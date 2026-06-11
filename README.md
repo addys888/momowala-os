@@ -66,7 +66,6 @@ All event tables are insert-once, keyed by the app's `Date.now()` ids; the app m
 
 ## Known v1 limitations
 
-- Combos don't deduct momo stock yet (reconciliation will show surplus on combo-heavy days)
 - Customer QR orders are recorded as paid UPI without payment verification
 - No role locks — anyone with the URL can open the Owner console
 - Token numbers can clash if two devices take orders at the same moment

@@ -62,6 +62,9 @@ create table if not exists day_close_logs (
   expected_paneer integer,
   actual_paneer integer,
   paneer_diff integer,
+  expected_corn integer,
+  actual_corn integer,
+  corn_diff integer,
   pieces_sold integer,
   revenue integer,
   closed_at timestamptz,
@@ -92,3 +95,10 @@ create policy "anon full access" on stock_logs for all to anon using (true) with
 create policy "anon full access" on cart_loadings for all to anon using (true) with check (true);
 create policy "anon full access" on day_close_logs for all to anon using (true) with check (true);
 create policy "anon full access" on inventory for all to anon using (true) with check (true);
+
+-- ── Migration: corn cheese stock ──
+-- Safe to run on databases created before corn cheese was added;
+-- no-ops on fresh installs.
+alter table day_close_logs add column if not exists expected_corn integer;
+alter table day_close_logs add column if not exists actual_corn integer;
+alter table day_close_logs add column if not exists corn_diff integer;

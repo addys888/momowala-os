@@ -22,40 +22,47 @@ const colors = {
   pilgrim: '#FF9933',      // Saffron
 };
 
-// ─── MENU DATA ───
+// ─── MENU DATA (matches the printed cart menu) ───
 const MENU_ITEMS = [
-  { id: 'vs', name: 'Veg Steam', cat: 'Steamed', half: 30, full: 60, pcsHalf: 5, pcsFull: 10, type: 'veg', stockKey: 'veg' },
-  { id: 'ps', name: 'Paneer Steam', cat: 'Steamed', half: 40, full: 80, pcsHalf: 5, pcsFull: 10, type: 'paneer', stockKey: 'paneer' },
-  { id: 'vk', name: 'Veg Kurkure', cat: 'Kurkure', half: 40, full: 80, pcsHalf: 4, pcsFull: 8, type: 'veg', stockKey: 'veg', star: true },
-  { id: 'pk', name: 'Paneer Kurkure', cat: 'Kurkure', half: 50, full: 99, pcsHalf: 4, pcsFull: 8, type: 'paneer', stockKey: 'paneer' },
-  { id: 'va', name: 'Veg Afghani', cat: 'Afghani', half: 60, full: 99, pcsHalf: 5, pcsFull: 9, type: 'veg', stockKey: 'veg' },
-  { id: 'pa', name: 'Paneer Afghani', cat: 'Afghani', half: 70, full: 119, pcsHalf: 5, pcsFull: 9, type: 'paneer', stockKey: 'paneer', star: true },
-  { id: 'vt', name: 'Veg Tandoori', cat: 'Tandoori', half: 60, full: 120, pcsHalf: 5, pcsFull: 10, type: 'veg', stockKey: 'veg' },
-  { id: 'pt', name: 'Paneer Tandoori', cat: 'Tandoori', half: 70, full: 140, pcsHalf: 5, pcsFull: 10, type: 'paneer', stockKey: 'paneer', star: true },
-  { id: 'vf', name: 'Veg Fried', cat: 'Fried', half: 40, full: 70, pcsHalf: 5, pcsFull: 10, type: 'veg', stockKey: 'veg' },
-  { id: 'pf', name: 'Paneer Fried', cat: 'Fried', half: 50, full: 90, pcsHalf: 5, pcsFull: 10, type: 'paneer', stockKey: 'paneer' },
+  // Steamed · 5/10 pcs
+  { id: 'vs', name: 'Veg Steam', cat: 'Steamed', half: 35, full: 70, pcsHalf: 5, pcsFull: 10, type: 'veg', stockKey: 'veg' },
+  { id: 'ps', name: 'Paneer Steam', cat: 'Steamed', half: 45, full: 90, pcsHalf: 5, pcsFull: 10, type: 'paneer', stockKey: 'paneer' },
+  { id: 'cs', name: 'Corn Cheese Steam', cat: 'Steamed', half: 50, full: 90, pcsHalf: 5, pcsFull: 10, type: 'corn', stockKey: 'corn' },
+  // Kurkure · 4/8 pcs · house bestseller
+  { id: 'vk', name: 'Veg Kurkure', cat: 'Kurkure', half: 50, full: 90, pcsHalf: 4, pcsFull: 8, type: 'veg', stockKey: 'veg', star: true },
+  { id: 'pk', name: 'Paneer Kurkure', cat: 'Kurkure', half: 65, full: 110, pcsHalf: 4, pcsFull: 8, type: 'paneer', stockKey: 'paneer', star: true },
+  { id: 'ck', name: 'Corn Cheese Kurkure', cat: 'Kurkure', half: 70, full: 130, pcsHalf: 4, pcsFull: 8, type: 'corn', stockKey: 'corn' },
+  // Afghani · 4/8 pcs
+  { id: 'va', name: 'Veg Afghani', cat: 'Afghani', half: 60, full: 110, pcsHalf: 4, pcsFull: 8, type: 'veg', stockKey: 'veg' },
+  { id: 'pa', name: 'Paneer Afghani', cat: 'Afghani', half: 70, full: 120, pcsHalf: 4, pcsFull: 8, type: 'paneer', stockKey: 'paneer', star: true },
+  { id: 'ca', name: 'Corn Cheese Afghani', cat: 'Afghani', half: 80, full: 130, pcsHalf: 4, pcsFull: 8, type: 'corn', stockKey: 'corn' },
+  // Fried · 5/10 pcs
+  { id: 'vf', name: 'Veg Fried', cat: 'Fried', half: 45, full: 80, pcsHalf: 5, pcsFull: 10, type: 'veg', stockKey: 'veg' },
+  { id: 'pf', name: 'Paneer Fried', cat: 'Fried', half: 55, full: 100, pcsHalf: 5, pcsFull: 10, type: 'paneer', stockKey: 'paneer' },
+  { id: 'cf', name: 'Corn Cheese Fried', cat: 'Fried', half: 65, full: 110, pcsHalf: 5, pcsFull: 10, type: 'corn', stockKey: 'corn' },
+  // Cocktail · 4/8 pcs
+  { id: 'vc', name: 'Veg Cocktail', cat: 'Cocktail', half: 55, full: 100, pcsHalf: 4, pcsFull: 8, type: 'veg', stockKey: 'veg' },
+  { id: 'pc', name: 'Paneer Cocktail', cat: 'Cocktail', half: 60, full: 110, pcsHalf: 4, pcsFull: 8, type: 'paneer', stockKey: 'paneer' },
+  { id: 'cc', name: 'Corn Cheese Cocktail', cat: 'Cocktail', half: 75, full: 120, pcsHalf: 4, pcsFull: 8, type: 'corn', stockKey: 'corn' },
+  // Tandoori · 4/8 pcs
+  { id: 'vt', name: 'Veg Tandoori', cat: 'Tandoori', half: 65, full: 120, pcsHalf: 4, pcsFull: 8, type: 'veg', stockKey: 'veg' },
+  { id: 'pt', name: 'Paneer Tandoori', cat: 'Tandoori', half: 75, full: 140, pcsHalf: 4, pcsFull: 8, type: 'paneer', stockKey: 'paneer', star: true },
+  { id: 'ct', name: 'Corn Cheese Tandoori', cat: 'Tandoori', half: 85, full: 150, pcsHalf: 4, pcsFull: 8, type: 'corn', stockKey: 'corn' },
 ];
 
-const COMBOS = [
-  { id: 'c1', name: 'Chai-Momo', price: 70, contains: [{id: 'vs', type: 'half'}], extra: 'Masala Chai' },
-  { id: 'c2', name: 'Student Special', price: 50, contains: [{id: 'vs', type: 'half'}], extra: 'Cold Drink' },
-  { id: 'c3', name: 'Family Feast', price: 280, contains: [{id: 'vs', type: 'full'}, {id: 'pk', type: 'full'}], extra: '4 Cold Drinks' },
-  { id: 'c4', name: 'Pilgrim Thali', price: 140, contains: [{id: 'vs', type: 'full'}], extra: 'Roll + Chai' },
+const LASSI = [
+  { id: 'l1', name: 'Sweet Lassi', price: 40 },
+  { id: 'l2', name: 'Mango Lassi', price: 40 },
+  { id: 'l3', name: 'Rose Rabdi Lassi', price: 50 },
+  { id: 'l4', name: 'Dry Fruit Blast Lassi', price: 60 },
 ];
 
-const BEVERAGES = [
-  { id: 'b1', name: 'Masala Chai', price: 20 },
-  { id: 'b2', name: 'Cold Drink', price: 25 },
-  { id: 'b3', name: 'Masala Chaas', price: 30 },
-  { id: 'b4', name: 'Lassi', price: 30 },
-  { id: 'b5', name: 'Nimbu Pani', price: 20 },
-  { id: 'b6', name: 'Water Bottle', price: 15 },
-];
-
+// All add-ons free during the promotion period
 const ADDONS = [
-  { id: 'a1', name: 'Cheese Slice', price: 20 },
-  { id: 'a2', name: 'Schezwan Chutney', price: 10 },
-  { id: 'a3', name: 'Cheese Burst', price: 20 },
+  { id: 'a1', name: 'Schezwan', price: 0 },
+  { id: 'a2', name: 'Extra Mayo', price: 0 },
+  { id: 'a3', name: 'Extra Chutney', price: 0 },
+  { id: 'a4', name: 'Extra Ketchup', price: 0 },
 ];
 
 // ─── STORAGE ───
@@ -64,25 +71,32 @@ const ADDONS = [
 const TODAY = new Date().toISOString().split('T')[0];
 
 // ─── INITIAL STATE ───
-const getInitialState = () => ({
-  inventory: storage.get('inventory', {
-    veg: { freezer: 500, cart: 100 },     // pieces
-    paneer: { freezer: 200, cart: 50 },
-    consumables: {
-      oil: { unit: 'L', stock: 5, perOrder: 0.02 },
-      cream: { unit: 'ml', stock: 1000, perOrder: 15 },
-      cheese: { unit: 'slices', stock: 50, perOrder: 1 },
-      schezwan: { unit: 'ml', stock: 500, perOrder: 10 },
-    },
-    beverages: { chai: 100, cold: 30, lassi: 0, chaas: 20, water: 30 }
-  }),
-  orders: storage.get('orders', []),
-  stockLogs: storage.get('stockLogs', []),
-  cartLoadings: storage.get('cartLoadings', []),
-  dayCloseLogs: storage.get('dayCloseLogs', []),
-  currentShift: storage.get('currentShift', null),
-  staffOnDuty: storage.get('staffOnDuty', null),
-});
+const DEFAULT_INVENTORY = {
+  veg: { freezer: 500, cart: 100 },     // pieces
+  paneer: { freezer: 200, cart: 50 },
+  corn: { freezer: 200, cart: 50 },
+  consumables: {
+    oil: { unit: 'L', stock: 5, perOrder: 0.02 },
+    cream: { unit: 'ml', stock: 1000, perOrder: 15 },
+    cheese: { unit: 'slices', stock: 50, perOrder: 1 },
+    schezwan: { unit: 'ml', stock: 500, perOrder: 10 },
+  },
+};
+
+const getInitialState = () => {
+  const inventory = storage.get('inventory', DEFAULT_INVENTORY);
+  // saved data from before corn cheese was added lacks this key
+  if (!inventory.corn) inventory.corn = { ...DEFAULT_INVENTORY.corn };
+  return {
+    inventory,
+    orders: storage.get('orders', []),
+    stockLogs: storage.get('stockLogs', []),
+    cartLoadings: storage.get('cartLoadings', []),
+    dayCloseLogs: storage.get('dayCloseLogs', []),
+    currentShift: storage.get('currentShift', null),
+    staffOnDuty: storage.get('staffOnDuty', null),
+  };
+};
 
 // ═══════════════════════════════════════════════
 // MAIN APP
@@ -125,22 +139,26 @@ export default function MomoWalaOS() {
 // ═══════════════════════════════════════════════
 function RoleSelector({ onSelect, online, setOnline }) {
   return (
-    <div style={{ minHeight: '100vh', background: colors.paper, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+    <div style={{ minHeight: '100vh', background: colors.ink, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '40px 24px' }}>
-        {/* Brand Mark */}
-        <div style={{ textAlign: 'center', marginBottom: 48 }}>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12, background: colors.ink, padding: '12px 20px', borderRadius: 100, marginBottom: 20 }}>
-            <div style={{ width: 36, height: 36, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }}>🥟</div>
-            <div style={{ color: colors.primary, fontWeight: 900, fontSize: 18, letterSpacing: 2 }}>MOMO WALA</div>
+        {/* Brand Mark — printed-menu style */}
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{ width: 76, height: 76, borderRadius: '50%', background: '#fff', border: `3px solid ${colors.primary}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, margin: '0 auto 16px' }}>🥟</div>
+          <div style={{ color: colors.primary, fontWeight: 900, fontSize: 42, letterSpacing: 3, lineHeight: 1 }}>MOMO WALA</div>
+          <div style={{ color: '#fff', fontSize: 21, marginTop: 8, fontWeight: 600 }}>मोमो वाला</div>
+          <div style={{ color: colors.primary, fontSize: 12, letterSpacing: 3, marginTop: 12, fontWeight: 700, borderTop: '1px solid rgba(255,214,10,0.35)', borderBottom: '1px solid rgba(255,214,10,0.35)', display: 'inline-block', padding: '6px 14px' }}>PURE DELIGHT ON EVERY PLATE</div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+            {['🌱 100% Pure Veg', '🙏 Jain Friendly', '🛕 रामभक्त स्पेशल'].map(b => (
+              <span key={b} style={{ border: '1px solid rgba(255,214,10,0.5)', color: colors.primary, fontSize: 11, fontWeight: 700, padding: '5px 11px', borderRadius: 14 }}>{b}</span>
+            ))}
           </div>
-          <div style={{ fontSize: 28, fontWeight: 800, color: colors.ink, lineHeight: 1.2 }}>Cart Operating System</div>
-          <div style={{ color: colors.muted, fontSize: 14, marginTop: 8 }}>Saketpuri Yojna, Ayodhya · Daily 4 PM — 11 PM</div>
+          <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 16 }}>Saketpuri Yojna, Ayodhya · Daily 4 PM — 11 PM</div>
         </div>
 
         {/* Status indicator */}
         <button
           onClick={() => setOnline(!online)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: online ? '#E7F5E7' : '#FFF1E7', border: `1px solid ${online ? colors.green : colors.accent}`, borderRadius: 20, marginBottom: 24, fontSize: 12, color: online ? colors.green : colors.accent, fontWeight: 600, margin: '0 auto 24px', cursor: 'pointer' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'transparent', border: `1px solid ${online ? colors.green : colors.accent}`, borderRadius: 20, marginBottom: 24, fontSize: 12, color: online ? '#7DD87D' : colors.accent, fontWeight: 600, margin: '0 auto 24px', cursor: 'pointer' }}>
           {online ? <Wifi size={14}/> : <WifiOff size={14}/>}
           {online ? 'Online · Auto-sync ready' : 'Offline · Saving locally'}
         </button>
@@ -152,8 +170,8 @@ function RoleSelector({ onSelect, online, setOnline }) {
             title="Owner"
             subtitle="Full control · Reports · Reconciliation"
             description="Dashboard, inventory, staff, audit logs"
-            color={colors.ink}
-            textColor={colors.primary}
+            color={colors.primary}
+            textColor={colors.ink}
             onClick={() => onSelect('owner')}
           />
           <RoleCard
@@ -161,8 +179,9 @@ function RoleSelector({ onSelect, online, setOnline }) {
             title="Staff (Chef / Helper)"
             subtitle="Order entry · Stock updates"
             description="Take orders, mark payments, manage shift"
-            color={colors.primary}
-            textColor={colors.ink}
+            color="#161616"
+            textColor={colors.primary}
+            border={`1.5px solid rgba(255,214,10,0.55)`}
             onClick={() => onSelect('staff')}
           />
           <RoleCard
@@ -172,13 +191,20 @@ function RoleSelector({ onSelect, online, setOnline }) {
             description="Browse menu, place order, get token"
             color="#fff"
             textColor={colors.ink}
-            border={`2px solid ${colors.ink}`}
             onClick={() => onSelect('customer')}
           />
         </div>
 
-        <div style={{ marginTop: 48, padding: 16, background: '#fff', border: `1px dashed ${colors.border}`, borderRadius: 12, fontSize: 12, color: colors.muted, lineHeight: 1.6 }}>
-          <strong style={{ color: colors.ink }}>How to install as APK on Android:</strong><br/>
+        {/* Contact footer — from the printed menu */}
+        <div style={{ marginTop: 36, textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 12, lineHeight: 2 }}>
+          📞 +91 63075 16898 · 📷 @momowalaindia<br/>
+          🛵 Free delivery nearby on orders above ₹200<br/>
+          🌐 www.momowala.co.in
+          <div style={{ color: colors.pilgrim, fontWeight: 700, marginTop: 8, fontSize: 13 }}>|| जय श्री राम ||</div>
+        </div>
+
+        <div style={{ marginTop: 28, padding: 16, border: '1px dashed rgba(255,214,10,0.35)', borderRadius: 12, fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 1.6 }}>
+          <strong style={{ color: colors.primary }}>How to install as APK on Android:</strong><br/>
           Open this page in Chrome → tap ⋮ menu → "Add to Home screen" → behaves like a native app, works offline.
         </div>
       </div>
@@ -281,6 +307,7 @@ function Dashboard({ state, todayRevenue, cashRevenue, upiRevenue, piecesSold, t
   const variance = todayRevenue - expectedRevenue;
   const vegLow = state.inventory.veg.freezer < 100;
   const paneerLow = state.inventory.paneer.freezer < 50;
+  const cornLow = state.inventory.corn.freezer < 50;
 
   return (
     <div>
@@ -309,8 +336,8 @@ function Dashboard({ state, todayRevenue, cashRevenue, upiRevenue, piecesSold, t
       )}
 
       {/* Stock alerts */}
-      {(vegLow || paneerLow) && (
-        <Alert type="danger" title="Low stock alert" message={`${vegLow ? 'Veg' : ''}${vegLow && paneerLow ? ' & ' : ''}${paneerLow ? 'Paneer' : ''} momo running low. Order before tomorrow.`} />
+      {(vegLow || paneerLow || cornLow) && (
+        <Alert type="danger" title="Low stock alert" message={`${[vegLow && 'Veg', paneerLow && 'Paneer', cornLow && 'Corn Cheese'].filter(Boolean).join(' & ')} momo running low. Order before tomorrow.`} />
       )}
 
       <SectionHeader title="Live Inventory" />
@@ -319,6 +346,8 @@ function Dashboard({ state, todayRevenue, cashRevenue, upiRevenue, piecesSold, t
         <StockRow label="Veg Momo · On Cart" value={state.inventory.veg.cart} unit="pcs" />
         <StockRow label="Paneer Momo · Freezer" value={state.inventory.paneer.freezer} unit="pcs" low={paneerLow} />
         <StockRow label="Paneer Momo · On Cart" value={state.inventory.paneer.cart} unit="pcs" />
+        <StockRow label="Corn Cheese · Freezer" value={state.inventory.corn.freezer} unit="pcs" low={cornLow} />
+        <StockRow label="Corn Cheese · On Cart" value={state.inventory.corn.cart} unit="pcs" />
       </div>
 
       <SectionHeader title="Recent Orders" />
@@ -451,6 +480,7 @@ function InventoryView({ state, updateState }) {
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>FREEZER (KITCHEN)</div>
         <FreezerItem type="veg" stock={state.inventory.veg.freezer} cart={state.inventory.veg.cart} onLoad={loadToCart} />
         <FreezerItem type="paneer" stock={state.inventory.paneer.freezer} cart={state.inventory.paneer.cart} onLoad={loadToCart} />
+        <FreezerItem type="corn" stock={state.inventory.corn.freezer} cart={state.inventory.corn.cart} onLoad={loadToCart} />
       </div>
 
       {/* Consumables */}
@@ -492,7 +522,7 @@ function FreezerItem({ type, stock, cart, onLoad }) {
   return (
     <div style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>{type} Momo</div>
+        <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>{type === 'corn' ? 'Corn Cheese' : type} Momo</div>
         <div style={{ fontSize: 13 }}>
           <span style={{ color: colors.muted }}>Freezer: </span><strong>{stock}</strong> · <span style={{ color: colors.muted }}>Cart: </span><strong>{cart}</strong>
         </div>
@@ -520,8 +550,9 @@ function StockInModal({ onAdd, onClose }) {
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>ITEM TYPE</div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setType('veg')} style={{ flex: 1, padding: 12, border: `2px solid ${type === 'veg' ? colors.ink : colors.border}`, background: type === 'veg' ? colors.ink : '#fff', color: type === 'veg' ? colors.primary : colors.ink, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Veg Momo</button>
-            <button onClick={() => setType('paneer')} style={{ flex: 1, padding: 12, border: `2px solid ${type === 'paneer' ? colors.ink : colors.border}`, background: type === 'paneer' ? colors.ink : '#fff', color: type === 'paneer' ? colors.primary : colors.ink, borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Paneer Momo</button>
+            {[['veg', 'Veg'], ['paneer', 'Paneer'], ['corn', 'Corn Cheese']].map(([key, label]) => (
+              <button key={key} onClick={() => setType(key)} style={{ flex: 1, padding: 12, border: `2px solid ${type === key ? colors.ink : colors.border}`, background: type === key ? colors.ink : '#fff', color: type === key ? colors.primary : colors.ink, borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{label}</button>
+            ))}
           </div>
         </div>
 
@@ -546,22 +577,23 @@ function Reconciliation({ state, updateState, todayOrders, cashRevenue, upiReven
   const [phonePeAmount, setPhonePeAmount] = useState('');
   const [remainingVeg, setRemainingVeg] = useState('');
   const [remainingPaneer, setRemainingPaneer] = useState('');
+  const [remainingCorn, setRemainingCorn] = useState('');
   const [closed, setClosed] = useState(false);
 
-  const expectedVeg = state.inventory.veg.cart - todayOrders.reduce((s, o) => s + o.items.reduce((sm, i) => {
+  const soldPieces = (key) => todayOrders.reduce((s, o) => s + o.items.reduce((sm, i) => {
     const m = MENU_ITEMS.find(x => x.id === i.id);
-    return m && m.stockKey === 'veg' ? sm + (i.type === 'half' ? m.pcsHalf : m.pcsFull) * i.qty : sm;
+    return m && m.stockKey === key ? sm + (i.type === 'half' ? m.pcsHalf : m.pcsFull) * i.qty : sm;
   }, 0), 0);
 
-  const expectedPaneer = state.inventory.paneer.cart - todayOrders.reduce((s, o) => s + o.items.reduce((sm, i) => {
-    const m = MENU_ITEMS.find(x => x.id === i.id);
-    return m && m.stockKey === 'paneer' ? sm + (i.type === 'half' ? m.pcsHalf : m.pcsFull) * i.qty : sm;
-  }, 0), 0);
+  const expectedVeg = state.inventory.veg.cart - soldPieces('veg');
+  const expectedPaneer = state.inventory.paneer.cart - soldPieces('paneer');
+  const expectedCorn = state.inventory.corn.cart - soldPieces('corn');
 
   const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - cashRevenue : null;
   const upiDiff = phonePeAmount !== '' ? parseInt(phonePeAmount) - upiRevenue : null;
   const vegDiff = remainingVeg !== '' ? parseInt(remainingVeg) - expectedVeg : null;
   const paneerDiff = remainingPaneer !== '' ? parseInt(remainingPaneer) - expectedPaneer : null;
+  const cornDiff = remainingCorn !== '' ? parseInt(remainingCorn) - expectedCorn : null;
 
   const closeDay = () => {
     const dayClose = {
@@ -576,6 +608,7 @@ function Reconciliation({ state, updateState, todayOrders, cashRevenue, upiReven
       upiDiff: upiDiff || 0,
       expectedVeg, actualVeg: parseInt(remainingVeg) || 0, vegDiff: vegDiff || 0,
       expectedPaneer, actualPaneer: parseInt(remainingPaneer) || 0, paneerDiff: paneerDiff || 0,
+      expectedCorn, actualCorn: parseInt(remainingCorn) || 0, cornDiff: cornDiff || 0,
       piecesSold,
       revenue: cashRevenue + upiRevenue,
       closedAt: new Date().toISOString()
@@ -658,9 +691,19 @@ function Reconciliation({ state, updateState, todayOrders, cashRevenue, upiReven
         unit="pcs"
       />
 
+      <ReconcileBlock
+        title="🥟 Corn Cheese Stock"
+        systemValue={`${expectedCorn} pcs expected`}
+        label="Actual pieces remaining on cart"
+        value={remainingCorn}
+        onChange={setRemainingCorn}
+        diff={cornDiff}
+        unit="pcs"
+      />
+
       {/* Close day button */}
       <button onClick={closeDay}
-        disabled={physicalCash === '' || phonePeAmount === '' || remainingVeg === '' || remainingPaneer === ''}
+        disabled={physicalCash === '' || phonePeAmount === '' || remainingVeg === '' || remainingPaneer === '' || remainingCorn === ''}
         style={{ width: '100%', background: physicalCash === '' || phonePeAmount === '' ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: 'pointer', marginTop: 16 }}>
         Close Day & Save Report
       </button>
@@ -851,9 +894,8 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder }) {
       <div style={{ display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
         {[
           { id: 'momos', label: '🥟 Momos' },
-          { id: 'combos', label: '💛 Combos' },
-          { id: 'beverages', label: '☕ Drinks' },
-          { id: 'addons', label: '➕ Extras' },
+          { id: 'lassi', label: '🥤 Lassi' },
+          { id: 'addons', label: '➕ Add-ons' },
         ].map(c => (
           <button key={c.id} onClick={() => setCategory(c.id)}
             style={{ padding: '8px 14px', background: category === c.id ? colors.ink : '#fff', color: category === c.id ? colors.primary : colors.ink, border: `1px solid ${category === c.id ? colors.ink : colors.border}`, borderRadius: 20, fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
@@ -867,14 +909,11 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder }) {
         {category === 'momos' && MENU_ITEMS.map(item => (
           <MenuItemRow key={item.id} item={item} onAdd={addToCart} />
         ))}
-        {category === 'combos' && COMBOS.map(item => (
-          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} extra={item.extra} onAdd={() => addToCart(item.id, item.name, item.price)} />
-        ))}
-        {category === 'beverages' && BEVERAGES.map(item => (
-          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
+        {category === 'lassi' && LASSI.map(item => (
+          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} extra="Made with Greek yogurt" onAdd={() => addToCart(item.id, item.name, item.price)} />
         ))}
         {category === 'addons' && ADDONS.map(item => (
-          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
+          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} extra="Free during promotion" onAdd={() => addToCart(item.id, item.name, item.price)} />
         ))}
       </div>
 
@@ -940,7 +979,7 @@ function SimpleItemRow({ id, name, price, extra, onAdd }) {
         {extra && <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>+ {extra}</div>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ fontWeight: 800, fontSize: 16 }}>₹{price}</div>
+        <div style={{ fontWeight: 800, fontSize: 16, color: price === 0 ? colors.green : colors.ink }}>{price === 0 ? 'FREE' : `₹${price}`}</div>
         <Plus size={18} color={colors.ink}/>
       </div>
     </button>
@@ -998,6 +1037,7 @@ function ShiftStatus({ state, myOrders, staffName }) {
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>STOCK ON CART</div>
         <StockRow label="Veg Momo (pcs)" value={state.inventory.veg.cart} unit="pcs"/>
         <StockRow label="Paneer Momo (pcs)" value={state.inventory.paneer.cart} unit="pcs"/>
+        <StockRow label="Corn Cheese (pcs)" value={state.inventory.corn.cart} unit="pcs"/>
       </div>
 
       <Alert
@@ -1089,45 +1129,53 @@ function CustomerApp({ state, updateState, setRole }) {
 
   return (
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 100, fontFamily: 'system-ui, sans-serif' }}>
-      {/* Customer header */}
-      <div style={{ background: colors.primary, padding: '24px 20px', position: 'sticky', top: 0, zIndex: 5 }}>
-        <div style={{ maxWidth: 700, margin: '0 auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ width: 44, height: 44, borderRadius: '50%', background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22 }}>🥟</div>
-            <div>
-              <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1, fontWeight: 700 }}>WELCOME TO</div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: colors.ink, lineHeight: 1 }}>MOMO WALA</div>
-              <div style={{ fontSize: 11, color: colors.ink, opacity: 0.7 }}>Saketpuri, Ayodhya · Order in 30 seconds</div>
-            </div>
+      {/* Customer header — printed-menu style */}
+      <div style={{ background: colors.ink, padding: '26px 20px 22px' }}>
+        <div style={{ maxWidth: 700, margin: '0 auto', textAlign: 'center' }}>
+          <div style={{ color: colors.primary, fontWeight: 900, fontSize: 32, letterSpacing: 3, lineHeight: 1 }}>MOMO WALA</div>
+          <div style={{ color: '#fff', fontSize: 16, marginTop: 6, fontWeight: 600 }}>मोमो वाला</div>
+          <div style={{ color: colors.primary, fontSize: 10, letterSpacing: 2.5, marginTop: 8, fontWeight: 700 }}>PURE DELIGHT ON EVERY PLATE</div>
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+            {['🌱 100% Pure Veg', '🙏 Jain Friendly', '🛕 रामभक्त स्पेशल'].map(b => (
+              <span key={b} style={{ border: '1px solid rgba(255,214,10,0.5)', color: colors.primary, fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 12 }}>{b}</span>
+            ))}
           </div>
+          <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 10 }}>Saketpuri, Ayodhya · Order in 30 seconds</div>
         </div>
       </div>
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {/* Bestsellers banner */}
         <div style={{ background: colors.ink, color: colors.primary, padding: 14, borderRadius: 12, marginBottom: 16, fontSize: 12, fontWeight: 700, textAlign: 'center', letterSpacing: 1 }}>
-          ⭐ TRY OUR BESTSELLERS — PANEER AFGHANI · KURKURE · TANDOORI ⭐
+          ⭐ BESTSELLERS — KURKURE · PANEER AFGHANI · PANEER TANDOORI ⭐
         </div>
 
-        <SectionHeader title="🥟 Momos" />
+        <SectionHeader title="🥟 Momos" subtitle="Veg · Paneer · Corn Cheese" />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
           {MENU_ITEMS.map(item => (
             <MenuItemRow key={item.id} item={item} onAdd={addToCart} />
           ))}
         </div>
 
-        <SectionHeader title="💛 Combos · Save More" />
+        <SectionHeader title="🥤 Special Lassi" subtitle="Made with Greek yogurt" />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-          {COMBOS.map(item => (
-            <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} extra={item.extra} onAdd={() => addToCart(item.id, item.name, item.price)} />
+          {LASSI.map(item => (
+            <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
           ))}
         </div>
 
-        <SectionHeader title="☕ Beverages" />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 100 }}>
-          {BEVERAGES.map(item => (
+        <SectionHeader title="➕ Perfect Add-ons" subtitle="All free during promotion" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+          {ADDONS.map(item => (
             <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
           ))}
+        </div>
+
+        {/* Contact footer — from the printed menu */}
+        <div style={{ background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, textAlign: 'center', fontSize: 12, fontWeight: 600, lineHeight: 1.9, marginBottom: 100 }}>
+          📞 +91 63075 16898 · 📷 @momowalaindia<br/>
+          🛵 Free delivery nearby on orders above ₹200<br/>
+          <span style={{ color: colors.pilgrim, fontWeight: 700 }}>|| जय श्री राम ||</span>
         </div>
       </div>
 
