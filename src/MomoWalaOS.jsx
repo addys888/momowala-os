@@ -22,6 +22,64 @@ const colors = {
   pilgrim: '#FF9933',      // Saffron
 };
 
+// ─── CARTLYFT BRAND (the QSR OS — used on admin chrome) ───
+const brand = {
+  navy: '#0A2F5C',
+  navyDark: '#082446',
+  teal: '#00A99B',
+  tealDark: '#0E8C82',
+  amber: '#FFC107',
+  bg: '#EEF2F7',         // professional light surface for the launcher
+  surface: '#FFFFFF',
+  text: '#0A2F5C',
+  muted: '#6B7A90',
+  border: '#DCE3EC',
+};
+
+// ─── CARTLYFT LOGO (inline SVG: cart + cloche + flame + gear) ───
+function CartlyftMark({ size = 40 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      {/* speed lines */}
+      <rect x="2" y="22" width="9" height="3" rx="1.5" fill={brand.teal} />
+      <rect x="0" y="30" width="7" height="3" rx="1.5" fill={brand.teal} opacity="0.7" />
+      <rect x="3" y="38" width="9" height="3" rx="1.5" fill={brand.teal} opacity="0.5" />
+      {/* gear behind */}
+      <circle cx="48" cy="34" r="11" fill={brand.navy} />
+      <circle cx="48" cy="34" r="5" fill={brand.bg} />
+      {[0,45,90,135,180,225,270,315].map(a => (
+        <rect key={a} x="46.5" y="20" width="3" height="5" rx="1" fill={brand.navy} transform={`rotate(${a} 48 34)`} />
+      ))}
+      {/* cart body */}
+      <path d="M14 40 L14 24 Q14 21 17 21 L40 21 Q43 21 43 24 L43 40 Z" fill={brand.teal} />
+      <path d="M30 21 L43 21 L43 40 L30 40 Z" fill={brand.navy} opacity="0.85" />
+      {/* cloche (food dome) */}
+      <path d="M21 21 Q21 13 28.5 13 Q36 13 36 21 Z" fill={brand.surface} />
+      <circle cx="28.5" cy="11.5" r="1.8" fill={brand.surface} />
+      {/* flame */}
+      <path d="M45 16 Q49 11 47 6 Q52 9 51 16 Q50 20 47 20 Q44 19 45 16 Z" fill={brand.amber} />
+      {/* wheels */}
+      <circle cx="22" cy="44" r="4.5" fill={brand.navy} />
+      <circle cx="38" cy="44" r="4.5" fill={brand.navy} />
+    </svg>
+  );
+}
+
+// Full lockup: mark + "Cartlyft" wordmark + tagline. variant: 'light' | 'dark'
+function CartlyftLogo({ size = 40, variant = 'dark', tagline = true }) {
+  const wordColor = variant === 'light' ? '#FFFFFF' : brand.navy;
+  const tagColor = variant === 'light' ? brand.amber : brand.teal;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <CartlyftMark size={size} />
+      <div style={{ lineHeight: 1 }}>
+        <div style={{ fontWeight: 800, fontSize: size * 0.62, color: wordColor, fontStyle: 'italic', letterSpacing: -0.5 }}>Cartlyft</div>
+        {tagline && <div style={{ fontSize: size * 0.26, color: tagColor, letterSpacing: 1.5, fontWeight: 700, marginTop: 3 }}>QSR OPERATING SYSTEM</div>}
+      </div>
+    </div>
+  );
+}
+
 // ─── MENU DATA (matches the printed cart menu) ───
 const MENU_ITEMS = [
   // Steamed · 5/10 pcs
@@ -181,26 +239,24 @@ export default function MomoWalaOS() {
 function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnline }) {
   const [loginMode, setLoginMode] = useState(null); // 'owner' | 'staff' | null
   return (
-    <div style={{ minHeight: '100vh', background: colors.ink, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '40px 24px' }}>
-        {/* Brand Mark — printed-menu style */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{ width: 76, height: 76, borderRadius: '50%', background: '#fff', border: `3px solid ${colors.primary}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 38, margin: '0 auto 16px' }}>🥟</div>
-          <div style={{ color: colors.primary, fontWeight: 900, fontSize: 42, letterSpacing: 3, lineHeight: 1 }}>MOMO WALA</div>
-          <div style={{ color: '#fff', fontSize: 21, marginTop: 8, fontWeight: 600 }}>मोमो वाला</div>
-          <div style={{ color: colors.primary, fontSize: 12, letterSpacing: 3, marginTop: 12, fontWeight: 700, borderTop: '1px solid rgba(255,214,10,0.35)', borderBottom: '1px solid rgba(255,214,10,0.35)', display: 'inline-block', padding: '6px 14px' }}>PURE DELIGHT ON EVERY PLATE</div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16, flexWrap: 'wrap' }}>
-            {['🌱 100% Pure Veg', '🙏 Jain Friendly', '🛕 रामभक्त स्पेशल'].map(b => (
-              <span key={b} style={{ border: '1px solid rgba(255,214,10,0.5)', color: colors.primary, fontSize: 11, fontWeight: 700, padding: '5px 11px', borderRadius: 14 }}>{b}</span>
-            ))}
-          </div>
-          <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12, marginTop: 16 }}>Saketpuri Yojna, Ayodhya · Daily 4 PM — 11 PM</div>
+    <div style={{ minHeight: '100vh', background: brand.bg, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+      {/* Navy header band */}
+      <div style={{ background: brand.navy, padding: '36px 24px 28px' }}>
+        <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', justifyContent: 'center' }}>
+          <CartlyftLogo size={48} variant="light" />
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 480, margin: '0 auto', padding: '28px 24px 40px' }}>
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div style={{ fontSize: 20, fontWeight: 800, color: brand.text }}>Welcome back</div>
+          <div style={{ color: brand.muted, fontSize: 13, marginTop: 4 }}>Choose how you're signing in today</div>
         </div>
 
         {/* Status indicator */}
         <button
           onClick={() => setOnline(!online)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'transparent', border: `1px solid ${online ? colors.green : colors.accent}`, borderRadius: 20, marginBottom: 24, fontSize: 12, color: online ? '#7DD87D' : colors.accent, fontWeight: 600, margin: '0 auto 24px', cursor: 'pointer' }}>
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: brand.surface, border: `1px solid ${online ? brand.teal : colors.accent}`, borderRadius: 20, marginBottom: 24, fontSize: 12, color: online ? brand.tealDark : colors.accent, fontWeight: 600, margin: '0 auto 24px', cursor: 'pointer' }}>
           {online ? <Wifi size={14}/> : <WifiOff size={14}/>}
           {online ? 'Online · Auto-sync ready' : 'Offline · Saving locally'}
         </button>
@@ -212,8 +268,8 @@ function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnli
             title="Owner"
             subtitle="Full control · Reports · Reconciliation"
             description="Dashboard, inventory, staff, audit logs"
-            color={colors.primary}
-            textColor={colors.ink}
+            color={brand.navy}
+            textColor="#fff"
             onClick={() => setLoginMode('owner')}
           />
           <RoleCard
@@ -221,18 +277,18 @@ function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnli
             title="Staff (Chef / Helper)"
             subtitle="Order entry · Stock updates"
             description="Take orders, mark payments, manage shift"
-            color="#161616"
-            textColor={colors.primary}
-            border={`1.5px solid rgba(255,214,10,0.55)`}
+            color={brand.teal}
+            textColor="#fff"
             onClick={() => setLoginMode('staff')}
           />
           <RoleCard
             icon={<Smartphone size={28} />}
             title="Customer"
             subtitle="Self-order via QR menu"
-            description="Browse menu, place order, get token"
-            color="#fff"
-            textColor={colors.ink}
+            description="Browse the Momo Wala menu, place order, get token"
+            color={brand.surface}
+            textColor={brand.text}
+            border={`1.5px solid ${brand.border}`}
             onClick={onCustomer}
           />
         </div>
@@ -247,17 +303,13 @@ function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnli
           />
         )}
 
-        {/* Contact footer — from the printed menu */}
-        <div style={{ marginTop: 36, textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 12, lineHeight: 2 }}>
-          📞 +91 63075 16898 · 📷 @momowalaindia<br/>
-          🛵 Free delivery nearby on orders above ₹200<br/>
-          🌐 www.momowala.co.in
-          <div style={{ color: colors.pilgrim, fontWeight: 700, marginTop: 8, fontSize: 13 }}>|| जय श्री राम ||</div>
+        <div style={{ marginTop: 28, padding: 16, border: `1px dashed ${brand.border}`, borderRadius: 12, fontSize: 12, color: brand.muted, lineHeight: 1.6, background: brand.surface }}>
+          <strong style={{ color: brand.text }}>Install on your phone:</strong><br/>
+          Open this page in Chrome → tap ⋮ menu → "Add to Home screen" → behaves like a native app, works offline.
         </div>
 
-        <div style={{ marginTop: 28, padding: 16, border: '1px dashed rgba(255,214,10,0.35)', borderRadius: 12, fontSize: 12, color: 'rgba(255,255,255,0.6)', lineHeight: 1.6 }}>
-          <strong style={{ color: colors.primary }}>How to install as APK on Android:</strong><br/>
-          Open this page in Chrome → tap ⋮ menu → "Add to Home screen" → behaves like a native app, works offline.
+        <div style={{ marginTop: 20, textAlign: 'center', color: brand.muted, fontSize: 11 }}>
+          Cartlyft QSR OS · powering Momo Wala, Ayodhya
         </div>
       </div>
     </div>
@@ -331,17 +383,18 @@ function LoginSheet({ mode, staffList, onClose, onSavePassword, onSuccess }) {
   const inputStyle = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 10 };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', padding: 24, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-        <div style={{ width: 40, height: 4, background: colors.border, borderRadius: 2, margin: '0 auto 16px' }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <Lock size={18} color={colors.ink} />
-          <div style={{ fontSize: 20, fontWeight: 800 }}>{title}</div>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 380, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
+          <CartlyftMark size={44} />
         </div>
-        {ownerNeedsSetup && (
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>First time here — set a password for {OWNER_MOBILE}. You'll use it every time after this.</div>
-        )}
-        {!ownerNeedsSetup && <div style={{ height: 12 }} />}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
+          <Lock size={18} color={brand.navy} />
+          <div style={{ fontSize: 20, fontWeight: 800, color: brand.navy }}>{title}</div>
+        </div>
+        {ownerNeedsSetup
+          ? <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16, textAlign: 'center' }}>First time here — set a password for {OWNER_MOBILE}. You'll use it every time after this.</div>
+          : <div style={{ height: 12 }} />}
 
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>MOBILE NUMBER</div>
         <input
@@ -373,8 +426,8 @@ function LoginSheet({ mode, staffList, onClose, onSavePassword, onSuccess }) {
         )}
 
         <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={submit} disabled={busy} style={{ flex: 2, padding: 14, background: colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
+          <button onClick={submit} disabled={busy} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>
             {ownerNeedsSetup ? 'Set Password & Enter' : 'Login'}
           </button>
         </div>
@@ -426,15 +479,15 @@ function OwnerApp({ state, updateState, setRole }) {
 
 function TopBar({ title, onExit }) {
   return (
-    <div style={{ background: colors.ink, color: colors.primary, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10 }}>
+    <div style={{ background: brand.navy, color: '#fff', padding: '12px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div style={{ width: 28, height: 28, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🥟</div>
+        <CartlyftMark size={30} />
         <div>
-          <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1 }}>MOMO WALA OS</div>
+          <div style={{ fontSize: 10, opacity: 0.75, letterSpacing: 1.5, fontWeight: 700, color: brand.amber }}>CARTLYFT QSR OS</div>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
         </div>
       </div>
-      <button onClick={onExit} style={{ background: 'transparent', border: `1px solid ${colors.primary}`, color: colors.primary, padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <button onClick={onExit} style={{ background: 'transparent', border: `1px solid rgba(255,255,255,0.5)`, color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
         <LogOut size={12}/> Exit
       </button>
     </div>
@@ -709,9 +762,8 @@ function StockInModal({ onAdd, onClose }) {
   const [qty, setQty] = useState(500);
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', padding: 24, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-        <div style={{ width: 40, height: 4, background: colors.border, borderRadius: 2, margin: '0 auto 16px' }} />
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>New Stock Delivery</div>
 
         <div style={{ marginBottom: 16 }}>
@@ -982,9 +1034,8 @@ function AddStaffModal({ existing, onAdd, onClose }) {
   const inputStyle = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 12 };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', padding: 24, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
-        <div style={{ width: 40, height: 4, background: colors.border, borderRadius: 2, margin: '0 auto 16px' }} />
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
         <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Register New Staff</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>You set their password now. Share it with them — they log in with their mobile number and this password.</div>
 
@@ -1276,16 +1327,16 @@ function MenuItemRow({ item, onAdd }) {
   );
 }
 
-function SimpleItemRow({ id, name, price, extra, onAdd }) {
+function SimpleItemRow({ id, name, price, extra, onAdd, picked }) {
   return (
-    <button onClick={onAdd} style={{ background: '#fff', borderRadius: 10, padding: 14, border: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', width: '100%' }}>
+    <button onClick={onAdd} style={{ background: picked ? '#E7F5E7' : '#fff', borderRadius: 10, padding: 14, border: `1px solid ${picked ? colors.green : colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', width: '100%' }}>
       <div style={{ textAlign: 'left' }}>
         <div style={{ fontWeight: 700, fontSize: 14 }}>{name}</div>
         {extra && <div style={{ fontSize: 11, color: colors.muted, marginTop: 2 }}>+ {extra}</div>}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <div style={{ fontWeight: 800, fontSize: 16, color: price === 0 ? colors.green : colors.ink }}>{price === 0 ? 'FREE' : `₹${price}`}</div>
-        <Plus size={18} color={colors.ink}/>
+        {picked ? <Check size={18} color={colors.green}/> : <Plus size={18} color={colors.ink}/>}
       </div>
     </button>
   );
@@ -1357,28 +1408,47 @@ function ShiftStatus({ state, myOrders, staffName }) {
 // ═══════════════════════════════════════════════
 // CUSTOMER APP — QR Self-Order
 // ═══════════════════════════════════════════════
+// Customers may add at most this many distinct add-ons, 1 of each.
+const MAX_ADDON_ITEMS = 2;
+
 function CustomerApp({ state, updateState, setRole }) {
   const [cart, setCart] = useState([]);
   const [step, setStep] = useState('menu'); // menu | confirm | success
   const [orderToken, setOrderToken] = useState('');
+  const [addonNote, setAddonNote] = useState('');
 
+  const isAddon = (id) => ADDONS.some(a => a.id === id);
+
+  // Functional updates so rapid taps always see the latest cart (no stale state).
   const addToCart = (id, name, price, type = null) => {
     const itemKey = `${id}-${type || 'std'}`;
-    const existing = cart.find(c => c.key === itemKey);
-    if (existing) {
-      setCart(cart.map(c => c.key === itemKey ? { ...c, qty: c.qty + 1 } : c));
-    } else {
-      setCart([...cart, { key: itemKey, id, name, price, type, qty: 1 }]);
-    }
+    setCart(prev => {
+      const existing = prev.find(c => c.key === itemKey);
+      // Add-on rules: max 1 of each, at most MAX_ADDON_ITEMS different add-ons.
+      if (isAddon(id)) {
+        if (existing) { flashAddonNote('You can add only 1 of each add-on.'); return prev; }
+        if (prev.filter(c => isAddon(c.id)).length >= MAX_ADDON_ITEMS) { flashAddonNote(`Add-ons are limited to ${MAX_ADDON_ITEMS} items.`); return prev; }
+        return [...prev, { key: itemKey, id, name, price, type, qty: 1 }];
+      }
+      return existing
+        ? prev.map(c => c.key === itemKey ? { ...c, qty: c.qty + 1 } : c)
+        : [...prev, { key: itemKey, id, name, price, type, qty: 1 }];
+    });
   };
 
+  const addonNoteTimer = React.useRef();
+  function flashAddonNote(msg) {
+    setAddonNote(msg);
+    clearTimeout(addonNoteTimer.current);
+    addonNoteTimer.current = setTimeout(() => setAddonNote(''), 2500);
+  }
+
   const removeFromCart = (key) => {
-    const existing = cart.find(c => c.key === key);
-    if (existing.qty > 1) {
-      setCart(cart.map(c => c.key === key ? { ...c, qty: c.qty - 1 } : c));
-    } else {
-      setCart(cart.filter(c => c.key !== key));
-    }
+    setCart(prev => {
+      const existing = prev.find(c => c.key === key);
+      if (existing && existing.qty > 1) return prev.map(c => c.key === key ? { ...c, qty: c.qty - 1 } : c);
+      return prev.filter(c => c.key !== key);
+    });
   };
 
   const placeOrder = () => {
@@ -1503,11 +1573,19 @@ function CustomerApp({ state, updateState, setRole }) {
           ))}
         </div>
 
-        <SectionHeader title="➕ Perfect Add-ons" subtitle="All free during promotion" />
+        <SectionHeader title="➕ Perfect Add-ons" subtitle={`Free · pick any ${MAX_ADDON_ITEMS}`} />
+        {addonNote && (
+          <div style={{ background: '#FFF1E7', color: colors.accent, border: `1px solid ${colors.accent}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle size={15}/> {addonNote}
+          </div>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-          {ADDONS.map(item => (
-            <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
-          ))}
+          {ADDONS.map(item => {
+            const picked = cart.some(c => c.id === item.id);
+            return (
+              <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} picked={picked} onAdd={() => addToCart(item.id, item.name, item.price)} />
+            );
+          })}
         </div>
 
         {/* Contact footer — from the printed menu */}
