@@ -1411,7 +1411,77 @@ function ShiftStatus({ state, myOrders, staffName }) {
 // Customers may add at most this many distinct add-ons, 1 of each.
 const MAX_ADDON_ITEMS = 2;
 
+// ─── QSR CARTS (tenants on the Cartlyft platform) ───
+// Momo Wala is live today; more carts can be added here as they onboard.
+// 'menu: true' means this cart's menu is wired up in the app.
+const CARTS = [
+  {
+    id: 'momowala',
+    name: 'Momo Wala',
+    tagline: 'मोमो वाला',
+    cuisine: 'Steamed, Kurkure, Afghani & Tandoori momos · 100% pure veg',
+    location: 'Saketpuri Yojna, Ayodhya',
+    timing: 'Daily 4 PM – 11 PM',
+    emoji: '🥟',
+    accent: colors.primary,
+    ink: colors.ink,
+    menu: true,
+  },
+];
+
+// ─── CUSTOMER: CART MARKETPLACE LISTING ───
+function CartListing({ onSelect, onExit }) {
+  return (
+    <div style={{ minHeight: '100vh', background: brand.bg, fontFamily: 'system-ui, sans-serif' }}>
+      <div style={{ background: brand.navy, padding: '22px 20px' }}>
+        <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <CartlyftLogo size={34} variant="light" tagline={false} />
+          <button onClick={onExit} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer' }}>← Back</button>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 600, margin: '0 auto', padding: 20 }}>
+        <div style={{ marginBottom: 4, fontSize: 22, fontWeight: 800, color: brand.text }}>Order from a cart</div>
+        <div style={{ fontSize: 13, color: brand.muted, marginBottom: 20 }}>Pick a QSR cart to see its menu and place an order</div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {CARTS.map(c => (
+            <button key={c.id} onClick={() => onSelect(c)}
+              style={{ display: 'flex', gap: 14, alignItems: 'center', textAlign: 'left', width: '100%', background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 16, padding: 16, cursor: 'pointer' }}>
+              <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 14, background: c.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, border: `2px solid ${c.accent}` }}>{c.emoji}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <div style={{ fontWeight: 800, fontSize: 17, color: brand.text }}>{c.name}</div>
+                  <div style={{ fontSize: 12, color: brand.muted }}>{c.tagline}</div>
+                </div>
+                <div style={{ fontSize: 12.5, color: brand.muted, margin: '3px 0 6px', lineHeight: 1.4 }}>{c.cuisine}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 11.5, color: brand.muted }}>
+                  <span>📍 {c.location}</span>
+                  <span>🕒 {c.timing}</span>
+                </div>
+              </div>
+              <ArrowRight size={20} color={brand.navy} style={{ flexShrink: 0 }} />
+            </button>
+          ))}
+
+          {/* Forward-looking placeholder so the directory reads as a platform */}
+          <div style={{ display: 'flex', gap: 14, alignItems: 'center', background: 'transparent', border: `1px dashed ${brand.border}`, borderRadius: 16, padding: 16, color: brand.muted }}>
+            <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 14, background: brand.surface, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, border: `1px dashed ${brand.border}` }}>🛒</div>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15, color: brand.text }}>More carts coming soon</div>
+              <div style={{ fontSize: 12.5, marginTop: 2 }}>New QSR carts onboarding to Cartlyft will appear here.</div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginTop: 24, textAlign: 'center', color: brand.muted, fontSize: 11 }}>Powered by Cartlyft QSR OS</div>
+      </div>
+    </div>
+  );
+}
+
 function CustomerApp({ state, updateState, setRole }) {
+  const [venue, setVenue] = useState(null);
   const [cart, setCart] = useState([]);
   const [step, setStep] = useState('menu'); // menu | confirm | success
   const [orderToken, setOrderToken] = useState('');
@@ -1465,7 +1535,9 @@ function CustomerApp({ state, updateState, setRole }) {
       total,
       payment: 'pending',     // not paid until staff confirms at the cart
       staff: null,
-      source: 'qr-order'
+      source: 'qr-order',
+      outlet: venue?.id,
+      outletName: venue?.name,
     };
     // Stock is NOT deducted here — only when staff marks the order paid,
     // so fake/abandoned QR orders never touch inventory or revenue.
@@ -1476,6 +1548,9 @@ function CustomerApp({ state, updateState, setRole }) {
   };
 
   const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
+
+  // Customer first picks a cart from the marketplace listing.
+  if (!venue) return <CartListing onSelect={(v) => { setVenue(v); setStep('menu'); }} onExit={() => setRole(null)} />;
 
   if (step === 'confirm') {
     return (
@@ -1530,7 +1605,7 @@ function CustomerApp({ state, updateState, setRole }) {
             <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>UPI:</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>momowala@upi</div>
           </div>
-          <button onClick={() => { setStep('menu'); setRole(null); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
+          <button onClick={() => { setStep('menu'); setVenue(null); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
         </div>
       </div>
     );
@@ -1539,7 +1614,10 @@ function CustomerApp({ state, updateState, setRole }) {
   return (
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 100, fontFamily: 'system-ui, sans-serif' }}>
       {/* Customer header — printed-menu style */}
-      <div style={{ background: colors.ink, padding: '26px 20px 22px' }}>
+      <div style={{ background: colors.ink, padding: '16px 20px 22px' }}>
+        <div style={{ maxWidth: 700, margin: '0 auto' }}>
+          <button onClick={() => { setVenue(null); setCart([]); }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 13, cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}>← All carts</button>
+        </div>
         <div style={{ maxWidth: 700, margin: '0 auto', textAlign: 'center' }}>
           <div style={{ color: colors.primary, fontWeight: 900, fontSize: 32, letterSpacing: 3, lineHeight: 1 }}>MOMO WALA</div>
           <div style={{ color: '#fff', fontSize: 16, marginTop: 6, fontWeight: 600 }}>मोमो वाला</div>

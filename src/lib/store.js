@@ -39,11 +39,13 @@ const orderToRow = (o) => ({
   id: o.id, token: o.token, date: o.date, time: o.time, items: o.items,
   total: o.total, payment: o.payment, staff: o.staff, source: o.source,
   settled_at: o.settledAt ?? null,
+  outlet: o.outlet ?? null, outlet_name: o.outletName ?? null,
 });
 const rowToOrder = (r) => ({
   id: r.id, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
   settledAt: r.settled_at ?? undefined,
+  outlet: r.outlet ?? undefined, outletName: r.outlet_name ?? undefined,
 });
 
 const staffToRow = (s) => ({

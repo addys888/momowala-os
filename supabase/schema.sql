@@ -17,6 +17,8 @@ create table if not exists orders (
   staff text,
   source text,
   settled_at timestamptz,
+  outlet text,
+  outlet_name text,
   inserted_at timestamptz not null default now()
 );
 
@@ -130,3 +132,7 @@ alter table day_close_logs add column if not exists corn_diff integer;
 alter table orders add column if not exists settled_at timestamptz;
 alter table orders drop constraint if exists orders_payment_check;
 alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending'));
+
+-- ── Migration: multi-cart (which QSR cart an order belongs to) ──
+alter table orders add column if not exists outlet text;
+alter table orders add column if not exists outlet_name text;
