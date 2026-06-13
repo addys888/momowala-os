@@ -2,11 +2,18 @@
 
 Cart management app for Momowala (Saketpuri Yojna, Ayodhya). Three roles in one app:
 
-- **Owner** — dashboard, inventory, end-of-day reconciliation, 7-day reports
-- **Staff** — order entry (cash/UPI), shift summary
-- **Customer** — QR self-order menu with token numbers
+- **Owner** (mobile `9452661608`) — sets own password on first login; dashboard, inventory, **staff registry**, end-of-day reconciliation, 7-day reports
+- **Staff** — log in with mobile + password; order entry (cash/UPI), settle pending QR orders, shift summary. Only staff the owner has registered can log in.
+- **Customer** — QR self-order menu → review → token number. Orders start **pending**; stock and revenue update only after staff marks them paid at the cart.
 
 Built with Vite + React. Data is saved to browser localStorage instantly (works offline) and synced to Supabase when configured. Hosted on Vercel.
+
+### Accounts & login
+
+- The owner number is fixed (`9452661608`). On first login the app asks the owner to **set a password**; afterwards that password is required each time.
+- The owner registers staff in the **Staff** tab (name, mobile, password). Staff then log in with their mobile number and that password.
+- An unregistered number cannot log in — it shows "this number is not registered".
+- Passwords are stored as SHA-256 hashes (never plain text), locally and in Supabase.
 
 ## Local development
 
@@ -20,7 +27,7 @@ The app runs fine with no configuration — it just stays localStorage-only unti
 ## 1. Set up Supabase (one time)
 
 1. Go to [supabase.com](https://supabase.com) → New project (free tier is fine). Pick the Mumbai region (`ap-south-1`) for lowest latency from Ayodhya.
-2. In the dashboard: **SQL Editor → New query**, paste the contents of [`supabase/schema.sql`](supabase/schema.sql), Run.
+2. In the dashboard: **SQL Editor → New query**, paste the contents of [`supabase/schema.sql`](supabase/schema.sql), Run. The whole file is safe to re-run — if you already created the tables earlier, running it again applies the new `staff` table, the `pending` payment status, and the corn-cheese columns via the migration block at the bottom.
 3. Go to **Project Settings → API** and copy two values:
    - Project URL
    - `anon` `public` key

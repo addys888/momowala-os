@@ -1,5 +1,15 @@
 import { supabase } from './supabase';
 
+// ─── PASSWORD HASHING ───
+// SHA-256 via the Web Crypto API. Not bcrypt-grade, but it means plaintext
+// passwords never touch localStorage or the database. Good enough for a
+// single-cart app with a handful of staff accounts.
+export async function hashPassword(plain) {
+  const bytes = new TextEncoder().encode(`momowala:${plain}`);
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 // ─── LOCAL PERSISTENCE (always on, works offline) ───
 const PREFIX = 'mw:';
 
@@ -22,8 +32,28 @@ export const storage = {
 };
 
 // ─── SUPABASE ROW MAPPING ───
-// orders / stock_logs / cart_loadings already use lowercase single-word keys
-// that match their columns; only day_close_logs needs camelCase ↔ snake_case.
+// stock_logs / cart_loadings use lowercase single-word keys that match their
+// columns; orders, staff and day_close_logs need camelCase ↔ snake_case.
+
+const orderToRow = (o) => ({
+  id: o.id, token: o.token, date: o.date, time: o.time, items: o.items,
+  total: o.total, payment: o.payment, staff: o.staff, source: o.source,
+  settled_at: o.settledAt ?? null,
+});
+const rowToOrder = (r) => ({
+  id: r.id, token: r.token, date: r.date, time: r.time, items: r.items,
+  total: r.total, payment: r.payment, staff: r.staff, source: r.source,
+  settledAt: r.settled_at ?? undefined,
+});
+
+const staffToRow = (s) => ({
+  id: s.id, name: s.name, mobile: s.mobile, password_hash: s.passwordHash ?? null,
+  role: s.role, active: s.active, updated_at: new Date().toISOString(),
+});
+const rowToStaff = (r) => ({
+  id: r.id, name: r.name, mobile: r.mobile, passwordHash: r.password_hash ?? null,
+  role: r.role, active: r.active,
+});
 
 const dayCloseToRow = (d) => ({
   id: d.id,
@@ -82,13 +112,28 @@ const unionById = (a = [], b = []) => {
   return [...seen.values()].sort((x, y) => x.id - y.id);
 };
 
+// Orders are mutable (pending → paid). When the same id exists on both sides,
+// prefer the settled copy so a payment recorded anywhere wins over 'pending'.
+const mergeOrders = (a = [], b = []) => {
+  const seen = new Map();
+  [...a, ...b].forEach((o) => {
+    const prev = seen.get(o.id);
+    if (!prev) { seen.set(o.id, o); return; }
+    const better = prev.payment !== 'pending' ? prev : o;
+    seen.set(o.id, better);
+  });
+  return [...seen.values()].sort((x, y) => x.id - y.id);
+};
+
 export function mergeStates(localState, cloud) {
   return {
     ...localState,
-    orders: unionById(localState.orders, cloud.orders),
+    orders: mergeOrders(localState.orders, cloud.orders),
     stockLogs: unionById(localState.stockLogs, cloud.stockLogs),
     cartLoadings: unionById(localState.cartLoadings, cloud.cartLoadings),
     dayCloseLogs: unionById(localState.dayCloseLogs, cloud.dayCloseLogs),
+    // staff is mutable and owner-managed; cloud copy wins on conflict
+    staff: cloud.staff?.length ? unionById(localState.staff, cloud.staff) : localState.staff,
     inventory: cloud.inventory ?? localState.inventory,
   };
 }
@@ -97,21 +142,23 @@ export function mergeStates(localState, cloud) {
 export async function loadCloudState() {
   if (!supabase) return null;
   try {
-    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory] = await Promise.all([
+    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff] = await Promise.all([
       supabase.from('orders').select('*').order('id'),
       supabase.from('stock_logs').select('*').order('id'),
       supabase.from('cart_loadings').select('*').order('id'),
       supabase.from('day_close_logs').select('*').order('id'),
       supabase.from('inventory').select('*').eq('id', 1).maybeSingle(),
+      supabase.from('staff').select('*').order('id'),
     ]);
-    const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory].find((r) => r.error);
+    const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff].find((r) => r.error);
     if (failed) throw failed.error;
     return {
-      orders: orders.data.map(stripMeta),
+      orders: orders.data.map((r) => rowToOrder(r)),
       stockLogs: stockLogs.data.map(stripMeta),
       cartLoadings: cartLoadings.data.map(stripMeta),
       dayCloseLogs: dayCloseLogs.data.map((r) => rowToDayClose(r)),
       inventory: inventory.data?.data ?? null,
+      staff: staff.data.map((r) => rowToStaff(r)),
     };
   } catch (e) {
     console.warn('Supabase load failed — running on local data only.', e.message);
@@ -130,16 +177,21 @@ export function syncToCloud(state) {
 
 async function pushState(state) {
   try {
+    // append-only logs: insert new rows, skip ones already there
     const append = (table, rows) =>
       rows.length
         ? supabase.from(table).upsert(rows, { onConflict: 'id', ignoreDuplicates: true })
         : null;
+    // mutable rows: insert-or-update so edits (settlements, password resets) sync
+    const merge = (table, rows) =>
+      rows.length ? supabase.from(table).upsert(rows, { onConflict: 'id' }) : null;
     const results = await Promise.all(
       [
-        append('orders', state.orders),
+        merge('orders', state.orders.map(orderToRow)),
         append('stock_logs', state.stockLogs),
         append('cart_loadings', state.cartLoadings),
         append('day_close_logs', state.dayCloseLogs.map(dayCloseToRow)),
+        merge('staff', state.staff.map(staffToRow)),
         supabase
           .from('inventory')
           .upsert({ id: 1, data: state.inventory, updated_at: new Date().toISOString() }),

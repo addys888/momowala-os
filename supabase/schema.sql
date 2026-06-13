@@ -13,9 +13,10 @@ create table if not exists orders (
   time text not null,
   items jsonb not null default '[]',
   total integer not null,
-  payment text not null check (payment in ('cash', 'upi')),
+  payment text not null check (payment in ('cash', 'upi', 'pending')),
   staff text,
   source text,
+  settled_at timestamptz,
   inserted_at timestamptz not null default now()
 );
 
@@ -79,6 +80,18 @@ create table if not exists inventory (
   updated_at timestamptz not null default now()
 );
 
+-- Owner + staff accounts. The owner row is seeded by the app; staff are
+-- added by the owner. Passwords are stored as SHA-256 hashes, never plain.
+create table if not exists staff (
+  id bigint primary key,
+  name text not null,
+  mobile text not null unique,
+  password_hash text,
+  role text not null default 'staff' check (role in ('owner', 'staff')),
+  active boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
 -- ── Row Level Security ──
 -- v1 has no user accounts: the app talks to Supabase with the anon key, so
 -- these policies allow anon read/write. That means anyone who has your URL
@@ -89,16 +102,31 @@ alter table stock_logs enable row level security;
 alter table cart_loadings enable row level security;
 alter table day_close_logs enable row level security;
 alter table inventory enable row level security;
+alter table staff enable row level security;
+
+-- drop-then-create so the whole file is safe to re-run
+drop policy if exists "anon full access" on orders;
+drop policy if exists "anon full access" on stock_logs;
+drop policy if exists "anon full access" on cart_loadings;
+drop policy if exists "anon full access" on day_close_logs;
+drop policy if exists "anon full access" on inventory;
+drop policy if exists "anon full access" on staff;
 
 create policy "anon full access" on orders for all to anon using (true) with check (true);
 create policy "anon full access" on stock_logs for all to anon using (true) with check (true);
 create policy "anon full access" on cart_loadings for all to anon using (true) with check (true);
 create policy "anon full access" on day_close_logs for all to anon using (true) with check (true);
 create policy "anon full access" on inventory for all to anon using (true) with check (true);
+create policy "anon full access" on staff for all to anon using (true) with check (true);
 
 -- ── Migration: corn cheese stock ──
--- Safe to run on databases created before corn cheese was added;
--- no-ops on fresh installs.
+-- Safe to run on databases created before corn cheese was added.
 alter table day_close_logs add column if not exists expected_corn integer;
 alter table day_close_logs add column if not exists actual_corn integer;
 alter table day_close_logs add column if not exists corn_diff integer;
+
+-- ── Migration: pending payment + staff accounts ──
+-- Allow the new 'pending' payment status and record when an order is settled.
+alter table orders add column if not exists settled_at timestamptz;
+alter table orders drop constraint if exists orders_payment_check;
+alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending'));

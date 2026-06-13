@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { storage, loadCloudState, mergeStates, syncToCloud } from './lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
 
 // ============================================
@@ -65,6 +65,33 @@ const ADDONS = [
   { id: 'a4', name: 'Extra Ketchup', price: 0 },
 ];
 
+// ─── ACCOUNTS ───
+// The owner account is fixed; staff are registered by the owner in the
+// Staff tab. Passwords are stored as SHA-256 hashes, never as plain text.
+const OWNER_MOBILE = '9452661608';
+const DEFAULT_STAFF = [
+  { id: 1, name: 'Owner', mobile: OWNER_MOBILE, passwordHash: null, role: 'owner', active: true },
+];
+
+const PAY_BADGE = {
+  cash: { bg: '#E7F5E7', fg: '#0F7B0F' },
+  upi: { bg: '#E7EEFF', fg: '#0050B3' },
+  pending: { bg: '#FFF1E7', fg: '#FF4D00' },
+};
+
+// Deduct an order's pieces from cart stock. Returns a new inventory object.
+function deductInventory(inventory, items) {
+  const next = { ...inventory };
+  items.forEach(item => {
+    const menu = MENU_ITEMS.find(m => m.id === item.id);
+    if (menu) {
+      const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
+      next[menu.stockKey] = { ...next[menu.stockKey], cart: next[menu.stockKey].cart - pcs };
+    }
+  });
+  return next;
+}
+
 // ─── STORAGE ───
 // localStorage (offline-first) + Supabase cloud sync — see src/lib/store.js
 
@@ -87,8 +114,12 @@ const getInitialState = () => {
   const inventory = storage.get('inventory', DEFAULT_INVENTORY);
   // saved data from before corn cheese was added lacks this key
   if (!inventory.corn) inventory.corn = { ...DEFAULT_INVENTORY.corn };
+  const staff = storage.get('staff', DEFAULT_STAFF);
+  // make sure the owner account always exists
+  if (!staff.some(s => s.role === 'owner')) staff.unshift(...DEFAULT_STAFF);
   return {
     inventory,
+    staff,
     orders: storage.get('orders', []),
     stockLogs: storage.get('stockLogs', []),
     cartLoadings: storage.get('cartLoadings', []),
@@ -115,6 +146,7 @@ export default function MomoWalaOS() {
 
   useEffect(() => {
     storage.set('inventory', state.inventory);
+    storage.set('staff', state.staff);
     storage.set('orders', state.orders);
     storage.set('stockLogs', state.stockLogs);
     storage.set('cartLoadings', state.cartLoadings);
@@ -126,7 +158,16 @@ export default function MomoWalaOS() {
 
   const updateState = (updates) => setState(prev => ({ ...prev, ...updates }));
 
-  if (!role) return <RoleSelector onSelect={setRole} online={online} setOnline={setOnline} />;
+  const handleLogin = (rec) => {
+    if (rec.role === 'owner') {
+      setRole('owner');
+    } else {
+      updateState({ staffOnDuty: rec.name });
+      setRole('staff');
+    }
+  };
+
+  if (!role) return <RoleSelector state={state} updateState={updateState} onLogin={handleLogin} onCustomer={() => setRole('customer')} online={online} setOnline={setOnline} />;
 
   const props = { state, updateState, setRole, online };
   if (role === 'owner') return <OwnerApp {...props} />;
@@ -137,7 +178,8 @@ export default function MomoWalaOS() {
 // ═══════════════════════════════════════════════
 // ROLE SELECTOR — Splash Screen
 // ═══════════════════════════════════════════════
-function RoleSelector({ onSelect, online, setOnline }) {
+function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnline }) {
+  const [loginMode, setLoginMode] = useState(null); // 'owner' | 'staff' | null
   return (
     <div style={{ minHeight: '100vh', background: colors.ink, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       <div style={{ maxWidth: 480, margin: '0 auto', padding: '40px 24px' }}>
@@ -172,7 +214,7 @@ function RoleSelector({ onSelect, online, setOnline }) {
             description="Dashboard, inventory, staff, audit logs"
             color={colors.primary}
             textColor={colors.ink}
-            onClick={() => onSelect('owner')}
+            onClick={() => setLoginMode('owner')}
           />
           <RoleCard
             icon={<ChefHat size={28} />}
@@ -182,7 +224,7 @@ function RoleSelector({ onSelect, online, setOnline }) {
             color="#161616"
             textColor={colors.primary}
             border={`1.5px solid rgba(255,214,10,0.55)`}
-            onClick={() => onSelect('staff')}
+            onClick={() => setLoginMode('staff')}
           />
           <RoleCard
             icon={<Smartphone size={28} />}
@@ -191,9 +233,19 @@ function RoleSelector({ onSelect, online, setOnline }) {
             description="Browse menu, place order, get token"
             color="#fff"
             textColor={colors.ink}
-            onClick={() => onSelect('customer')}
+            onClick={onCustomer}
           />
         </div>
+
+        {loginMode && (
+          <LoginSheet
+            mode={loginMode}
+            staffList={state.staff}
+            onClose={() => setLoginMode(null)}
+            onSavePassword={(id, hash) => updateState({ staff: state.staff.map(s => s.id === id ? { ...s, passwordHash: hash } : s) })}
+            onSuccess={(rec) => { setLoginMode(null); onLogin(rec); }}
+          />
+        )}
 
         {/* Contact footer — from the printed menu */}
         <div style={{ marginTop: 36, textAlign: 'center', color: 'rgba(255,255,255,0.6)', fontSize: 12, lineHeight: 2 }}>
@@ -229,6 +281,108 @@ function RoleCard({ icon, title, subtitle, description, color, textColor, border
   );
 }
 
+// ─── LOGIN SHEET (owner + staff) ───
+function LoginSheet({ mode, staffList, onClose, onSavePassword, onSuccess }) {
+  const [mobile, setMobile] = useState(mode === 'owner' ? OWNER_MOBILE : '');
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const ownerRec = staffList.find(s => s.role === 'owner');
+  const ownerNeedsSetup = mode === 'owner' && !ownerRec?.passwordHash;
+
+  const submit = async () => {
+    setError('');
+    const m = mobile.trim();
+
+    if (mode === 'owner') {
+      if (m !== OWNER_MOBILE) { setError('That is not the owner number.'); return; }
+      if (ownerNeedsSetup) {
+        if (pw.length < 4) { setError('Choose a password of at least 4 digits.'); return; }
+        if (pw !== pw2) { setError('The two passwords do not match.'); return; }
+        setBusy(true);
+        const hash = await hashPassword(pw);
+        onSavePassword(ownerRec.id, hash);
+        onSuccess(ownerRec);
+        return;
+      }
+      setBusy(true);
+      const hash = await hashPassword(pw);
+      setBusy(false);
+      if (hash !== ownerRec.passwordHash) { setError('Wrong password.'); return; }
+      onSuccess(ownerRec);
+      return;
+    }
+
+    // staff login
+    if (!/^\d{10}$/.test(m)) { setError('Enter a 10-digit mobile number.'); return; }
+    const rec = staffList.find(s => s.role === 'staff' && s.mobile === m && s.active);
+    if (!rec) { setError('This number is not registered. Ask the owner to add you first.'); return; }
+    if (!rec.passwordHash) { setError('Your password has not been set yet. Ask the owner.'); return; }
+    setBusy(true);
+    const hash = await hashPassword(pw);
+    setBusy(false);
+    if (hash !== rec.passwordHash) { setError('Wrong password.'); return; }
+    onSuccess(rec);
+  };
+
+  const title = mode === 'owner' ? (ownerNeedsSetup ? 'Set Owner Password' : 'Owner Login') : 'Staff Login';
+  const inputStyle = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 10 };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', padding: 24, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 40, height: 4, background: colors.border, borderRadius: 2, margin: '0 auto 16px' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+          <Lock size={18} color={colors.ink} />
+          <div style={{ fontSize: 20, fontWeight: 800 }}>{title}</div>
+        </div>
+        {ownerNeedsSetup && (
+          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>First time here — set a password for {OWNER_MOBILE}. You'll use it every time after this.</div>
+        )}
+        {!ownerNeedsSetup && <div style={{ height: 12 }} />}
+
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>MOBILE NUMBER</div>
+        <input
+          type="tel" inputMode="numeric" value={mobile} placeholder="10-digit number"
+          disabled={mode === 'owner'}
+          onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+          style={{ ...inputStyle, background: mode === 'owner' ? '#F5F4F0' : '#fff', fontWeight: 700, letterSpacing: 1 }} />
+
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>{ownerNeedsSetup ? 'NEW PASSWORD' : 'PASSWORD'}</div>
+        <input type="password" inputMode="numeric" value={pw} placeholder="••••"
+          onChange={e => setPw(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && !ownerNeedsSetup && submit()}
+          style={inputStyle} />
+
+        {ownerNeedsSetup && (
+          <>
+            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>CONFIRM PASSWORD</div>
+            <input type="password" inputMode="numeric" value={pw2} placeholder="••••"
+              onChange={e => setPw2(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && submit()}
+              style={inputStyle} />
+          </>
+        )}
+
+        {error && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={submit} disabled={busy} style={{ flex: 2, padding: 14, background: colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>
+            {ownerNeedsSetup ? 'Set Password & Enter' : 'Login'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════
 // OWNER APP
 // ═══════════════════════════════════════════════
@@ -252,9 +406,10 @@ function OwnerApp({ state, updateState, setRole }) {
       <TopBar title="Owner Console" onExit={() => setRole(null)} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard state={state} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'dashboard' && <Dashboard state={state} updateState={updateState} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
+        {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} />}
         {tab === 'reports' && <Reports state={state} />}
       </div>
 
@@ -262,6 +417,7 @@ function OwnerApp({ state, updateState, setRole }) {
         { id: 'dashboard', icon: <Home size={20}/>, label: 'Home' },
         { id: 'inventory', icon: <Boxes size={20}/>, label: 'Stock' },
         { id: 'reconcile', icon: <CheckCircle2 size={20}/>, label: 'Reconcile' },
+        { id: 'staff', icon: <Users size={20}/>, label: 'Staff' },
         { id: 'reports', icon: <BarChart3 size={20}/>, label: 'Reports' },
       ]} />
     </div>
@@ -291,8 +447,13 @@ function BottomNav({ tab, setTab, tabs }) {
       <div style={{ maxWidth: 700, margin: '0 auto', display: 'flex', justifyContent: 'space-around' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ background: 'transparent', border: 'none', padding: '8px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', color: tab === t.id ? colors.ink : colors.muted, fontWeight: tab === t.id ? 700 : 500 }}>
-            {t.icon}
+            style={{ background: 'transparent', border: 'none', padding: '8px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', color: tab === t.id ? colors.ink : colors.muted, fontWeight: tab === t.id ? 700 : 500, position: 'relative' }}>
+            <div style={{ position: 'relative' }}>
+              {t.icon}
+              {t.badge > 0 && (
+                <span style={{ position: 'absolute', top: -6, right: -10, background: colors.accent, color: '#fff', fontSize: 10, fontWeight: 800, minWidth: 16, height: 16, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{t.badge}</span>
+              )}
+            </div>
             <span style={{ fontSize: 11 }}>{t.label}</span>
           </button>
         ))}
@@ -305,6 +466,7 @@ function BottomNav({ tab, setTab, tabs }) {
 function Dashboard({ state, todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
   const expectedRevenue = piecesSold * 12; // avg ₹12/piece
   const variance = todayRevenue - expectedRevenue;
+  const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
   const vegLow = state.inventory.veg.freezer < 100;
   const paneerLow = state.inventory.paneer.freezer < 50;
   const cornLow = state.inventory.corn.freezer < 50;
@@ -333,6 +495,11 @@ function Dashboard({ state, todayRevenue, cashRevenue, upiRevenue, piecesSold, t
           title={variance > 0 ? 'Revenue HIGHER than expected' : 'Possible stock leakage'}
           message={`Recorded ₹${todayRevenue} vs expected ₹${expectedRevenue} (based on pieces sold × avg ₹12). Difference: ₹${variance}`}
         />
+      )}
+
+      {/* Pending QR orders awaiting payment */}
+      {pendingCount > 0 && (
+        <Alert type="warn" title={`${pendingCount} order${pendingCount > 1 ? 's' : ''} awaiting payment`} message="Customer QR orders not yet collected. Staff settles these in the Pending tab — stock and revenue update only after payment." />
       )}
 
       {/* Stock alerts */}
@@ -409,7 +576,7 @@ function OrderRow({ order }) {
       </div>
       <div style={{ textAlign: 'right' }}>
         <div style={{ fontWeight: 700 }}>₹{order.total}</div>
-        <div style={{ fontSize: 10, padding: '2px 8px', background: order.payment === 'cash' ? '#E7F5E7' : '#E7EEFF', color: order.payment === 'cash' ? colors.green : '#0050B3', borderRadius: 10, marginTop: 2, display: 'inline-block', fontWeight: 600 }}>{order.payment.toUpperCase()}</div>
+        <div style={{ fontSize: 10, padding: '2px 8px', background: PAY_BADGE[order.payment].bg, color: PAY_BADGE[order.payment].fg, borderRadius: 10, marginTop: 2, display: 'inline-block', fontWeight: 600 }}>{order.payment.toUpperCase()}</div>
       </div>
     </div>
   );
@@ -731,6 +898,120 @@ function ReconcileBlock({ title, systemValue, label, value, onChange, diff, unit
   );
 }
 
+// ─── OWNER: STAFF REGISTRY ───
+function StaffRegistry({ state, updateState }) {
+  const [showAdd, setShowAdd] = useState(false);
+  const staff = state.staff.filter(s => s.role === 'staff');
+  const owner = state.staff.find(s => s.role === 'owner');
+
+  const addStaff = async (name, mobile, password) => {
+    const hash = await hashPassword(password);
+    const rec = { id: Date.now(), name, mobile, passwordHash: hash, role: 'staff', active: true };
+    updateState({ staff: [...state.staff, rec] });
+    setShowAdd(false);
+  };
+
+  const toggleActive = (id) => updateState({ staff: state.staff.map(s => s.id === id ? { ...s, active: !s.active } : s) });
+  const removeStaff = (id) => { if (confirm('Remove this staff member? They will no longer be able to log in.')) updateState({ staff: state.staff.filter(s => s.id !== id) }); };
+  const resetPassword = async (id) => {
+    const np = prompt('Enter a new password for this staff member (min 4 characters):');
+    if (!np) return;
+    if (np.length < 4) { alert('Password must be at least 4 characters.'); return; }
+    const hash = await hashPassword(np);
+    updateState({ staff: state.staff.map(s => s.id === id ? { ...s, passwordHash: hash } : s) });
+    alert('Password updated.');
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Staff Registry" subtitle="Only registered staff can log in" />
+
+      <button onClick={() => setShowAdd(true)}
+        style={{ width: '100%', background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <Plus size={18}/> Register New Staff
+      </button>
+
+      {showAdd && <AddStaffModal existing={state.staff} onAdd={addStaff} onClose={() => setShowAdd(false)} />}
+
+      {/* Owner card */}
+      <div style={{ background: colors.ink, color: colors.primary, borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1, fontWeight: 700 }}>OWNER</div>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>{owner?.mobile}</div>
+          <div style={{ fontSize: 11, opacity: 0.7 }}>{owner?.passwordHash ? 'Password set' : 'Password not set yet'}</div>
+        </div>
+        <button onClick={() => resetPassword(owner.id)} style={{ background: 'rgba(255,214,10,0.15)', color: colors.primary, border: `1px solid rgba(255,214,10,0.4)`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Change Password</button>
+      </div>
+
+      <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>STAFF MEMBERS ({staff.length})</div>
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+        {staff.map(s => (
+          <div key={s.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: s.active ? 1 : 0.5 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{s.name} {!s.active && <span style={{ fontSize: 11, color: colors.red }}>· disabled</span>}</div>
+              <div style={{ fontSize: 13, color: colors.muted }}>{s.mobile}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => resetPassword(s.id)} title="Reset password" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Lock size={14}/></button>
+              <button onClick={() => toggleActive(s.id)} title={s.active ? 'Disable login' : 'Enable login'} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}>{s.active ? <EyeOff size={14}/> : <Eye size={14}/>}</button>
+              <button onClick={() => removeStaff(s.id)} title="Remove" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
+            </div>
+          </div>
+        ))}
+        {staff.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: colors.muted, fontSize: 14 }}>No staff registered yet. Add your chef and helper above.</div>}
+      </div>
+    </div>
+  );
+}
+
+function AddStaffModal({ existing, onAdd, onClose }) {
+  const [name, setName] = useState('');
+  const [mobile, setMobile] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = () => {
+    setError('');
+    if (!name.trim()) { setError('Enter a name.'); return; }
+    if (!/^\d{10}$/.test(mobile)) { setError('Enter a 10-digit mobile number.'); return; }
+    if (mobile === OWNER_MOBILE || existing.some(s => s.mobile === mobile)) { setError('That number is already registered.'); return; }
+    if (password.length < 4) { setError('Password must be at least 4 characters.'); return; }
+    onAdd(name.trim(), mobile, password);
+  };
+
+  const inputStyle = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 12 };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 50, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', padding: 24, width: '100%', maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+        <div style={{ width: 40, height: 4, background: colors.border, borderRadius: 2, margin: '0 auto 16px' }} />
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Register New Staff</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>You set their password now. Share it with them — they log in with their mobile number and this password.</div>
+
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>NAME</div>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Ramesh" style={inputStyle} />
+
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>MOBILE NUMBER</div>
+        <input type="tel" inputMode="numeric" value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit number" style={{ ...inputStyle, fontWeight: 700, letterSpacing: 1 }} />
+
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>SET PASSWORD</div>
+        <input type="text" value={password} onChange={e => setPassword(e.target.value)} placeholder="min 4 characters" style={inputStyle} />
+
+        {error && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={submit} style={{ flex: 2, padding: 14, background: colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Register Staff</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── OWNER: REPORTS ───
 function Reports({ state }) {
   const last7 = state.dayCloseLogs.slice(-7);
@@ -785,14 +1066,14 @@ function Reports({ state }) {
 function StaffApp({ state, updateState, setRole }) {
   const [tab, setTab] = useState('order');
   const [cart, setCart] = useState([]);
-  const [staffName, setStaffName] = useState(state.staffOnDuty || '');
+  const staffName = state.staffOnDuty;
 
-  if (!staffName) {
-    return <StaffLogin onLogin={(name) => { setStaffName(name); updateState({ staffOnDuty: name }); }} setRole={setRole} />;
-  }
+  // Login is gated at the role selector; this is just a safety net.
+  if (!staffName) { setRole(null); return null; }
 
   const todayOrders = state.orders.filter(o => o.date === TODAY);
   const myOrders = todayOrders.filter(o => o.staff === staffName);
+  const pendingOrders = todayOrders.filter(o => o.payment === 'pending');
 
   const placeOrder = (payment) => {
     if (cart.length === 0) return;
@@ -808,19 +1089,24 @@ function StaffApp({ state, updateState, setRole }) {
       staff: staffName,
       source: 'staff-entry'
     };
-
-    // Auto-deduct inventory
-    const newInv = { ...state.inventory };
-    cart.forEach(item => {
-      const menu = MENU_ITEMS.find(m => m.id === item.id);
-      if (menu) {
-        const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
-        newInv[menu.stockKey] = { ...newInv[menu.stockKey], cart: newInv[menu.stockKey].cart - pcs };
-      }
-    });
-
-    updateState({ orders: [...state.orders, order], inventory: newInv });
+    // Staff order is settled on the spot, so deduct stock now.
+    updateState({ orders: [...state.orders, order], inventory: deductInventory(state.inventory, cart) });
     setCart([]);
+  };
+
+  // Customer QR orders arrive as 'pending'; staff confirms payment here,
+  // and only then is stock deducted.
+  const settleOrder = (orderId, payment) => {
+    const order = state.orders.find(o => o.id === orderId);
+    if (!order || order.payment !== 'pending') return;
+    updateState({
+      orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
+      inventory: deductInventory(state.inventory, order.items),
+    });
+  };
+  const cancelOrder = (orderId) => {
+    if (!confirm('Cancel this unpaid order?')) return;
+    updateState({ orders: state.orders.filter(o => o.id !== orderId) });
   };
 
   return (
@@ -829,34 +1115,53 @@ function StaffApp({ state, updateState, setRole }) {
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} />}
+        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={cancelOrder} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} />}
         {tab === 'shift' && <ShiftStatus state={state} myOrders={myOrders} staffName={staffName} />}
       </div>
 
       <BottomNav tab={tab} setTab={setTab} tabs={[
         { id: 'order', icon: <Plus size={20}/>, label: 'New Order' },
+        { id: 'pending', icon: <Clock size={20}/>, label: 'Pending', badge: pendingOrders.length },
         { id: 'myorders', icon: <FileText size={20}/>, label: 'My Orders' },
-        { id: 'shift', icon: <Clock size={20}/>, label: 'Shift' },
+        { id: 'shift', icon: <Award size={20}/>, label: 'Shift' },
       ]} />
     </div>
   );
 }
 
-function StaffLogin({ onLogin, setRole }) {
-  const [name, setName] = useState('');
+// ─── STAFF: PENDING CUSTOMER ORDERS ───
+function PendingOrders({ orders, onSettle, onCancel }) {
   return (
-    <div style={{ minHeight: '100vh', background: colors.paper, padding: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'system-ui, sans-serif' }}>
-      <div style={{ width: '100%', maxWidth: 380, textAlign: 'center' }}>
-        <ChefHat size={48} color={colors.ink} style={{ margin: '0 auto 16px' }}/>
-        <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 4 }}>Start Your Shift</div>
-        <div style={{ color: colors.muted, fontSize: 14, marginBottom: 24 }}>Select who's on duty</div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 24 }}>
-          <button onClick={() => onLogin('Chef')} style={{ padding: 18, background: colors.ink, color: colors.primary, border: 'none', borderRadius: 12, fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>👨‍🍳 Chef (Main)</button>
-          <button onClick={() => onLogin('Helper')} style={{ padding: 18, background: colors.primary, color: colors.ink, border: 'none', borderRadius: 12, fontWeight: 700, fontSize: 16, cursor: 'pointer' }}>🤝 Helper</button>
+    <div>
+      <SectionHeader title="Pending Payment" subtitle="QR orders waiting to be collected" />
+      {orders.length === 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 40, textAlign: 'center', border: `1px solid ${colors.border}` }}>
+          <CheckCircle2 size={36} color={colors.green} style={{ margin: '0 auto 12px' }}/>
+          <div style={{ color: colors.muted, fontSize: 14 }}>No pending orders. All collected!</div>
         </div>
-
-        <button onClick={() => setRole(null)} style={{ background: 'transparent', border: 'none', color: colors.muted, fontSize: 13, cursor: 'pointer' }}>← Back to home</button>
+      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {orders.map(o => (
+          <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.accent}`, overflow: 'hidden' }}>
+            <div style={{ padding: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 22, fontWeight: 900 }}>#{o.token}</div>
+                <div style={{ fontSize: 12, color: colors.muted }}>{o.time} · self-order</div>
+              </div>
+              <div style={{ fontSize: 13, color: colors.muted, marginBottom: 12 }}>
+                {o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 12 }}>₹{o.total}</div>
+              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8, fontWeight: 600 }}>MARK AS PAID (deducts stock)</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => onSettle(o.id, 'cash')} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>💵 Cash</button>
+                <button onClick={() => onSettle(o.id, 'upi')} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>📱 UPI</button>
+                <button onClick={() => onCancel(o.id)} style={{ background: '#fff', color: colors.red, border: `1px solid ${colors.border}`, padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>✕</button>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1009,7 +1314,7 @@ function MyOrdersScreen({ orders }) {
             <div style={{ fontSize: 12, color: colors.muted }}>
               {o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}
             </div>
-            <div style={{ fontSize: 10, padding: '2px 8px', background: o.payment === 'cash' ? '#E7F5E7' : '#E7EEFF', color: o.payment === 'cash' ? colors.green : '#0050B3', borderRadius: 10, marginTop: 6, display: 'inline-block', fontWeight: 600 }}>{o.payment.toUpperCase()}</div>
+            <div style={{ fontSize: 10, padding: '2px 8px', background: PAY_BADGE[o.payment].bg, color: PAY_BADGE[o.payment].fg, borderRadius: 10, marginTop: 6, display: 'inline-block', fontWeight: 600 }}>{o.payment.toUpperCase()}</div>
           </div>
         ))}
         {orders.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: colors.muted }}>No orders yet · Tap "New Order" to start</div>}
@@ -1054,7 +1359,7 @@ function ShiftStatus({ state, myOrders, staffName }) {
 // ═══════════════════════════════════════════════
 function CustomerApp({ state, updateState, setRole }) {
   const [cart, setCart] = useState([]);
-  const [step, setStep] = useState('menu'); // menu | summary | success
+  const [step, setStep] = useState('menu'); // menu | confirm | success
   const [orderToken, setOrderToken] = useState('');
 
   const addToCart = (id, name, price, type = null) => {
@@ -1077,6 +1382,7 @@ function CustomerApp({ state, updateState, setRole }) {
   };
 
   const placeOrder = () => {
+    if (cart.length === 0) return;
     const todayOrders = state.orders.filter(o => o.date === TODAY);
     const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
     const token = String(todayOrders.length + 1).padStart(3, '0');
@@ -1087,27 +1393,59 @@ function CustomerApp({ state, updateState, setRole }) {
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
       items: cart,
       total,
-      payment: 'upi',
-      staff: 'Customer Self-Order',
+      payment: 'pending',     // not paid until staff confirms at the cart
+      staff: null,
       source: 'qr-order'
     };
-
-    const newInv = { ...state.inventory };
-    cart.forEach(item => {
-      const menu = MENU_ITEMS.find(m => m.id === item.id);
-      if (menu) {
-        const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
-        newInv[menu.stockKey] = { ...newInv[menu.stockKey], cart: newInv[menu.stockKey].cart - pcs };
-      }
-    });
-
-    updateState({ orders: [...state.orders, order], inventory: newInv });
+    // Stock is NOT deducted here — only when staff marks the order paid,
+    // so fake/abandoned QR orders never touch inventory or revenue.
+    updateState({ orders: [...state.orders, order] });
     setOrderToken(token);
     setStep('success');
     setCart([]);
   };
 
   const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
+
+  if (step === 'confirm') {
+    return (
+      <div style={{ minHeight: '100vh', background: colors.paper, fontFamily: 'system-ui, sans-serif', padding: 20 }}>
+        <div style={{ maxWidth: 480, margin: '0 auto' }}>
+          <button onClick={() => setStep('menu')} style={{ background: 'transparent', border: 'none', color: colors.muted, fontSize: 14, cursor: 'pointer', marginBottom: 16 }}>← Back to menu</button>
+          <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 16 }}>Review your order</div>
+
+          <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden', marginBottom: 16 }}>
+            {cart.map(item => (
+              <div key={item.key} style={{ padding: '14px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{item.name} {item.type && <span style={{ color: colors.muted, fontWeight: 400 }}>({item.type})</span>}</div>
+                  <div style={{ fontSize: 12, color: colors.muted }}>{item.price === 0 ? 'Free' : `₹${item.price}`} × {item.qty}</div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <button onClick={() => removeFromCart(item.key)} style={{ background: '#F5F4F0', border: 'none', width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontWeight: 700 }}>−</button>
+                  <div style={{ minWidth: 18, textAlign: 'center', fontWeight: 700 }}>{item.qty}</div>
+                  <button onClick={() => addToCart(item.id, item.name, item.price, item.type)} style={{ background: colors.ink, color: colors.primary, border: 'none', width: 28, height: 28, borderRadius: 6, cursor: 'pointer', fontWeight: 700 }}>+</button>
+                </div>
+              </div>
+            ))}
+            {cart.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: colors.muted }}>Your cart is empty.</div>}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, padding: '0 4px' }}>
+            <div style={{ fontWeight: 700 }}>Total</div>
+            <div style={{ fontSize: 28, fontWeight: 900 }}>₹{total}</div>
+          </div>
+
+          <Alert type="warn" title="Pay at the cart" message="Place your order to get a token number, then pay by cash or UPI at the cart. Your order is confirmed only after payment." />
+
+          <button onClick={placeOrder} disabled={cart.length === 0}
+            style={{ width: '100%', background: cart.length === 0 ? colors.border : colors.ink, color: colors.primary, border: 'none', padding: 18, borderRadius: 12, fontWeight: 800, fontSize: 16, cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}>
+            Confirm Order & Get Token
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (step === 'success') {
     return (
@@ -1118,7 +1456,8 @@ function CustomerApp({ state, updateState, setRole }) {
           <div style={{ fontSize: 80, fontWeight: 900, lineHeight: 1, margin: '8px 0' }}>#{orderToken}</div>
           <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 24 }}>Show this number at the cart<br/>Ready in 5-8 minutes</div>
           <div style={{ borderTop: '1px solid rgba(255,214,10,0.3)', paddingTop: 20 }}>
-            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 8 }}>Pay via UPI to:</div>
+            <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 8 }}>💵 Pay at the cart — cash or UPI</div>
+            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>UPI:</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>momowala@upi</div>
           </div>
           <button onClick={() => { setStep('menu'); setRole(null); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
@@ -1199,8 +1538,8 @@ function CustomerApp({ state, updateState, setRole }) {
                 <div style={{ fontSize: 11, opacity: 0.7 }}>TOTAL</div>
                 <div style={{ fontSize: 26, fontWeight: 900 }}>₹{total}</div>
               </div>
-              <button onClick={placeOrder} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '14px 24px', borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-                Place Order <ArrowRight size={16}/>
+              <button onClick={() => setStep('confirm')} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '14px 24px', borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                Review Order <ArrowRight size={16}/>
               </button>
             </div>
           </div>
