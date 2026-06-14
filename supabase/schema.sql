@@ -119,6 +119,13 @@ create table if not exists platform (
   updated_at timestamptz not null default now()
 );
 
+-- Per-cart menus, stored as one JSON blob keyed { [cartId]: {items,lassi,addons} }.
+create table if not exists menus (
+  id integer primary key check (id = 1),
+  data jsonb not null,
+  updated_at timestamptz not null default now()
+);
+
 -- ── Row Level Security ──
 -- v1 has no user accounts: the app talks to Supabase with the anon key, so
 -- these policies allow anon read/write. That means anyone who has your URL
@@ -137,7 +144,7 @@ alter table platform enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform']
+  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform','menus']
   loop
     execute format('drop policy if exists "anon full access" on %I', t);
     execute format('create policy "anon full access" on %I for all to anon using (true) with check (true)', t);

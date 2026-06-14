@@ -156,11 +156,22 @@ const PAY_BADGE = {
   pending: { bg: '#FFF1E7', fg: '#FF4D00' },
 };
 
-// Deduct an order's pieces from cart stock. Returns a new inventory object.
-function deductInventory(inventory, items) {
+// ─── PER-CART MENUS ───
+// Each cart owns its menu. Momo Wala is seeded from the constants above;
+// carts onboarded later start empty and are filled via the menu editor
+// (manually or by AI photo extraction).
+const SEED_MENUS = {
+  momowala: { items: MENU_ITEMS, lassi: LASSI, addons: ADDONS },
+};
+const EMPTY_MENU = { items: [], lassi: [], addons: [] };
+const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
+
+// Deduct an order's pieces from cart stock, looking item details up in the
+// cart's own menu. Returns a new inventory object.
+function deductInventory(inventory, items, menuItems = MENU_ITEMS) {
   const next = { ...inventory };
   items.forEach(item => {
-    const menu = MENU_ITEMS.find(m => m.id === item.id);
+    const menu = menuItems.find(m => m.id === item.id);
     if (menu) {
       const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
       next[menu.stockKey] = { ...next[menu.stockKey], cart: next[menu.stockKey].cart - pcs };
@@ -223,6 +234,11 @@ const getInitialState = () => {
 
   const platform = storage.get('platform', { adminMobile: PLATFORM_ADMIN_MOBILE, adminPasswordHash: null });
 
+  // ── menus, keyed by cartId ──
+  let menus = storage.get('menus', null);
+  if (!menus) menus = { ...SEED_MENUS };
+  carts.forEach(c => { if (!menus[c.id]) menus[c.id] = { items: [], lassi: [], addons: [] }; });
+
   // tag any legacy event rows with the momowala cart
   const tag = (arr) => (arr || []).map(x => x.cartId ? x : { ...x, cartId: 'momowala' });
 
@@ -230,6 +246,7 @@ const getInitialState = () => {
     platform,
     carts,
     inventory,
+    menus,
     staff,
     orders: tag(storage.get('orders', [])),
     stockLogs: tag(storage.get('stockLogs', [])),
@@ -261,6 +278,7 @@ export default function App() {
     storage.set('platform', state.platform);
     storage.set('carts', state.carts);
     storage.set('inventoryByCart', state.inventory);
+    storage.set('menus', state.menus);
     storage.set('staffV2', state.staff);
     storage.set('orders', state.orders);
     storage.set('stockLogs', state.stockLogs);
@@ -522,6 +540,17 @@ function AdminApp({ state, updateState, onExit }) {
 
 function AdminCarts({ state, updateState }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [menuCartId, setMenuCartId] = useState(null);
+
+  if (menuCartId) {
+    const c = state.carts.find(x => x.id === menuCartId);
+    return (
+      <div>
+        <button onClick={() => setMenuCartId(null)} style={{ background: 'transparent', border: 'none', color: brand.tealDark, fontSize: 14, cursor: 'pointer', marginBottom: 12, fontWeight: 600 }}>← Back to carts</button>
+        <MenuEditor state={state} updateState={updateState} cartId={menuCartId} cart={c} />
+      </div>
+    );
+  }
 
   const addCart = async (form) => {
     let id = slugify(form.name) || `cart-${Date.now()}`;
@@ -533,7 +562,7 @@ function AdminCarts({ state, updateState }) {
       accent: form.accent || brand.teal, ownerName: form.ownerName.trim(), ownerMobile: form.ownerMobile,
       ownerPasswordHash, active: true, createdAt: TODAY,
     };
-    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInventory() } });
+    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInventory() }, menus: { ...state.menus, [id]: { items: [], lassi: [], addons: [] } } });
     setShowAdd(false);
   };
 
@@ -578,6 +607,7 @@ function AdminCarts({ state, updateState }) {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button onClick={() => setMenuCartId(c.id)} style={{ ...adminBtn, color: brand.tealDark, borderColor: brand.teal }}>📋 Set up menu</button>
               <button onClick={() => resetOwnerPw(c)} style={adminBtn}>Reset owner password</button>
               <button onClick={() => toggleActive(c.id)} style={adminBtn}>{c.active ? 'Disable' : 'Enable'}</button>
               <button onClick={() => removeCart(c)} style={{ ...adminBtn, color: colors.red }}>Remove</button>
@@ -712,12 +742,212 @@ function AdminReports({ state }) {
 }
 
 // ═══════════════════════════════════════════════
+// MENU EDITOR (admin per-cart + owner) — manual + AI photo extract
+// ═══════════════════════════════════════════════
+const newId = (p) => `${p}${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
+
+// Downscale a photo to keep the upload under Vercel's request limit.
+async function fileToBase64(file, maxDim = 1600, quality = 0.8) {
+  const img = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+  const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+  return canvas.toDataURL('image/jpeg', quality).split(',')[1];
+}
+
+function MenuEditor({ state, updateState, cartId, cart }) {
+  const menu = menuFor(state, cartId);
+  const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
+  const [edit, setEdit] = useState(null);   // { section, item } — null when closed
+  const [busy, setBusy] = useState(false);
+  const [aiNote, setAiNote] = useState('');
+  const fileRef = React.useRef();
+
+  const setMenu = (next) => updateState({ menus: { ...state.menus, [cartId]: next } });
+  const saveItem = (section, item) => {
+    const list = menu[section] || [];
+    const exists = item.id && list.some(x => x.id === item.id);
+    const nextList = exists ? list.map(x => x.id === item.id ? item : x) : [...list, { ...item, id: item.id || newId(section[0]) }];
+    setMenu({ ...menu, [section]: nextList });
+    setEdit(null);
+  };
+  const removeItem = (section, id) => { if (confirm('Remove this item?')) setMenu({ ...menu, [section]: (menu[section] || []).filter(x => x.id !== id) }); };
+
+  const onPhoto = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAiNote(''); setBusy(true);
+    try {
+      const image = await fileToBase64(file);
+      const res = await fetch('/api/extract-menu', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image, mediaType: 'image/jpeg' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Extraction failed');
+      const tag = (arr, p) => (arr || []).map(x => ({ ...x, id: newId(p) }));
+      const extracted = {
+        items: tag(data.items, 'm'),
+        lassi: tag(data.lassi, 'l'),
+        addons: tag(data.addons, 'a'),
+      };
+      const count = extracted.items.length + extracted.lassi.length + extracted.addons.length;
+      if (count === 0) { setAiNote('No menu items detected in that photo. Try a clearer shot.'); return; }
+      const hasExisting = items.length + lassi.length + addons.length > 0;
+      const merge = hasExisting && confirm(`Found ${count} items. OK = add to the current menu, Cancel = replace it.`);
+      setMenu(merge
+        ? { items: [...items, ...extracted.items], lassi: [...lassi, ...extracted.lassi], addons: [...addons, ...extracted.addons] }
+        : extracted);
+      setAiNote(`Imported ${count} items — review and edit below, then they're saved automatically.`);
+    } catch (err) {
+      setAiNote(`Couldn't read the menu: ${err.message}. You can still add items manually.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <SectionHeader title="Menu Setup" subtitle={cart?.name} />
+
+      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={onPhoto} />
+      <button onClick={() => fileRef.current?.click()} disabled={busy}
+        style={{ width: '100%', background: brand.teal, color: '#fff', padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.7 : 1 }}>
+        {busy ? '📷 Reading menu…' : '📷 Scan menu photo (AI auto-fill)'}
+      </button>
+      {aiNote && <div style={{ background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: brand.text, marginBottom: 16 }}>{aiNote}</div>}
+
+      <MenuSection title="🥟 Momos" hint="Half / full price + pieces"
+        rows={items.map(i => ({ id: i.id, primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: `${i.cat || 'Momo'} · ${i.type} · ₹${i.half}/${i.full} · ${i.pcsHalf}/${i.pcsFull}pc` }))}
+        onAdd={() => setEdit({ section: 'items', item: { type: 'veg', cat: 'Steamed', pcsHalf: 5, pcsFull: 10 } })}
+        onEdit={(id) => setEdit({ section: 'items', item: items.find(x => x.id === id) })}
+        onRemove={(id) => removeItem('items', id)} />
+
+      <MenuSection title="🥤 Drinks" hint="Single price"
+        rows={lassi.map(i => ({ id: i.id, primary: i.name, secondary: `₹${i.price}` }))}
+        onAdd={() => setEdit({ section: 'lassi', item: { price: 0 } })}
+        onEdit={(id) => setEdit({ section: 'lassi', item: lassi.find(x => x.id === id) })}
+        onRemove={(id) => removeItem('lassi', id)} />
+
+      <MenuSection title="➕ Add-ons" hint="₹0 = free"
+        rows={addons.map(i => ({ id: i.id, primary: i.name, secondary: i.price === 0 ? 'Free' : `₹${i.price}` }))}
+        onAdd={() => setEdit({ section: 'addons', item: { price: 0 } })}
+        onEdit={(id) => setEdit({ section: 'addons', item: addons.find(x => x.id === id) })}
+        onRemove={(id) => removeItem('addons', id)} />
+
+      {edit?.section === 'items' && <MomoItemModal initial={edit.item} onSave={(it) => saveItem('items', it)} onClose={() => setEdit(null)} />}
+      {edit && edit.section !== 'items' && <SimpleItemModal initial={edit.item} section={edit.section} onSave={(it) => saveItem(edit.section, it)} onClose={() => setEdit(null)} />}
+    </div>
+  );
+}
+
+function MenuSection({ title, hint, rows, onAdd, onEdit, onRemove }) {
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div><div style={{ fontWeight: 800, fontSize: 16 }}>{title}</div><div style={{ fontSize: 11, color: colors.muted }}>{hint}</div></div>
+        <button onClick={onAdd} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={14}/> Add</button>
+      </div>
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+        {rows.map(r => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${colors.border}` }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{r.primary}</div>
+              <div style={{ fontSize: 12, color: colors.muted }}>{r.secondary}</div>
+            </div>
+            <button onClick={() => onEdit(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={14}/></button>
+            <button onClick={() => onRemove(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
+          </div>
+        ))}
+        {rows.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>None yet</div>}
+      </div>
+    </div>
+  );
+}
+
+const editLabel = { fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 };
+const editInput = { width: '100%', padding: '11px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 15, boxSizing: 'border-box', marginBottom: 12 };
+function EditModalShell({ title, onClose, onSave, error, children }) {
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 440, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16, color: brand.navy }}>{title}</div>
+        {children}
+        {error && <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}><AlertCircle size={15}/> {error}</div>}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
+          <button onClick={onSave} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MomoItemModal({ initial, onSave, onClose }) {
+  const [f, setF] = useState({ cat: 'Steamed', type: 'veg', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, ...initial });
+  const [error, setError] = useState('');
+  const num = (v) => parseInt(v) || 0;
+  const submit = () => {
+    if (!f.name?.trim()) { setError('Enter an item name.'); return; }
+    if (!num(f.half) && !num(f.full)) { setError('Enter at least one price.'); return; }
+    onSave({ ...f, name: f.name.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type });
+  };
+  const set = (k, v) => setF(p => ({ ...p, [k]: v }));
+  return (
+    <EditModalShell title={initial?.id ? 'Edit momo' : 'Add momo'} onClose={onClose} onSave={submit} error={error}>
+      <div style={editLabel}>NAME</div>
+      <input value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Veg Steam" style={editInput} />
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><div style={editLabel}>CATEGORY</div><input value={f.cat} onChange={e => set('cat', e.target.value)} placeholder="Steamed" style={editInput} /></div>
+        <div style={{ flex: 1 }}><div style={editLabel}>STOCK TYPE</div>
+          <select value={f.type} onChange={e => set('type', e.target.value)} style={editInput}>
+            <option value="veg">Veg</option><option value="paneer">Paneer</option><option value="corn">Corn Cheese</option>
+          </select>
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><div style={editLabel}>HALF ₹</div><input type="number" value={f.half} onChange={e => set('half', e.target.value)} style={editInput} /></div>
+        <div style={{ flex: 1 }}><div style={editLabel}>HALF PCS</div><input type="number" value={f.pcsHalf} onChange={e => set('pcsHalf', e.target.value)} style={editInput} /></div>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><div style={editLabel}>FULL ₹</div><input type="number" value={f.full} onChange={e => set('full', e.target.value)} style={editInput} /></div>
+        <div style={{ flex: 1 }}><div style={editLabel}>FULL PCS</div><input type="number" value={f.pcsFull} onChange={e => set('pcsFull', e.target.value)} style={editInput} /></div>
+      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginBottom: 12, cursor: 'pointer' }}>
+        <input type="checkbox" checked={!!f.star} onChange={e => set('star', e.target.checked)} /> Mark as bestseller ⭐
+      </label>
+    </EditModalShell>
+  );
+}
+
+function SimpleItemModal({ initial, section, onSave, onClose }) {
+  const [f, setF] = useState({ name: '', price: 0, ...initial });
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!f.name?.trim()) { setError('Enter a name.'); return; }
+    onSave({ ...f, name: f.name.trim(), price: parseInt(f.price) || 0 });
+  };
+  return (
+    <EditModalShell title={`${initial?.id ? 'Edit' : 'Add'} ${section === 'addons' ? 'add-on' : 'drink'}`} onClose={onClose} onSave={submit} error={error}>
+      <div style={editLabel}>NAME</div>
+      <input value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} placeholder={section === 'addons' ? 'e.g. Extra Cheese' : 'e.g. Mango Lassi'} style={editInput} />
+      <div style={editLabel}>PRICE ₹ {section === 'addons' && '(0 = free)'}</div>
+      <input type="number" value={f.price} onChange={e => setF(p => ({ ...p, price: e.target.value }))} style={editInput} />
+    </EditModalShell>
+  );
+}
+
+// ═══════════════════════════════════════════════
 // OWNER APP
 // ═══════════════════════════════════════════════
 function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
+  const menu = menuFor(state, cartId);
 
   const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
   const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.payment === 'pending' ? 0 : o.total), 0);
@@ -725,7 +955,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   const upiRevenue = todayOrders.filter(o => o.payment === 'upi').reduce((sum, o) => sum + o.total, 0);
   const piecesSold = todayOrders.filter(o => o.payment !== 'pending').reduce((sum, o) => {
     return sum + o.items.reduce((s, item) => {
-      const m = MENU_ITEMS.find(x => x.id === item.id);
+      const m = menu.items.find(x => x.id === item.id);
       if (!m) return s;
       return s + (item.type === 'half' ? m.pcsHalf : m.pcsFull) * item.qty;
     }, 0);
@@ -739,6 +969,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         {tab === 'dashboard' && <Dashboard inv={inv} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
+        {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'reports' && <Reports state={state} cartId={cartId} />}
       </div>
@@ -746,6 +977,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       <BottomNav tab={tab} setTab={setTab} tabs={[
         { id: 'dashboard', icon: <Home size={20}/>, label: 'Home' },
         { id: 'inventory', icon: <Boxes size={20}/>, label: 'Stock' },
+        { id: 'menu', icon: <Edit3 size={20}/>, label: 'Menu' },
         { id: 'reconcile', icon: <CheckCircle2 size={20}/>, label: 'Reconcile' },
         { id: 'staff', icon: <Users size={20}/>, label: 'Staff' },
         { id: 'reports', icon: <BarChart3 size={20}/>, label: 'Reports' },
@@ -1393,6 +1625,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [cart, setCart] = useState([]);
   const cartInfo = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
+  const menu = menuFor(state, cartId);
 
   // Login is gated at the role selector; this is just a safety net.
   if (!staffName) { onExit(); return null; }
@@ -1419,7 +1652,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       source: 'staff-entry'
     };
     // Staff order is settled on the spot, so deduct stock now.
-    setCartInv(deductInventory(inv, cart), { orders: [...state.orders, order] });
+    setCartInv(deductInventory(inv, cart, menu.items), { orders: [...state.orders, order] });
     setCart([]);
   };
 
@@ -1428,7 +1661,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const settleOrder = (orderId, payment) => {
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment !== 'pending') return;
-    setCartInv(deductInventory(inv, order.items), {
+    setCartInv(deductInventory(inv, order.items, menu.items), {
       orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
     });
   };
@@ -1442,7 +1675,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       <TopBar title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} />}
+        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={cancelOrder} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} />}
         {tab === 'shift' && <ShiftStatus inv={inv} myOrders={myOrders} staffName={staffName} />}
@@ -1495,8 +1728,9 @@ function PendingOrders({ orders, onSettle, onCancel }) {
   );
 }
 
-function NewOrderScreen({ cart, setCart, onPlaceOrder }) {
+function NewOrderScreen({ cart, setCart, onPlaceOrder, menu }) {
   const [category, setCategory] = useState('momos');
+  const items = menu?.items || [], lassi = menu?.lassi || [], addons = menu?.addons || [];
 
   const addToCart = (id, name, price, type = null, qty = 1) => {
     const itemKey = `${id}-${type || 'std'}`;
@@ -1539,15 +1773,18 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder }) {
 
       {/* Items list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 100 }}>
-        {category === 'momos' && MENU_ITEMS.map(item => (
+        {category === 'momos' && items.map(item => (
           <MenuItemRow key={item.id} item={item} onAdd={addToCart} />
         ))}
-        {category === 'lassi' && LASSI.map(item => (
-          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} extra="Made with Greek yogurt" onAdd={() => addToCart(item.id, item.name, item.price)} />
+        {category === 'lassi' && lassi.map(item => (
+          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
         ))}
-        {category === 'addons' && ADDONS.map(item => (
-          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} extra="Free during promotion" onAdd={() => addToCart(item.id, item.name, item.price)} />
+        {category === 'addons' && addons.map(item => (
+          <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
         ))}
+        {((category === 'momos' && !items.length) || (category === 'lassi' && !lassi.length) || (category === 'addons' && !addons.length)) && (
+          <div style={{ padding: 32, textAlign: 'center', color: colors.muted, fontSize: 14 }}>Nothing in this section yet.</div>
+        )}
       </div>
 
       {/* Cart bottom sheet */}
@@ -1751,7 +1988,9 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const [orderToken, setOrderToken] = useState('');
   const [addonNote, setAddonNote] = useState('');
 
-  const isAddon = (id) => ADDONS.some(a => a.id === id);
+  const menu = menuFor(state, venue.id);
+  const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
+  const isAddon = (id) => addons.some(a => a.id === id);
 
   // Functional updates so rapid taps always see the latest cart (no stale state).
   const addToCart = (id, name, price, type = null) => {
@@ -1898,46 +2137,59 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
       </div>
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {/* Bestsellers banner */}
-        <div style={{ background: colors.ink, color: colors.primary, padding: 14, borderRadius: 12, marginBottom: 16, fontSize: 12, fontWeight: 700, textAlign: 'center', letterSpacing: 1 }}>
-          ⭐ BESTSELLERS — KURKURE · PANEER AFGHANI · PANEER TANDOORI ⭐
-        </div>
-
-        <SectionHeader title="🥟 Momos" subtitle="Veg · Paneer · Corn Cheese" />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-          {MENU_ITEMS.map(item => (
-            <MenuItemRow key={item.id} item={item} onAdd={addToCart} />
-          ))}
-        </div>
-
-        <SectionHeader title="🥤 Special Lassi" subtitle="Made with Greek yogurt" />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-          {LASSI.map(item => (
-            <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
-          ))}
-        </div>
-
-        <SectionHeader title="➕ Perfect Add-ons" subtitle={`Free · pick any ${MAX_ADDON_ITEMS}`} />
-        {addonNote && (
-          <div style={{ background: '#FFF1E7', color: colors.accent, border: `1px solid ${colors.accent}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertCircle size={15}/> {addonNote}
+        {items.length === 0 && lassi.length === 0 && addons.length === 0 && (
+          <div style={{ background: '#fff', borderRadius: 12, padding: 40, textAlign: 'center', border: `1px solid ${colors.border}`, color: colors.muted, marginBottom: 16 }}>
+            This cart's menu isn't ready yet. Please check back soon.
           </div>
         )}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-          {ADDONS.map(item => {
-            const picked = cart.some(c => c.id === item.id);
-            return (
-              <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} picked={picked} onAdd={() => addToCart(item.id, item.name, item.price)} />
-            );
-          })}
-        </div>
 
-        {/* Contact footer — from the printed menu */}
-        <div style={{ background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, textAlign: 'center', fontSize: 12, fontWeight: 600, lineHeight: 1.9, marginBottom: 100 }}>
+        {venue.id === 'momowala' && items.length > 0 && (
+          <div style={{ background: colors.ink, color: colors.primary, padding: 14, borderRadius: 12, marginBottom: 16, fontSize: 12, fontWeight: 700, textAlign: 'center', letterSpacing: 1 }}>
+            ⭐ BESTSELLERS — KURKURE · PANEER AFGHANI · PANEER TANDOORI ⭐
+          </div>
+        )}
+
+        {items.length > 0 && <>
+          <SectionHeader title="🥟 Momos" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+            {items.map(item => (
+              <MenuItemRow key={item.id} item={item} onAdd={addToCart} />
+            ))}
+          </div>
+        </>}
+
+        {lassi.length > 0 && <>
+          <SectionHeader title="🥤 Drinks" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+            {lassi.map(item => (
+              <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
+            ))}
+          </div>
+        </>}
+
+        {addons.length > 0 && <>
+          <SectionHeader title="➕ Add-ons" subtitle={`Pick any ${MAX_ADDON_ITEMS}`} />
+          {addonNote && (
+            <div style={{ background: '#FFF1E7', color: colors.accent, border: `1px solid ${colors.accent}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, fontWeight: 600, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertCircle size={15}/> {addonNote}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
+            {addons.map(item => {
+              const picked = cart.some(c => c.id === item.id);
+              return (
+                <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} picked={picked} onAdd={() => addToCart(item.id, item.name, item.price)} />
+              );
+            })}
+          </div>
+        </>}
+
+        {/* Contact footer — Momo Wala only */}
+        {venue.id === 'momowala' && <div style={{ background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, textAlign: 'center', fontSize: 12, fontWeight: 600, lineHeight: 1.9, marginBottom: 100 }}>
           📞 +91 63075 16898 · 📷 @momowalaindia<br/>
           🛵 Free delivery nearby on orders above ₹200<br/>
           <span style={{ color: colors.pilgrim, fontWeight: 700 }}>|| जय श्री राम ||</span>
-        </div>
+        </div>}
       </div>
 
       {/* Customer cart bar */}

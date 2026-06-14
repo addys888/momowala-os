@@ -159,6 +159,7 @@ export function mergeStates(localState, cloud) {
     platform: cloud.platform ?? localState.platform,
     // inventory is one keyed blob ({ [cartId]: inv }); cloud wins if present
     inventory: cloud.inventory ?? localState.inventory,
+    menus: cloud.menus ?? localState.menus,
   };
 }
 
@@ -166,7 +167,7 @@ export function mergeStates(localState, cloud) {
 export async function loadCloudState() {
   if (!supabase) return null;
   try {
-    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform] = await Promise.all([
+    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus] = await Promise.all([
       supabase.from('orders').select('*').order('id'),
       supabase.from('stock_logs').select('*').order('id'),
       supabase.from('cart_loadings').select('*').order('id'),
@@ -175,6 +176,7 @@ export async function loadCloudState() {
       supabase.from('staff').select('*').order('id'),
       supabase.from('carts').select('*').order('created_at'),
       supabase.from('platform').select('*').eq('id', 1).maybeSingle(),
+      supabase.from('menus').select('*').eq('id', 1).maybeSingle(),
     ]);
     const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform].find((r) => r.error);
     if (failed) throw failed.error;
@@ -187,6 +189,7 @@ export async function loadCloudState() {
       staff: staff.data.map((r) => rowToStaff(r)),
       carts: carts.data.map((r) => rowToCart(r)),
       platform: platform.data ? { adminMobile: platform.data.admin_mobile, adminPasswordHash: platform.data.admin_password_hash ?? null } : null,
+      menus: menus.data?.data ?? null,
     };
   } catch (e) {
     console.warn('Supabase load failed — running on local data only.', e.message);
@@ -225,6 +228,9 @@ async function pushState(state) {
         supabase
           .from('inventory')
           .upsert({ id: 1, data: state.inventory, updated_at: new Date().toISOString() }),
+        supabase
+          .from('menus')
+          .upsert({ id: 1, data: state.menus, updated_at: new Date().toISOString() }),
       ].filter(Boolean)
     );
     const failed = results.find((r) => r.error);
