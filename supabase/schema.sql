@@ -104,6 +104,7 @@ create table if not exists carts (
   timing text,
   emoji text,
   accent text,
+  owner_name text,
   owner_mobile text,
   owner_password_hash text,
   active boolean not null default true,
@@ -176,3 +177,6 @@ update staff         set cart_id = 'momowala' where cart_id is null;
 -- nullable so old inserts don't break, but drop the NOT NULL + check.
 alter table staff alter column role drop not null;
 alter table staff drop constraint if exists staff_role_check;
+
+-- ── Migration: owner name on carts ──
+alter table carts add column if not exists owner_name text;

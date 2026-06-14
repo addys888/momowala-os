@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, createContext, useContext } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
 
@@ -141,6 +142,7 @@ const SEED_CARTS = [
     timing: 'Daily 4 PM – 11 PM',
     emoji: '🥟',
     accent: '#FFD60A',
+    ownerName: 'Momo Wala Owner',
     ownerMobile: '9452661608',
     ownerPasswordHash: null,
     active: true,
@@ -238,13 +240,15 @@ const getInitialState = () => {
 };
 
 // ═══════════════════════════════════════════════
-// MAIN APP
+// STORE CONTEXT + SESSION
 // ═══════════════════════════════════════════════
-export default function MomoWalaOS() {
-  // session: null | { role: 'admin'|'owner'|'staff'|'customer', cartId?, name? }
-  const [session, setSession] = useState(null);
+const StoreContext = createContext(null);
+const useStore = () => useContext(StoreContext);
+
+export default function App() {
   const [state, setState] = useState(getInitialState());
-  const [online, setOnline] = useState(true);
+  // session: null | { role: 'admin'|'owner'|'staff', cartId?, name? } — persisted
+  const [session, setSession] = useState(() => storage.get('session', null));
 
   // Hydrate from Supabase once on load (no-op when env keys are missing)
   useEffect(() => {
@@ -262,247 +266,235 @@ export default function MomoWalaOS() {
     storage.set('stockLogs', state.stockLogs);
     storage.set('cartLoadings', state.cartLoadings);
     storage.set('dayCloseLogs', state.dayCloseLogs);
-    storage.set('staffOnDuty', state.staffOnDuty);
     syncToCloud(state);
   }, [state]);
 
+  useEffect(() => { storage.set('session', session); }, [session]);
+
   const updateState = (updates) => setState(prev => ({ ...prev, ...updates }));
-  const exit = () => setSession(null);
+  const login = (sess) => setSession(sess);
+  const logout = () => setSession(null);
 
-  if (!session) return <RoleSelector state={state} updateState={updateState} onLogin={setSession} onCustomer={() => setSession({ role: 'customer' })} online={online} setOnline={setOnline} />;
+  return (
+    <StoreContext.Provider value={{ state, updateState, session, login, logout }}>
+      <BrowserRouter>
+        <Routes>
+          {/* Public — customer */}
+          <Route path="/" element={<MarketplaceRoute />} />
+          <Route path="/c/:cartId" element={<CartMenuRoute />} />
+          {/* Cart team — owner + staff share one login */}
+          <Route path="/login" element={<TeamLogin />} />
+          <Route path="/manage" element={<RequireRole role="owner"><OwnerRoute /></RequireRole>} />
+          <Route path="/work" element={<RequireRole role="staff"><StaffRoute /></RequireRole>} />
+          {/* Platform admin */}
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin" element={<RequireRole role="admin"><AdminRoute /></RequireRole>} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </BrowserRouter>
+    </StoreContext.Provider>
+  );
+}
 
-  const props = { state, updateState, onExit: exit };
-  if (session.role === 'admin') return <AdminApp {...props} />;
-  if (session.role === 'owner') return <OwnerApp {...props} cartId={session.cartId} />;
-  if (session.role === 'staff') return <StaffApp {...props} cartId={session.cartId} staffName={session.name} />;
-  if (session.role === 'customer') return <CustomerApp {...props} />;
+// Route guards — bounce to the right login if the session doesn't match.
+function RequireRole({ role, children }) {
+  const { session } = useStore();
+  if (!session || session.role !== role) {
+    return <Navigate to={role === 'admin' ? '/admin/login' : '/login'} replace />;
+  }
+  return children;
+}
+
+// ── Route wrappers: pull state/session/params, render the app screens ──
+function MarketplaceRoute() {
+  const { state } = useStore();
+  const nav = useNavigate();
+  return <CartListing carts={state.carts.filter(c => c.active)} onSelect={(c) => nav(`/c/${c.id}`)} />;
+}
+
+function CartMenuRoute() {
+  const { state, updateState } = useStore();
+  const { cartId } = useParams();
+  const nav = useNavigate();
+  const venue = state.carts.find(c => c.id === cartId && c.active);
+  if (!venue) return <Navigate to="/" replace />;
+  return <CartMenu state={state} updateState={updateState} venue={venue} onBack={() => nav('/')} onDone={() => nav('/')} />;
+}
+
+function AdminRoute() {
+  const { state, updateState, logout } = useStore();
+  const nav = useNavigate();
+  return <AdminApp state={state} updateState={updateState} onExit={() => { logout(); nav('/admin/login'); }} />;
+}
+
+function OwnerRoute() {
+  const { state, updateState, session, logout } = useStore();
+  const nav = useNavigate();
+  // cart could have been removed while logged in
+  if (!state.carts.some(c => c.id === session.cartId)) { logout(); return <Navigate to="/login" replace />; }
+  return <OwnerApp state={state} updateState={updateState} cartId={session.cartId} onExit={() => { logout(); nav('/login'); }} />;
+}
+
+function StaffRoute() {
+  const { state, updateState, session, logout } = useStore();
+  const nav = useNavigate();
+  if (!state.staff.some(s => s.mobile && s.cartId === session.cartId && s.name === session.name && s.active)) {
+    logout(); return <Navigate to="/login" replace />;
+  }
+  return <StaffApp state={state} updateState={updateState} cartId={session.cartId} staffName={session.name} onExit={() => { logout(); nav('/login'); }} />;
 }
 
 // ═══════════════════════════════════════════════
-// ROLE SELECTOR — Splash Screen
+// LOGIN PAGES (routed) — cart team + platform admin
 // ═══════════════════════════════════════════════
-function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnline }) {
-  const [loginMode, setLoginMode] = useState(null); // 'admin' | 'owner' | 'staff' | null
+function LoginShell({ title, subtitle, children, footer }) {
   return (
-    <div style={{ minHeight: '100vh', background: brand.bg, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
-      {/* Navy header band */}
-      <div style={{ background: brand.navy, padding: '36px 24px 28px' }}>
-        <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', justifyContent: 'center' }}>
-          <CartlyftLogo size={48} variant="light" />
+    <div style={{ minHeight: '100vh', background: brand.bg, fontFamily: 'system-ui, -apple-system, sans-serif', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ background: brand.navy, padding: '28px 24px' }}>
+        <div style={{ maxWidth: 440, margin: '0 auto', display: 'flex', justifyContent: 'center' }}>
+          <CartlyftLogo size={40} variant="light" />
         </div>
       </div>
-
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '28px 24px 40px' }}>
-        <div style={{ textAlign: 'center', marginBottom: 24 }}>
-          <div style={{ fontSize: 20, fontWeight: 800, color: brand.text }}>Welcome back</div>
-          <div style={{ color: brand.muted, fontSize: 13, marginTop: 4 }}>Choose how you're signing in today</div>
-        </div>
-
-        {/* Status indicator */}
-        <button
-          onClick={() => setOnline(!online)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: brand.surface, border: `1px solid ${online ? brand.teal : colors.accent}`, borderRadius: 20, marginBottom: 24, fontSize: 12, color: online ? brand.tealDark : colors.accent, fontWeight: 600, margin: '0 auto 24px', cursor: 'pointer' }}>
-          {online ? <Wifi size={14}/> : <WifiOff size={14}/>}
-          {online ? 'Online · Auto-sync ready' : 'Offline · Saving locally'}
-        </button>
-
-        {/* Role cards */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <RoleCard
-            icon={<Settings size={28} />}
-            title="Cartlyft Admin"
-            subtitle="Platform control"
-            description="Onboard & manage carts, owners, platform reports"
-            color={brand.amber}
-            textColor={brand.navy}
-            onClick={() => setLoginMode('admin')}
-          />
-          <RoleCard
-            icon={<BarChart3 size={28} />}
-            title="Cart Owner"
-            subtitle="Run your cart"
-            description="Dashboard, inventory, staff, reconciliation"
-            color={brand.navy}
-            textColor="#fff"
-            onClick={() => setLoginMode('owner')}
-          />
-          <RoleCard
-            icon={<ChefHat size={28} />}
-            title="Staff (Chef / Helper)"
-            subtitle="Order entry · Stock updates"
-            description="Take orders, mark payments, manage shift"
-            color={brand.teal}
-            textColor="#fff"
-            onClick={() => setLoginMode('staff')}
-          />
-          <RoleCard
-            icon={<Smartphone size={28} />}
-            title="Customer"
-            subtitle="Self-order via QR menu"
-            description="Browse the Momo Wala menu, place order, get token"
-            color={brand.surface}
-            textColor={brand.text}
-            border={`1.5px solid ${brand.border}`}
-            onClick={onCustomer}
-          />
-        </div>
-
-        {loginMode && (
-          <LoginSheet
-            mode={loginMode}
-            state={state}
-            onClose={() => setLoginMode(null)}
-            onSetAdminPw={(hash) => updateState({ platform: { ...state.platform, adminPasswordHash: hash } })}
-            onSetOwnerPw={(cartId, hash) => updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ownerPasswordHash: hash } : c) })}
-            onSuccess={(sess) => { setLoginMode(null); onLogin(sess); }}
-          />
-        )}
-
-        <div style={{ marginTop: 28, padding: 16, border: `1px dashed ${brand.border}`, borderRadius: 12, fontSize: 12, color: brand.muted, lineHeight: 1.6, background: brand.surface }}>
-          <strong style={{ color: brand.text }}>Install on your phone:</strong><br/>
-          Open this page in Chrome → tap ⋮ menu → "Add to Home screen" → behaves like a native app, works offline.
-        </div>
-
-        <div style={{ marginTop: 20, textAlign: 'center', color: brand.muted, fontSize: 11 }}>
-          Cartlyft QSR OS · powering Momo Wala, Ayodhya
+      <div style={{ flex: 1, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '32px 20px' }}>
+        <div style={{ width: '100%', maxWidth: 380 }}>
+          <div style={{ textAlign: 'center', marginBottom: 20 }}>
+            <div style={{ fontSize: 22, fontWeight: 800, color: brand.text }}>{title}</div>
+            {subtitle && <div style={{ color: brand.muted, fontSize: 13, marginTop: 4 }}>{subtitle}</div>}
+          </div>
+          {children}
+          {footer}
         </div>
       </div>
     </div>
   );
 }
 
-function RoleCard({ icon, title, subtitle, description, color, textColor, border, onClick }) {
+function LoginFields({ mobile, setMobile, mobileLocked, pw, setPw, pw2, setPw2, showConfirm, error, busy, onSubmit, cta }) {
+  const inputStyle = { width: '100%', padding: '13px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 12, background: '#fff' };
   return (
-    <button onClick={onClick} style={{ display: 'flex', alignItems: 'center', gap: 16, padding: 20, background: color, color: textColor, border: border || 'none', borderRadius: 16, textAlign: 'left', cursor: 'pointer', width: '100%', transition: 'transform 0.1s' }}
-      onMouseDown={e => e.currentTarget.style.transform = 'scale(0.98)'}
-      onMouseUp={e => e.currentTarget.style.transform = 'scale(1)'}
-      onMouseLeave={e => e.currentTarget.style.transform = 'scale(1)'}>
-      <div style={{ flexShrink: 0 }}>{icon}</div>
-      <div style={{ flex: 1 }}>
-        <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 2 }}>{title}</div>
-        <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 4 }}>{subtitle}</div>
-        <div style={{ fontSize: 12, opacity: 0.65 }}>{description}</div>
-      </div>
-      <ArrowRight size={20} />
-    </button>
+    <div style={{ background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 16, padding: 20 }}>
+      <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>MOBILE NUMBER</div>
+      <input type="tel" inputMode="numeric" value={mobile} disabled={mobileLocked}
+        onChange={e => setMobile && setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
+        placeholder="10-digit number"
+        style={{ ...inputStyle, background: mobileLocked ? '#F5F4F0' : '#fff', fontWeight: 700, letterSpacing: 1 }} />
+      <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>{showConfirm ? 'NEW PASSWORD' : 'PASSWORD'}</div>
+      <input type="password" inputMode="numeric" value={pw} onChange={e => setPw(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && !showConfirm && onSubmit()} placeholder="••••" style={inputStyle} />
+      {showConfirm && (<>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>CONFIRM PASSWORD</div>
+        <input type="password" inputMode="numeric" value={pw2} onChange={e => setPw2(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && onSubmit()} placeholder="••••" style={inputStyle} />
+      </>)}
+      {error && <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}><AlertCircle size={15} /> {error}</div>}
+      <button onClick={onSubmit} disabled={busy} style={{ width: '100%', padding: 15, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 15, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>{cta}</button>
+    </div>
   );
 }
 
-// ─── LOGIN SHEET (admin · owner · staff) ───
-// The cart is derived from the account: an owner's cart is the one whose
-// ownerMobile matches; a staff member's cart is on their record.
-function LoginSheet({ mode, state, onClose, onSetAdminPw, onSetOwnerPw, onSuccess }) {
-  const [mobile, setMobile] = useState(mode === 'admin' ? state.platform.adminMobile : '');
+// One login for the whole cart team — owner and staff. The role is detected
+// from the number: an owner matches a cart's ownerMobile, a staff matches a
+// staff record. Owners with no password yet set one here on first login.
+function TeamLogin() {
+  const { state, updateState, login } = useStore();
+  const nav = useNavigate();
+  const [mobile, setMobile] = useState('');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const adminNeedsSetup = mode === 'admin' && !state.platform.adminPasswordHash;
-  // owner-first-time only applies to a cart whose owner password isn't set yet
-  const ownerCart = mode === 'owner' ? state.carts.find(c => c.ownerMobile === mobile.trim() && c.active) : null;
-  const ownerNeedsSetup = mode === 'owner' && ownerCart && !ownerCart.ownerPasswordHash;
-  const needsSetup = adminNeedsSetup || ownerNeedsSetup;
+  const m = mobile.trim();
+  const ownerCart = state.carts.find(c => c.ownerMobile === m && c.active);
+  const ownerNeedsSetup = ownerCart && !ownerCart.ownerPasswordHash;
 
   const submit = async () => {
     setError('');
-    const m = mobile.trim();
     if (!/^\d{10}$/.test(m)) { setError('Enter a 10-digit mobile number.'); return; }
 
-    const verify = async (hash) => (await hashPassword(pw)) === hash;
-    const doSetup = async (save, session) => {
+    if (ownerCart) {
+      if (ownerNeedsSetup) {
+        if (pw.length < 4) { setError('Choose a password of at least 4 digits.'); return; }
+        if (pw !== pw2) { setError('The two passwords do not match.'); return; }
+        setBusy(true);
+        const hash = await hashPassword(pw);
+        updateState({ carts: state.carts.map(c => c.id === ownerCart.id ? { ...c, ownerPasswordHash: hash } : c) });
+        login({ role: 'owner', cartId: ownerCart.id });
+        nav('/manage'); return;
+      }
+      setBusy(true);
+      const ok = (await hashPassword(pw)) === ownerCart.ownerPasswordHash;
+      setBusy(false);
+      if (!ok) { setError('Wrong password.'); return; }
+      login({ role: 'owner', cartId: ownerCart.id });
+      nav('/manage'); return;
+    }
+
+    const rec = state.staff.find(s => s.mobile === m && s.active);
+    if (!rec) { setError('This number is not registered. Ask your cart owner or the admin.'); return; }
+    if (!rec.passwordHash) { setError('Your password has not been set yet. Ask your owner.'); return; }
+    setBusy(true);
+    const ok = (await hashPassword(pw)) === rec.passwordHash;
+    setBusy(false);
+    if (!ok) { setError('Wrong password.'); return; }
+    login({ role: 'staff', cartId: rec.cartId, name: rec.name });
+    nav('/work');
+  };
+
+  return (
+    <LoginShell
+      title={ownerNeedsSetup ? 'Set your owner password' : 'Cart team login'}
+      subtitle={ownerNeedsSetup ? `First time — set a password for ${m}` : 'Owners and staff sign in here'}
+      footer={
+        <div style={{ marginTop: 22, textAlign: 'center' }}>
+          <Link to="/" style={{ color: brand.tealDark, fontSize: 13, textDecoration: 'none', fontWeight: 600 }}>← Browse carts as a customer</Link>
+          <div style={{ marginTop: 12 }}><Link to="/admin/login" style={{ color: brand.muted, fontSize: 12, textDecoration: 'none' }}>Cartlyft platform admin →</Link></div>
+        </div>
+      }>
+      <LoginFields mobile={mobile} setMobile={setMobile} pw={pw} setPw={setPw} pw2={pw2} setPw2={setPw2}
+        showConfirm={ownerNeedsSetup} error={error} busy={busy} onSubmit={submit}
+        cta={ownerNeedsSetup ? 'Set Password & Enter' : 'Login'} />
+    </LoginShell>
+  );
+}
+
+function AdminLogin() {
+  const { state, updateState, login } = useStore();
+  const nav = useNavigate();
+  const [pw, setPw] = useState('');
+  const [pw2, setPw2] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const adminMobile = state.platform.adminMobile;
+  const needsSetup = !state.platform.adminPasswordHash;
+
+  const submit = async () => {
+    setError('');
+    if (needsSetup) {
       if (pw.length < 4) { setError('Choose a password of at least 4 digits.'); return; }
       if (pw !== pw2) { setError('The two passwords do not match.'); return; }
       setBusy(true);
-      save(await hashPassword(pw));
-      onSuccess(session);
-    };
-
-    if (mode === 'admin') {
-      if (m !== state.platform.adminMobile) { setError('That is not the Cartlyft admin number.'); return; }
-      if (adminNeedsSetup) return doSetup(onSetAdminPw, { role: 'admin' });
-      setBusy(true); const ok = await verify(state.platform.adminPasswordHash); setBusy(false);
-      if (!ok) { setError('Wrong password.'); return; }
-      onSuccess({ role: 'admin' });
-      return;
+      const hash = await hashPassword(pw);
+      updateState({ platform: { ...state.platform, adminPasswordHash: hash } });
+      login({ role: 'admin' }); nav('/admin'); return;
     }
-
-    if (mode === 'owner') {
-      const cart = state.carts.find(c => c.ownerMobile === m && c.active);
-      if (!cart) { setError('This number is not a registered cart owner. Ask the Cartlyft admin.'); return; }
-      if (!cart.ownerPasswordHash) return doSetup((h) => onSetOwnerPw(cart.id, h), { role: 'owner', cartId: cart.id });
-      setBusy(true); const ok = await verify(cart.ownerPasswordHash); setBusy(false);
-      if (!ok) { setError('Wrong password.'); return; }
-      onSuccess({ role: 'owner', cartId: cart.id });
-      return;
-    }
-
-    // staff
-    const rec = state.staff.find(s => s.mobile === m && s.active);
-    if (!rec) { setError('This number is not registered. Ask your cart owner to add you.'); return; }
-    if (!rec.passwordHash) { setError('Your password has not been set yet. Ask your owner.'); return; }
-    setBusy(true); const ok = await verify(rec.passwordHash); setBusy(false);
+    setBusy(true);
+    const ok = (await hashPassword(pw)) === state.platform.adminPasswordHash;
+    setBusy(false);
     if (!ok) { setError('Wrong password.'); return; }
-    onSuccess({ role: 'staff', cartId: rec.cartId, name: rec.name });
+    login({ role: 'admin' }); nav('/admin');
   };
 
-  const title = mode === 'admin' ? (adminNeedsSetup ? 'Set Admin Password' : 'Cartlyft Admin')
-    : mode === 'owner' ? (ownerNeedsSetup ? 'Set Owner Password' : 'Cart Owner Login')
-    : 'Staff Login';
-  const mobileLocked = mode === 'admin';
-  const inputStyle = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 10 };
-
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 380, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-          <CartlyftMark size={44} />
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 4 }}>
-          <Lock size={18} color={brand.navy} />
-          <div style={{ fontSize: 20, fontWeight: 800, color: brand.navy }}>{title}</div>
-        </div>
-        {needsSetup
-          ? <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16, textAlign: 'center' }}>First time here — set a password for {mobile}. You'll use it every time after this.</div>
-          : <div style={{ height: 12 }} />}
-
-        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>MOBILE NUMBER</div>
-        <input
-          type="tel" inputMode="numeric" value={mobile} placeholder="10-digit number"
-          disabled={mobileLocked}
-          onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
-          style={{ ...inputStyle, background: mobileLocked ? '#F5F4F0' : '#fff', fontWeight: 700, letterSpacing: 1 }} />
-
-        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>{needsSetup ? 'NEW PASSWORD' : 'PASSWORD'}</div>
-        <input type="password" inputMode="numeric" value={pw} placeholder="••••"
-          onChange={e => setPw(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !needsSetup && submit()}
-          style={inputStyle} />
-
-        {needsSetup && (
-          <>
-            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>CONFIRM PASSWORD</div>
-            <input type="password" inputMode="numeric" value={pw2} placeholder="••••"
-              onChange={e => setPw2(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && submit()}
-              style={inputStyle} />
-          </>
-        )}
-
-        {error && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>
-            <AlertCircle size={15} /> {error}
-          </div>
-        )}
-
-        <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
-          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
-          <button onClick={submit} disabled={busy} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>
-            {needsSetup ? 'Set Password & Enter' : 'Login'}
-          </button>
-        </div>
-      </div>
-    </div>
+    <LoginShell
+      title={needsSetup ? 'Set admin password' : 'Cartlyft admin'}
+      subtitle={`Platform super-admin · ${adminMobile}`}
+      footer={<div style={{ marginTop: 22, textAlign: 'center' }}><Link to="/login" style={{ color: brand.muted, fontSize: 13, textDecoration: 'none' }}>← Cart team login</Link></div>}>
+      <LoginFields mobile={adminMobile} mobileLocked pw={pw} setPw={setPw} pw2={pw2} setPw2={setPw2}
+        showConfirm={needsSetup} error={error} busy={busy} onSubmit={submit}
+        cta={needsSetup ? 'Set Password & Enter' : 'Login'} />
+    </LoginShell>
   );
 }
 
@@ -538,7 +530,7 @@ function AdminCarts({ state, updateState }) {
     const cart = {
       id, name: form.name.trim(), tagline: form.tagline.trim(), cuisine: form.cuisine.trim(),
       location: form.location.trim(), timing: form.timing.trim(), emoji: form.emoji || '🛒',
-      accent: form.accent || brand.teal, ownerMobile: form.ownerMobile,
+      accent: form.accent || brand.teal, ownerName: form.ownerName.trim(), ownerMobile: form.ownerMobile,
       ownerPasswordHash, active: true, createdAt: TODAY,
     };
     updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInventory() } });
@@ -580,7 +572,8 @@ function AdminCarts({ state, updateState }) {
               <div style={{ flexShrink: 0, width: 46, height: 46, borderRadius: 12, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, border: `2px solid ${c.accent}` }}>{c.emoji}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 800, fontSize: 16 }}>{c.name} {!c.active && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>· disabled</span>}</div>
-                <div style={{ fontSize: 12, color: colors.muted }}>{c.location} · owner {c.ownerMobile}</div>
+                <div style={{ fontSize: 12, color: colors.muted }}>{c.location}</div>
+                <div style={{ fontSize: 12, color: colors.muted }}>Owner: {c.ownerName ? `${c.ownerName} · ` : ''}{c.ownerMobile}</div>
                 <div style={{ fontSize: 11, color: c.ownerPasswordHash ? colors.green : colors.accent, fontWeight: 600, marginTop: 2 }}>{c.ownerPasswordHash ? 'Owner password set' : 'Owner sets password on first login'}</div>
               </div>
             </div>
@@ -599,7 +592,7 @@ function AdminCarts({ state, updateState }) {
 const adminBtn = { background: '#fff', border: `1px solid ${colors.border}`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', color: brand.text };
 
 function AddCartModal({ onAdd, onClose }) {
-  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', accent: brand.teal, ownerMobile: '', ownerPassword: '' });
+  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', accent: brand.teal, ownerName: '', ownerMobile: '', ownerPassword: '' });
   const [error, setError] = useState('');
   const set = (k) => (e) => setF(prev => ({ ...prev, [k]: e.target.value }));
 
@@ -607,6 +600,7 @@ function AddCartModal({ onAdd, onClose }) {
     setError('');
     if (!f.name.trim()) { setError('Enter a cart name.'); return; }
     if (!f.cuisine.trim()) { setError('Describe the food served.'); return; }
+    if (!f.ownerName.trim()) { setError('Enter the owner\'s name.'); return; }
     if (!/^\d{10}$/.test(f.ownerMobile)) { setError('Enter the owner\'s 10-digit mobile number.'); return; }
     if (f.ownerPassword && f.ownerPassword.length < 4) { setError('Owner password must be at least 4 characters (or leave blank for owner to set).'); return; }
     onAdd(f);
@@ -639,10 +633,17 @@ function AddCartModal({ onAdd, onClose }) {
         <input value={f.location} onChange={set('location')} placeholder="Area, city" style={inputStyle} />
         <div style={label}>TIMING</div>
         <input value={f.timing} onChange={set('timing')} style={inputStyle} />
-        <div style={label}>OWNER MOBILE</div>
-        <input type="tel" inputMode="numeric" value={f.ownerMobile} onChange={e => setF(p => ({ ...p, ownerMobile: e.target.value.replace(/\D/g, '').slice(0, 10) }))} placeholder="10-digit number" style={{ ...inputStyle, fontWeight: 700, letterSpacing: 1 }} />
-        <div style={label}>OWNER PASSWORD (optional — owner can set on first login)</div>
-        <input type="text" value={f.ownerPassword} onChange={set('ownerPassword')} placeholder="min 4 characters, or leave blank" style={inputStyle} />
+
+        <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 14px', paddingTop: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: brand.navy, marginBottom: 2 }}>Cart owner</div>
+          <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 12 }}>This person logs in at the cart team page and runs the cart.</div>
+          <div style={label}>OWNER NAME</div>
+          <input value={f.ownerName} onChange={set('ownerName')} placeholder="e.g. Ramesh Kumar" style={inputStyle} />
+          <div style={label}>OWNER MOBILE</div>
+          <input type="tel" inputMode="numeric" value={f.ownerMobile} onChange={e => setF(p => ({ ...p, ownerMobile: e.target.value.replace(/\D/g, '').slice(0, 10) }))} placeholder="10-digit number" style={{ ...inputStyle, fontWeight: 700, letterSpacing: 1 }} />
+          <div style={label}>OWNER PASSWORD (optional — owner can set on first login)</div>
+          <input type="text" value={f.ownerPassword} onChange={set('ownerPassword')} placeholder="min 4 characters, or leave blank" style={inputStyle} />
+        </div>
 
         {error && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
@@ -1690,13 +1691,13 @@ const MAX_ADDON_ITEMS = 2;
 // ─── QSR CARTS (tenants on the Cartlyft platform) ───
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
-function CartListing({ carts, onSelect, onExit }) {
+function CartListing({ carts, onSelect }) {
   return (
     <div style={{ minHeight: '100vh', background: brand.bg, fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ background: brand.navy, padding: '22px 20px' }}>
         <div style={{ maxWidth: 600, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <CartlyftLogo size={34} variant="light" tagline={false} />
-          <button onClick={onExit} style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer' }}>← Back</button>
+          <Link to="/login" style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.4)', color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', textDecoration: 'none' }}>Cart team login</Link>
         </div>
       </div>
 
@@ -1734,14 +1735,17 @@ function CartListing({ carts, onSelect, onExit }) {
           </div>
         </div>
 
-        <div style={{ marginTop: 24, textAlign: 'center', color: brand.muted, fontSize: 11 }}>Powered by Cartlyft QSR OS</div>
+        <div style={{ marginTop: 24, textAlign: 'center', fontSize: 11 }}>
+          <Link to="/admin/login" style={{ color: brand.muted, textDecoration: 'none' }}>Powered by Cartlyft QSR OS</Link>
+        </div>
       </div>
     </div>
   );
 }
 
-function CustomerApp({ state, updateState, onExit }) {
-  const [venue, setVenue] = useState(null);
+// One cart's customer menu + ordering flow. The cart (`venue`) comes from
+// the /c/:cartId route; onBack/onDone navigate back to the marketplace.
+function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const [cart, setCart] = useState([]);
   const [step, setStep] = useState('menu'); // menu | confirm | success
   const [orderToken, setOrderToken] = useState('');
@@ -1810,9 +1814,6 @@ function CustomerApp({ state, updateState, onExit }) {
 
   const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
 
-  // Customer first picks a cart from the marketplace listing.
-  if (!venue) return <CartListing carts={state.carts.filter(c => c.active)} onSelect={(v) => { setVenue(v); setStep('menu'); }} onExit={onExit} />;
-
   if (step === 'confirm') {
     return (
       <div style={{ minHeight: '100vh', background: colors.paper, fontFamily: 'system-ui, sans-serif', padding: 20 }}>
@@ -1866,7 +1867,7 @@ function CustomerApp({ state, updateState, onExit }) {
             <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>UPI:</div>
             <div style={{ fontSize: 18, fontWeight: 700 }}>momowala@upi</div>
           </div>
-          <button onClick={() => { setStep('menu'); setVenue(null); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
+          <button onClick={() => { setStep('menu'); onDone(); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
         </div>
       </div>
     );
@@ -1877,18 +1878,22 @@ function CustomerApp({ state, updateState, onExit }) {
       {/* Customer header — printed-menu style */}
       <div style={{ background: colors.ink, padding: '16px 20px 22px' }}>
         <div style={{ maxWidth: 700, margin: '0 auto' }}>
-          <button onClick={() => { setVenue(null); setCart([]); }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 13, cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}>← All carts</button>
+          <button onClick={() => { setCart([]); onBack(); }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 13, cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}>← All carts</button>
         </div>
         <div style={{ maxWidth: 700, margin: '0 auto', textAlign: 'center' }}>
-          <div style={{ color: colors.primary, fontWeight: 900, fontSize: 32, letterSpacing: 3, lineHeight: 1 }}>MOMO WALA</div>
-          <div style={{ color: '#fff', fontSize: 16, marginTop: 6, fontWeight: 600 }}>मोमो वाला</div>
-          <div style={{ color: colors.primary, fontSize: 10, letterSpacing: 2.5, marginTop: 8, fontWeight: 700 }}>PURE DELIGHT ON EVERY PLATE</div>
-          <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
-            {['🌱 100% Pure Veg', '🙏 Jain Friendly', '🛕 रामभक्त स्पेशल'].map(b => (
-              <span key={b} style={{ border: '1px solid rgba(255,214,10,0.5)', color: colors.primary, fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 12 }}>{b}</span>
-            ))}
-          </div>
-          <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 10 }}>Saketpuri, Ayodhya · Order in 30 seconds</div>
+          <div style={{ color: venue.accent, fontWeight: 900, fontSize: 32, letterSpacing: 3, lineHeight: 1, textTransform: 'uppercase' }}>{venue.name}</div>
+          {venue.tagline && <div style={{ color: '#fff', fontSize: 16, marginTop: 6, fontWeight: 600 }}>{venue.tagline}</div>}
+          {venue.id === 'momowala' && (
+            <>
+              <div style={{ color: venue.accent, fontSize: 10, letterSpacing: 2.5, marginTop: 8, fontWeight: 700 }}>PURE DELIGHT ON EVERY PLATE</div>
+              <div style={{ display: 'flex', gap: 6, justifyContent: 'center', marginTop: 12, flexWrap: 'wrap' }}>
+                {['🌱 100% Pure Veg', '🙏 Jain Friendly', '🛕 रामभक्त स्पेशल'].map(b => (
+                  <span key={b} style={{ border: '1px solid rgba(255,214,10,0.5)', color: venue.accent, fontSize: 10, fontWeight: 700, padding: '4px 9px', borderRadius: 12 }}>{b}</span>
+                ))}
+              </div>
+            </>
+          )}
+          <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, marginTop: 10 }}>{venue.location} · Order in 30 seconds</div>
         </div>
       </div>
 

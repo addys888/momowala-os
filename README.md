@@ -9,6 +9,21 @@
 
 Built with Vite + React. Data is saved to browser localStorage instantly (works offline) and synced to Supabase when configured. Hosted on Vercel.
 
+### URLs & journeys
+
+The app uses real routes (React Router), so every screen is bookmarkable and a cart's QR code can point straight at its menu.
+
+| URL | Who | What |
+| --- | --- | --- |
+| `/` | public | Cart marketplace — lists active carts |
+| `/c/:cartId` | public | A cart's menu + ordering (QR-code target, e.g. `/c/momowala`) |
+| `/login` | owner + staff | **One login** — role auto-detected from the number; owner → `/manage`, staff → `/work` |
+| `/manage` | owner | Owner console (dashboard, stock, reconcile, staff, reports) — guarded |
+| `/work` | staff | Staff workplace (orders, pending, shift) — guarded |
+| `/admin/login` → `/admin` | platform admin | Onboard & manage carts, per-cart reports — guarded |
+
+Sessions persist across refresh; guarded routes bounce to the right login when there's no matching session. The customer marketplace links to the team login (header) and admin (footer).
+
 ### Tenancy & accounts
 
 - **Every operational record is tagged with a `cartId`** — orders, inventory, stock logs, cart loadings, day-close reports, and staff. Owners and staff only ever see their own cart's data.
