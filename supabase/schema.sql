@@ -82,15 +82,39 @@ create table if not exists inventory (
   updated_at timestamptz not null default now()
 );
 
--- Owner + staff accounts. The owner row is seeded by the app; staff are
--- added by the owner. Passwords are stored as SHA-256 hashes, never plain.
+-- Staff accounts, each tied to one cart. Registered by that cart's owner.
+-- Passwords are stored as SHA-256 hashes, never plain.
 create table if not exists staff (
   id bigint primary key,
+  cart_id text,
   name text not null,
   mobile text not null unique,
   password_hash text,
-  role text not null default 'staff' check (role in ('owner', 'staff')),
   active boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+
+-- QSR carts (tenants). Onboarded by the Cartlyft platform admin.
+create table if not exists carts (
+  id text primary key,
+  name text not null,
+  tagline text,
+  cuisine text,
+  location text,
+  timing text,
+  emoji text,
+  accent text,
+  owner_mobile text,
+  owner_password_hash text,
+  active boolean not null default true,
+  created_at text
+);
+
+-- Single-row platform admin account (Cartlyft super-admin).
+create table if not exists platform (
+  id integer primary key check (id = 1),
+  admin_mobile text,
+  admin_password_hash text,
   updated_at timestamptz not null default now()
 );
 
@@ -105,21 +129,19 @@ alter table cart_loadings enable row level security;
 alter table day_close_logs enable row level security;
 alter table inventory enable row level security;
 alter table staff enable row level security;
+alter table carts enable row level security;
+alter table platform enable row level security;
 
 -- drop-then-create so the whole file is safe to re-run
-drop policy if exists "anon full access" on orders;
-drop policy if exists "anon full access" on stock_logs;
-drop policy if exists "anon full access" on cart_loadings;
-drop policy if exists "anon full access" on day_close_logs;
-drop policy if exists "anon full access" on inventory;
-drop policy if exists "anon full access" on staff;
-
-create policy "anon full access" on orders for all to anon using (true) with check (true);
-create policy "anon full access" on stock_logs for all to anon using (true) with check (true);
-create policy "anon full access" on cart_loadings for all to anon using (true) with check (true);
-create policy "anon full access" on day_close_logs for all to anon using (true) with check (true);
-create policy "anon full access" on inventory for all to anon using (true) with check (true);
-create policy "anon full access" on staff for all to anon using (true) with check (true);
+do $$
+declare t text;
+begin
+  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform']
+  loop
+    execute format('drop policy if exists "anon full access" on %I', t);
+    execute format('create policy "anon full access" on %I for all to anon using (true) with check (true)', t);
+  end loop;
+end $$;
 
 -- ── Migration: corn cheese stock ──
 -- Safe to run on databases created before corn cheese was added.
@@ -136,3 +158,21 @@ alter table orders add constraint orders_payment_check check (payment in ('cash'
 -- ── Migration: multi-cart (which QSR cart an order belongs to) ──
 alter table orders add column if not exists outlet text;
 alter table orders add column if not exists outlet_name text;
+
+-- ── Migration: multi-tenant cart_id on every per-cart table ──
+-- Tags existing single-tenant rows with the seed momowala cart.
+alter table orders add column if not exists cart_id text;
+alter table stock_logs add column if not exists cart_id text;
+alter table cart_loadings add column if not exists cart_id text;
+alter table day_close_logs add column if not exists cart_id text;
+alter table staff add column if not exists cart_id text;
+update orders        set cart_id = 'momowala' where cart_id is null;
+update stock_logs    set cart_id = 'momowala' where cart_id is null;
+update cart_loadings set cart_id = 'momowala' where cart_id is null;
+update day_close_logs set cart_id = 'momowala' where cart_id is null;
+update staff         set cart_id = 'momowala' where cart_id is null;
+
+-- staff.role is no longer used (role is implied by table); keep the column
+-- nullable so old inserts don't break, but drop the NOT NULL + check.
+alter table staff alter column role drop not null;
+alter table staff drop constraint if exists staff_role_check;

@@ -1,19 +1,24 @@
 # Momo Wala OS
 
-Cart management app for Momowala (Saketpuri Yojna, Ayodhya). Three roles in one app:
+**Cartlyft** is a multi-tenant QSR Operating System. One platform runs many food carts; **Momo Wala** (Saketpuri Yojna, Ayodhya) is the first cart on it. Four roles, three tiers:
 
-- **Owner** (mobile `9452661608`) — sets own password on first login; dashboard, inventory, **staff registry**, end-of-day reconciliation, 7-day reports
-- **Staff** — log in with mobile + password; order entry (cash/UPI), settle pending QR orders, shift summary. Only staff the owner has registered can log in.
-- **Customer** — QR self-order menu → review → token number. Orders start **pending**; stock and revenue update only after staff marks them paid at the cart.
+- **Cartlyft Admin** (mobile `9452661608`) — the platform super-admin. Onboards QSR carts, assigns each cart's owner, resets owner passwords, enables/disables/removes carts, and sees per-cart reports across the whole platform.
+- **Cart Owner** (one per cart) — runs a single cart: dashboard, inventory, **staff registry**, end-of-day reconciliation, 7-day reports — all scoped to that cart only.
+- **Staff** — belong to one cart; log in with mobile + password and can only access their own cart's workplace. Order entry (cash/UPI), settle pending QR orders, shift summary.
+- **Customer** — picks a cart from the marketplace listing, then self-orders → review → token. Orders start **pending**; stock and revenue update only after staff marks them paid.
 
 Built with Vite + React. Data is saved to browser localStorage instantly (works offline) and synced to Supabase when configured. Hosted on Vercel.
 
-### Accounts & login
+### Tenancy & accounts
 
-- The owner number is fixed (`9452661608`). On first login the app asks the owner to **set a password**; afterwards that password is required each time.
-- The owner registers staff in the **Staff** tab (name, mobile, password). Staff then log in with their mobile number and that password.
-- An unregistered number cannot log in — it shows "this number is not registered".
+- **Every operational record is tagged with a `cartId`** — orders, inventory, stock logs, cart loadings, day-close reports, and staff. Owners and staff only ever see their own cart's data.
+- The login screen has four entry points. The **cart is derived from the account**: a cart owner is whoever matches a cart's `ownerMobile`; a staff member's cart is on their record. No cart-picker needed.
+- The Cartlyft admin number is fixed (`9452661608`, see `PLATFORM_ADMIN_MOBILE`). The admin sets a password on first login.
+- When the admin onboards a cart, they assign the owner's mobile (and optionally an initial password — otherwise the owner sets it on first login). The owner then registers their own staff.
+- An unregistered number cannot log in anywhere — it shows "not registered".
 - Passwords are stored as SHA-256 hashes (never plain text), locally and in Supabase.
+
+> **Note on shared menu:** all carts currently share the Momo Wala menu/recipe data (`MENU_ITEMS`). Per-cart menus are the next step when a second cart goes live for real.
 
 ## Local development
 

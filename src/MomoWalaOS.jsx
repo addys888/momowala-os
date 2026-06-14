@@ -123,12 +123,29 @@ const ADDONS = [
   { id: 'a4', name: 'Extra Ketchup', price: 0 },
 ];
 
-// ─── ACCOUNTS ───
-// The owner account is fixed; staff are registered by the owner in the
-// Staff tab. Passwords are stored as SHA-256 hashes, never as plain text.
-const OWNER_MOBILE = '9452661608';
-const DEFAULT_STAFF = [
-  { id: 1, name: 'Owner', mobile: OWNER_MOBILE, passwordHash: null, role: 'owner', active: true },
+// ─── ACCOUNTS & TENANCY ───
+// Three tiers: Cartlyft platform admin → cart owner (one per cart) → staff
+// (belong to one cart). Passwords are stored as SHA-256 hashes, never plain.
+// The platform admin number is the single configurable super-account.
+const PLATFORM_ADMIN_MOBILE = '9452661608';
+
+// Seed cart so the existing Momo Wala data has a home. New carts are
+// onboarded by the admin at runtime; this is just the starting tenant.
+const SEED_CARTS = [
+  {
+    id: 'momowala',
+    name: 'Momo Wala',
+    tagline: 'मोमो वाला',
+    cuisine: 'Steamed, Kurkure, Afghani & Tandoori momos · 100% pure veg',
+    location: 'Saketpuri Yojna, Ayodhya',
+    timing: 'Daily 4 PM – 11 PM',
+    emoji: '🥟',
+    accent: '#FFD60A',
+    ownerMobile: '9452661608',
+    ownerPasswordHash: null,
+    active: true,
+    createdAt: '2026-06-01',
+  },
 ];
 
 const PAY_BADGE = {
@@ -168,21 +185,54 @@ const DEFAULT_INVENTORY = {
   },
 };
 
+const freshInventory = () => JSON.parse(JSON.stringify(DEFAULT_INVENTORY));
+
 const getInitialState = () => {
-  const inventory = storage.get('inventory', DEFAULT_INVENTORY);
-  // saved data from before corn cheese was added lacks this key
-  if (!inventory.corn) inventory.corn = { ...DEFAULT_INVENTORY.corn };
-  const staff = storage.get('staff', DEFAULT_STAFF);
-  // make sure the owner account always exists
-  if (!staff.some(s => s.role === 'owner')) staff.unshift(...DEFAULT_STAFF);
+  // Legacy single-tenant keys (pre multi-cart) — read only, for migration.
+  const legacyStaff = storage.get('staff', null);
+  const legacyInv = storage.get('inventory', null);
+
+  // ── carts ──
+  let carts = storage.get('carts', null);
+  if (!carts) {
+    const ownerRec = Array.isArray(legacyStaff) ? legacyStaff.find(s => s.role === 'owner') : null;
+    carts = SEED_CARTS.map(c => ({ ...c, ownerPasswordHash: ownerRec?.passwordHash ?? c.ownerPasswordHash }));
+  }
+
+  // ── inventory, keyed by cartId ──
+  let inventory = storage.get('inventoryByCart', null);
+  if (!inventory) {
+    const base = (legacyInv && legacyInv.veg) ? legacyInv : freshInventory();
+    if (!base.corn) base.corn = { ...DEFAULT_INVENTORY.corn };
+    inventory = { momowala: base };
+  }
+  carts.forEach(c => { if (!inventory[c.id]) inventory[c.id] = freshInventory(); });
+
+  // ── staff, each tied to a cartId ──
+  let staff = storage.get('staffV2', null);
+  if (!staff) {
+    staff = Array.isArray(legacyStaff)
+      ? legacyStaff.filter(s => s.role === 'staff').map(s => ({
+          id: s.id, cartId: 'momowala', name: s.name, mobile: s.mobile,
+          passwordHash: s.passwordHash, active: s.active,
+        }))
+      : [];
+  }
+
+  const platform = storage.get('platform', { adminMobile: PLATFORM_ADMIN_MOBILE, adminPasswordHash: null });
+
+  // tag any legacy event rows with the momowala cart
+  const tag = (arr) => (arr || []).map(x => x.cartId ? x : { ...x, cartId: 'momowala' });
+
   return {
+    platform,
+    carts,
     inventory,
     staff,
-    orders: storage.get('orders', []),
-    stockLogs: storage.get('stockLogs', []),
-    cartLoadings: storage.get('cartLoadings', []),
-    dayCloseLogs: storage.get('dayCloseLogs', []),
-    currentShift: storage.get('currentShift', null),
+    orders: tag(storage.get('orders', [])),
+    stockLogs: tag(storage.get('stockLogs', [])),
+    cartLoadings: tag(storage.get('cartLoadings', [])),
+    dayCloseLogs: tag(storage.get('dayCloseLogs', [])),
     staffOnDuty: storage.get('staffOnDuty', null),
   };
 };
@@ -191,7 +241,8 @@ const getInitialState = () => {
 // MAIN APP
 // ═══════════════════════════════════════════════
 export default function MomoWalaOS() {
-  const [role, setRole] = useState(null);
+  // session: null | { role: 'admin'|'owner'|'staff'|'customer', cartId?, name? }
+  const [session, setSession] = useState(null);
   const [state, setState] = useState(getInitialState());
   const [online, setOnline] = useState(true);
 
@@ -203,41 +254,35 @@ export default function MomoWalaOS() {
   }, []);
 
   useEffect(() => {
-    storage.set('inventory', state.inventory);
-    storage.set('staff', state.staff);
+    storage.set('platform', state.platform);
+    storage.set('carts', state.carts);
+    storage.set('inventoryByCart', state.inventory);
+    storage.set('staffV2', state.staff);
     storage.set('orders', state.orders);
     storage.set('stockLogs', state.stockLogs);
     storage.set('cartLoadings', state.cartLoadings);
     storage.set('dayCloseLogs', state.dayCloseLogs);
-    storage.set('currentShift', state.currentShift);
     storage.set('staffOnDuty', state.staffOnDuty);
     syncToCloud(state);
   }, [state]);
 
   const updateState = (updates) => setState(prev => ({ ...prev, ...updates }));
+  const exit = () => setSession(null);
 
-  const handleLogin = (rec) => {
-    if (rec.role === 'owner') {
-      setRole('owner');
-    } else {
-      updateState({ staffOnDuty: rec.name });
-      setRole('staff');
-    }
-  };
+  if (!session) return <RoleSelector state={state} updateState={updateState} onLogin={setSession} onCustomer={() => setSession({ role: 'customer' })} online={online} setOnline={setOnline} />;
 
-  if (!role) return <RoleSelector state={state} updateState={updateState} onLogin={handleLogin} onCustomer={() => setRole('customer')} online={online} setOnline={setOnline} />;
-
-  const props = { state, updateState, setRole, online };
-  if (role === 'owner') return <OwnerApp {...props} />;
-  if (role === 'staff') return <StaffApp {...props} />;
-  if (role === 'customer') return <CustomerApp {...props} />;
+  const props = { state, updateState, onExit: exit };
+  if (session.role === 'admin') return <AdminApp {...props} />;
+  if (session.role === 'owner') return <OwnerApp {...props} cartId={session.cartId} />;
+  if (session.role === 'staff') return <StaffApp {...props} cartId={session.cartId} staffName={session.name} />;
+  if (session.role === 'customer') return <CustomerApp {...props} />;
 }
 
 // ═══════════════════════════════════════════════
 // ROLE SELECTOR — Splash Screen
 // ═══════════════════════════════════════════════
 function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnline }) {
-  const [loginMode, setLoginMode] = useState(null); // 'owner' | 'staff' | null
+  const [loginMode, setLoginMode] = useState(null); // 'admin' | 'owner' | 'staff' | null
   return (
     <div style={{ minHeight: '100vh', background: brand.bg, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
       {/* Navy header band */}
@@ -264,10 +309,19 @@ function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnli
         {/* Role cards */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <RoleCard
+            icon={<Settings size={28} />}
+            title="Cartlyft Admin"
+            subtitle="Platform control"
+            description="Onboard & manage carts, owners, platform reports"
+            color={brand.amber}
+            textColor={brand.navy}
+            onClick={() => setLoginMode('admin')}
+          />
+          <RoleCard
             icon={<BarChart3 size={28} />}
-            title="Owner"
-            subtitle="Full control · Reports · Reconciliation"
-            description="Dashboard, inventory, staff, audit logs"
+            title="Cart Owner"
+            subtitle="Run your cart"
+            description="Dashboard, inventory, staff, reconciliation"
             color={brand.navy}
             textColor="#fff"
             onClick={() => setLoginMode('owner')}
@@ -296,10 +350,11 @@ function RoleSelector({ state, updateState, onLogin, onCustomer, online, setOnli
         {loginMode && (
           <LoginSheet
             mode={loginMode}
-            staffList={state.staff}
+            state={state}
             onClose={() => setLoginMode(null)}
-            onSavePassword={(id, hash) => updateState({ staff: state.staff.map(s => s.id === id ? { ...s, passwordHash: hash } : s) })}
-            onSuccess={(rec) => { setLoginMode(null); onLogin(rec); }}
+            onSetAdminPw={(hash) => updateState({ platform: { ...state.platform, adminPasswordHash: hash } })}
+            onSetOwnerPw={(cartId, hash) => updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ownerPasswordHash: hash } : c) })}
+            onSuccess={(sess) => { setLoginMode(null); onLogin(sess); }}
           />
         )}
 
@@ -333,53 +388,68 @@ function RoleCard({ icon, title, subtitle, description, color, textColor, border
   );
 }
 
-// ─── LOGIN SHEET (owner + staff) ───
-function LoginSheet({ mode, staffList, onClose, onSavePassword, onSuccess }) {
-  const [mobile, setMobile] = useState(mode === 'owner' ? OWNER_MOBILE : '');
+// ─── LOGIN SHEET (admin · owner · staff) ───
+// The cart is derived from the account: an owner's cart is the one whose
+// ownerMobile matches; a staff member's cart is on their record.
+function LoginSheet({ mode, state, onClose, onSetAdminPw, onSetOwnerPw, onSuccess }) {
+  const [mobile, setMobile] = useState(mode === 'admin' ? state.platform.adminMobile : '');
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const ownerRec = staffList.find(s => s.role === 'owner');
-  const ownerNeedsSetup = mode === 'owner' && !ownerRec?.passwordHash;
+  const adminNeedsSetup = mode === 'admin' && !state.platform.adminPasswordHash;
+  // owner-first-time only applies to a cart whose owner password isn't set yet
+  const ownerCart = mode === 'owner' ? state.carts.find(c => c.ownerMobile === mobile.trim() && c.active) : null;
+  const ownerNeedsSetup = mode === 'owner' && ownerCart && !ownerCart.ownerPasswordHash;
+  const needsSetup = adminNeedsSetup || ownerNeedsSetup;
 
   const submit = async () => {
     setError('');
     const m = mobile.trim();
+    if (!/^\d{10}$/.test(m)) { setError('Enter a 10-digit mobile number.'); return; }
 
-    if (mode === 'owner') {
-      if (m !== OWNER_MOBILE) { setError('That is not the owner number.'); return; }
-      if (ownerNeedsSetup) {
-        if (pw.length < 4) { setError('Choose a password of at least 4 digits.'); return; }
-        if (pw !== pw2) { setError('The two passwords do not match.'); return; }
-        setBusy(true);
-        const hash = await hashPassword(pw);
-        onSavePassword(ownerRec.id, hash);
-        onSuccess(ownerRec);
-        return;
-      }
+    const verify = async (hash) => (await hashPassword(pw)) === hash;
+    const doSetup = async (save, session) => {
+      if (pw.length < 4) { setError('Choose a password of at least 4 digits.'); return; }
+      if (pw !== pw2) { setError('The two passwords do not match.'); return; }
       setBusy(true);
-      const hash = await hashPassword(pw);
-      setBusy(false);
-      if (hash !== ownerRec.passwordHash) { setError('Wrong password.'); return; }
-      onSuccess(ownerRec);
+      save(await hashPassword(pw));
+      onSuccess(session);
+    };
+
+    if (mode === 'admin') {
+      if (m !== state.platform.adminMobile) { setError('That is not the Cartlyft admin number.'); return; }
+      if (adminNeedsSetup) return doSetup(onSetAdminPw, { role: 'admin' });
+      setBusy(true); const ok = await verify(state.platform.adminPasswordHash); setBusy(false);
+      if (!ok) { setError('Wrong password.'); return; }
+      onSuccess({ role: 'admin' });
       return;
     }
 
-    // staff login
-    if (!/^\d{10}$/.test(m)) { setError('Enter a 10-digit mobile number.'); return; }
-    const rec = staffList.find(s => s.role === 'staff' && s.mobile === m && s.active);
-    if (!rec) { setError('This number is not registered. Ask the owner to add you first.'); return; }
-    if (!rec.passwordHash) { setError('Your password has not been set yet. Ask the owner.'); return; }
-    setBusy(true);
-    const hash = await hashPassword(pw);
-    setBusy(false);
-    if (hash !== rec.passwordHash) { setError('Wrong password.'); return; }
-    onSuccess(rec);
+    if (mode === 'owner') {
+      const cart = state.carts.find(c => c.ownerMobile === m && c.active);
+      if (!cart) { setError('This number is not a registered cart owner. Ask the Cartlyft admin.'); return; }
+      if (!cart.ownerPasswordHash) return doSetup((h) => onSetOwnerPw(cart.id, h), { role: 'owner', cartId: cart.id });
+      setBusy(true); const ok = await verify(cart.ownerPasswordHash); setBusy(false);
+      if (!ok) { setError('Wrong password.'); return; }
+      onSuccess({ role: 'owner', cartId: cart.id });
+      return;
+    }
+
+    // staff
+    const rec = state.staff.find(s => s.mobile === m && s.active);
+    if (!rec) { setError('This number is not registered. Ask your cart owner to add you.'); return; }
+    if (!rec.passwordHash) { setError('Your password has not been set yet. Ask your owner.'); return; }
+    setBusy(true); const ok = await verify(rec.passwordHash); setBusy(false);
+    if (!ok) { setError('Wrong password.'); return; }
+    onSuccess({ role: 'staff', cartId: rec.cartId, name: rec.name });
   };
 
-  const title = mode === 'owner' ? (ownerNeedsSetup ? 'Set Owner Password' : 'Owner Login') : 'Staff Login';
+  const title = mode === 'admin' ? (adminNeedsSetup ? 'Set Admin Password' : 'Cartlyft Admin')
+    : mode === 'owner' ? (ownerNeedsSetup ? 'Set Owner Password' : 'Cart Owner Login')
+    : 'Staff Login';
+  const mobileLocked = mode === 'admin';
   const inputStyle = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 10 };
 
   return (
@@ -392,24 +462,24 @@ function LoginSheet({ mode, staffList, onClose, onSavePassword, onSuccess }) {
           <Lock size={18} color={brand.navy} />
           <div style={{ fontSize: 20, fontWeight: 800, color: brand.navy }}>{title}</div>
         </div>
-        {ownerNeedsSetup
-          ? <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16, textAlign: 'center' }}>First time here — set a password for {OWNER_MOBILE}. You'll use it every time after this.</div>
+        {needsSetup
+          ? <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16, textAlign: 'center' }}>First time here — set a password for {mobile}. You'll use it every time after this.</div>
           : <div style={{ height: 12 }} />}
 
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>MOBILE NUMBER</div>
         <input
           type="tel" inputMode="numeric" value={mobile} placeholder="10-digit number"
-          disabled={mode === 'owner'}
+          disabled={mobileLocked}
           onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))}
-          style={{ ...inputStyle, background: mode === 'owner' ? '#F5F4F0' : '#fff', fontWeight: 700, letterSpacing: 1 }} />
+          style={{ ...inputStyle, background: mobileLocked ? '#F5F4F0' : '#fff', fontWeight: 700, letterSpacing: 1 }} />
 
-        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>{ownerNeedsSetup ? 'NEW PASSWORD' : 'PASSWORD'}</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>{needsSetup ? 'NEW PASSWORD' : 'PASSWORD'}</div>
         <input type="password" inputMode="numeric" value={pw} placeholder="••••"
           onChange={e => setPw(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !ownerNeedsSetup && submit()}
+          onKeyDown={e => e.key === 'Enter' && !needsSetup && submit()}
           style={inputStyle} />
 
-        {ownerNeedsSetup && (
+        {needsSetup && (
           <>
             <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>CONFIRM PASSWORD</div>
             <input type="password" inputMode="numeric" value={pw2} placeholder="••••"
@@ -428,7 +498,7 @@ function LoginSheet({ mode, staffList, onClose, onSavePassword, onSuccess }) {
         <div style={{ display: 'flex', gap: 10, marginTop: 6 }}>
           <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
           <button onClick={submit} disabled={busy} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>
-            {ownerNeedsSetup ? 'Set Password & Enter' : 'Login'}
+            {needsSetup ? 'Set Password & Enter' : 'Login'}
           </button>
         </div>
       </div>
@@ -437,16 +507,222 @@ function LoginSheet({ mode, staffList, onClose, onSavePassword, onSuccess }) {
 }
 
 // ═══════════════════════════════════════════════
+// CARTLYFT ADMIN APP — platform / multi-tenant control
+// ═══════════════════════════════════════════════
+const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+function AdminApp({ state, updateState, onExit }) {
+  const [tab, setTab] = useState('carts');
+  return (
+    <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
+      <TopBar title="Platform Admin" onExit={onExit} />
+      <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
+        {tab === 'carts' && <AdminCarts state={state} updateState={updateState} />}
+        {tab === 'reports' && <AdminReports state={state} />}
+      </div>
+      <BottomNav tab={tab} setTab={setTab} tabs={[
+        { id: 'carts', icon: <Boxes size={20}/>, label: 'Carts' },
+        { id: 'reports', icon: <BarChart3 size={20}/>, label: 'Reports' },
+      ]} />
+    </div>
+  );
+}
+
+function AdminCarts({ state, updateState }) {
+  const [showAdd, setShowAdd] = useState(false);
+
+  const addCart = async (form) => {
+    let id = slugify(form.name) || `cart-${Date.now()}`;
+    if (state.carts.some(c => c.id === id)) id = `${id}-${Date.now().toString().slice(-4)}`;
+    const ownerPasswordHash = form.ownerPassword ? await hashPassword(form.ownerPassword) : null;
+    const cart = {
+      id, name: form.name.trim(), tagline: form.tagline.trim(), cuisine: form.cuisine.trim(),
+      location: form.location.trim(), timing: form.timing.trim(), emoji: form.emoji || '🛒',
+      accent: form.accent || brand.teal, ownerMobile: form.ownerMobile,
+      ownerPasswordHash, active: true, createdAt: TODAY,
+    };
+    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInventory() } });
+    setShowAdd(false);
+  };
+
+  const toggleActive = (id) => updateState({ carts: state.carts.map(c => c.id === id ? { ...c, active: !c.active } : c) });
+  const resetOwnerPw = async (cart) => {
+    const np = prompt(`New owner password for ${cart.name} (min 4 chars):`);
+    if (!np) return;
+    if (np.length < 4) { alert('Password must be at least 4 characters.'); return; }
+    const hash = await hashPassword(np);
+    updateState({ carts: state.carts.map(c => c.id === cart.id ? { ...c, ownerPasswordHash: hash } : c) });
+    alert(`Owner password updated for ${cart.name}.`);
+  };
+  const removeCart = (cart) => {
+    const orders = state.orders.filter(o => o.cartId === cart.id).length;
+    if (!confirm(`Remove ${cart.name}? This hides the cart and removes its staff. ${orders} order(s) stay in records.`)) return;
+    updateState({
+      carts: state.carts.filter(c => c.id !== cart.id),
+      staff: state.staff.filter(s => s.cartId !== cart.id),
+    });
+  };
+
+  return (
+    <div>
+      <SectionHeader title="QSR Carts" subtitle={`${state.carts.length} on the platform`} />
+      <button onClick={() => setShowAdd(true)}
+        style={{ width: '100%', background: brand.navy, color: '#fff', padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <Plus size={18}/> Onboard New Cart
+      </button>
+
+      {showAdd && <AddCartModal onAdd={addCart} onClose={() => setShowAdd(false)} />}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {state.carts.map(c => (
+          <div key={c.id} style={{ background: '#fff', borderRadius: 14, border: `1px solid ${colors.border}`, padding: 16, opacity: c.active ? 1 : 0.55 }}>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ flexShrink: 0, width: 46, height: 46, borderRadius: 12, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, border: `2px solid ${c.accent}` }}>{c.emoji}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{c.name} {!c.active && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>· disabled</span>}</div>
+                <div style={{ fontSize: 12, color: colors.muted }}>{c.location} · owner {c.ownerMobile}</div>
+                <div style={{ fontSize: 11, color: c.ownerPasswordHash ? colors.green : colors.accent, fontWeight: 600, marginTop: 2 }}>{c.ownerPasswordHash ? 'Owner password set' : 'Owner sets password on first login'}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button onClick={() => resetOwnerPw(c)} style={adminBtn}>Reset owner password</button>
+              <button onClick={() => toggleActive(c.id)} style={adminBtn}>{c.active ? 'Disable' : 'Enable'}</button>
+              <button onClick={() => removeCart(c)} style={{ ...adminBtn, color: colors.red }}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const adminBtn = { background: '#fff', border: `1px solid ${colors.border}`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', color: brand.text };
+
+function AddCartModal({ onAdd, onClose }) {
+  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', accent: brand.teal, ownerMobile: '', ownerPassword: '' });
+  const [error, setError] = useState('');
+  const set = (k) => (e) => setF(prev => ({ ...prev, [k]: e.target.value }));
+
+  const submit = () => {
+    setError('');
+    if (!f.name.trim()) { setError('Enter a cart name.'); return; }
+    if (!f.cuisine.trim()) { setError('Describe the food served.'); return; }
+    if (!/^\d{10}$/.test(f.ownerMobile)) { setError('Enter the owner\'s 10-digit mobile number.'); return; }
+    if (f.ownerPassword && f.ownerPassword.length < 4) { setError('Owner password must be at least 4 characters (or leave blank for owner to set).'); return; }
+    onAdd(f);
+  };
+
+  const label = { fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 };
+  const inputStyle = { width: '100%', padding: '11px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 15, boxSizing: 'border-box', marginBottom: 12 };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 440, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, color: brand.navy }}>Onboard New Cart</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Create a QSR cart and assign its owner. The owner logs in with their mobile + this password.</div>
+
+        <div style={label}>CART NAME</div>
+        <input value={f.name} onChange={set('name')} placeholder="e.g. Chaat Junction" style={inputStyle} />
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={label}>EMOJI / LOGO</div>
+            <input value={f.emoji} onChange={set('emoji')} placeholder="🛒" style={inputStyle} />
+          </div>
+          <div style={{ flex: 2 }}>
+            <div style={label}>TAGLINE (optional)</div>
+            <input value={f.tagline} onChange={set('tagline')} placeholder="चाट जंक्शन" style={inputStyle} />
+          </div>
+        </div>
+        <div style={label}>FOOD DESCRIPTION</div>
+        <input value={f.cuisine} onChange={set('cuisine')} placeholder="Pani puri, tikki, dahi chaat…" style={inputStyle} />
+        <div style={label}>LOCATION</div>
+        <input value={f.location} onChange={set('location')} placeholder="Area, city" style={inputStyle} />
+        <div style={label}>TIMING</div>
+        <input value={f.timing} onChange={set('timing')} style={inputStyle} />
+        <div style={label}>OWNER MOBILE</div>
+        <input type="tel" inputMode="numeric" value={f.ownerMobile} onChange={e => setF(p => ({ ...p, ownerMobile: e.target.value.replace(/\D/g, '').slice(0, 10) }))} placeholder="10-digit number" style={{ ...inputStyle, fontWeight: 700, letterSpacing: 1 }} />
+        <div style={label}>OWNER PASSWORD (optional — owner can set on first login)</div>
+        <input type="text" value={f.ownerPassword} onChange={set('ownerPassword')} placeholder="min 4 characters, or leave blank" style={inputStyle} />
+
+        {error && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
+          <button onClick={submit} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Create Cart</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminReports({ state }) {
+  const rows = state.carts.map(c => {
+    const orders = state.orders.filter(o => o.cartId === c.id);
+    const today = orders.filter(o => o.date === TODAY && o.payment !== 'pending');
+    const allTime = orders.filter(o => o.payment !== 'pending');
+    return {
+      cart: c,
+      todayRevenue: today.reduce((s, o) => s + o.total, 0),
+      todayOrders: today.length,
+      pending: orders.filter(o => o.date === TODAY && o.payment === 'pending').length,
+      allRevenue: allTime.reduce((s, o) => s + o.total, 0),
+      allOrders: allTime.length,
+    };
+  });
+  const platformToday = rows.reduce((s, r) => s + r.todayRevenue, 0);
+
+  return (
+    <div>
+      <SectionHeader title="Platform Reports" subtitle="Per-cart performance" />
+      <div style={{ background: brand.navy, color: '#fff', padding: 20, borderRadius: 14, marginBottom: 16 }}>
+        <div style={{ fontSize: 11, letterSpacing: 1.5, color: brand.amber, fontWeight: 700 }}>ALL CARTS · TODAY</div>
+        <div style={{ fontSize: 34, fontWeight: 900, marginTop: 4 }}>₹{platformToday.toLocaleString('en-IN')}</div>
+        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{rows.reduce((s, r) => s + r.todayOrders, 0)} orders across {rows.length} cart{rows.length !== 1 ? 's' : ''}</div>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {rows.map(r => (
+          <div key={r.cart.id} style={{ background: '#fff', borderRadius: 14, border: `1px solid ${colors.border}`, padding: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, border: `2px solid ${r.cart.accent}` }}>{r.cart.emoji}</div>
+              <div style={{ fontWeight: 800, fontSize: 16 }}>{r.cart.name}</div>
+              {r.pending > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: colors.accent }}>{r.pending} pending</span>}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, color: colors.muted }}>Today</div>
+                <div style={{ fontSize: 20, fontWeight: 800 }}>₹{r.todayRevenue.toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 11, color: colors.muted }}>{r.todayOrders} orders</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: colors.muted }}>All-time</div>
+                <div style={{ fontSize: 20, fontWeight: 800 }}>₹{r.allRevenue.toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 11, color: colors.muted }}>{r.allOrders} orders</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════
 // OWNER APP
 // ═══════════════════════════════════════════════
-function OwnerApp({ state, updateState, setRole }) {
+function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
+  const cart = state.carts.find(c => c.id === cartId);
+  const inv = state.inventory[cartId];
 
-  const todayOrders = state.orders.filter(o => o.date === TODAY);
-  const todayRevenue = todayOrders.reduce((sum, o) => sum + o.total, 0);
+  const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
+  const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.payment === 'pending' ? 0 : o.total), 0);
   const cashRevenue = todayOrders.filter(o => o.payment === 'cash').reduce((sum, o) => sum + o.total, 0);
   const upiRevenue = todayOrders.filter(o => o.payment === 'upi').reduce((sum, o) => sum + o.total, 0);
-  const piecesSold = todayOrders.reduce((sum, o) => {
+  const piecesSold = todayOrders.filter(o => o.payment !== 'pending').reduce((sum, o) => {
     return sum + o.items.reduce((s, item) => {
       const m = MENU_ITEMS.find(x => x.id === item.id);
       if (!m) return s;
@@ -456,14 +732,14 @@ function OwnerApp({ state, updateState, setRole }) {
 
   return (
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
-      <TopBar title="Owner Console" onExit={() => setRole(null)} />
+      <TopBar title={`${cart?.name ?? 'Cart'} · Owner`} onExit={onExit} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard state={state} updateState={updateState} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
-        {tab === 'inventory' && <InventoryView state={state} updateState={updateState} />}
-        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
-        {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} />}
-        {tab === 'reports' && <Reports state={state} />}
+        {tab === 'dashboard' && <Dashboard inv={inv} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} />}
+        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
+        {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
+        {tab === 'reports' && <Reports state={state} cartId={cartId} />}
       </div>
 
       <BottomNav tab={tab} setTab={setTab} tabs={[
@@ -516,13 +792,13 @@ function BottomNav({ tab, setTab, tabs }) {
 }
 
 // ─── OWNER: DASHBOARD ───
-function Dashboard({ state, todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
+function Dashboard({ inv, todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
   const expectedRevenue = piecesSold * 12; // avg ₹12/piece
   const variance = todayRevenue - expectedRevenue;
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
-  const vegLow = state.inventory.veg.freezer < 100;
-  const paneerLow = state.inventory.paneer.freezer < 50;
-  const cornLow = state.inventory.corn.freezer < 50;
+  const vegLow = inv.veg.freezer < 100;
+  const paneerLow = inv.paneer.freezer < 50;
+  const cornLow = inv.corn.freezer < 50;
 
   return (
     <div>
@@ -562,12 +838,12 @@ function Dashboard({ state, todayRevenue, cashRevenue, upiRevenue, piecesSold, t
 
       <SectionHeader title="Live Inventory" />
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
-        <StockRow label="Veg Momo · Freezer" value={state.inventory.veg.freezer} unit="pcs" low={vegLow} />
-        <StockRow label="Veg Momo · On Cart" value={state.inventory.veg.cart} unit="pcs" />
-        <StockRow label="Paneer Momo · Freezer" value={state.inventory.paneer.freezer} unit="pcs" low={paneerLow} />
-        <StockRow label="Paneer Momo · On Cart" value={state.inventory.paneer.cart} unit="pcs" />
-        <StockRow label="Corn Cheese · Freezer" value={state.inventory.corn.freezer} unit="pcs" low={cornLow} />
-        <StockRow label="Corn Cheese · On Cart" value={state.inventory.corn.cart} unit="pcs" />
+        <StockRow label="Veg Momo · Freezer" value={inv.veg.freezer} unit="pcs" low={vegLow} />
+        <StockRow label="Veg Momo · On Cart" value={inv.veg.cart} unit="pcs" />
+        <StockRow label="Paneer Momo · Freezer" value={inv.paneer.freezer} unit="pcs" low={paneerLow} />
+        <StockRow label="Paneer Momo · On Cart" value={inv.paneer.cart} unit="pcs" />
+        <StockRow label="Corn Cheese · Freezer" value={inv.corn.freezer} unit="pcs" low={cornLow} />
+        <StockRow label="Corn Cheese · On Cart" value={inv.corn.cart} unit="pcs" />
       </div>
 
       <SectionHeader title="Recent Orders" />
@@ -645,42 +921,34 @@ function SectionHeader({ title, subtitle }) {
 }
 
 // ─── OWNER: INVENTORY ───
-function InventoryView({ state, updateState }) {
+function InventoryView({ state, updateState, cartId, inv }) {
   const [showAddStock, setShowAddStock] = useState(false);
+  const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
+  const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
+  const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
 
   const addStock = (type, qty) => {
-    const newInv = { ...state.inventory };
+    const newInv = { ...inv };
     newInv[type] = { ...newInv[type], freezer: newInv[type].freezer + qty };
     const log = {
-      id: Date.now(),
-      date: TODAY,
+      id: Date.now(), cartId, date: TODAY,
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-      type: 'STOCK_IN',
-      item: type,
-      qty,
-      note: `Added ${qty} pieces of ${type}`
+      type: 'STOCK_IN', item: type, qty, note: `Added ${qty} pieces of ${type}`
     };
-    updateState({ inventory: newInv, stockLogs: [...state.stockLogs, log] });
+    setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
     setShowAddStock(false);
   };
 
   const loadToCart = (type, qty) => {
-    const newInv = { ...state.inventory };
-    if (newInv[type].freezer < qty) {
-      alert('Not enough stock in freezer!');
-      return;
-    }
+    const newInv = { ...inv };
+    if (newInv[type].freezer < qty) { alert('Not enough stock in freezer!'); return; }
     newInv[type] = { freezer: newInv[type].freezer - qty, cart: newInv[type].cart + qty };
     const log = {
-      id: Date.now(),
-      date: TODAY,
+      id: Date.now(), cartId, date: TODAY,
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-      type: 'CART_LOAD',
-      item: type,
-      qty,
-      note: `Moved ${qty} ${type} pieces to cart`
+      type: 'CART_LOAD', item: type, qty, note: `Moved ${qty} ${type} pieces to cart`
     };
-    updateState({ inventory: newInv, cartLoadings: [...state.cartLoadings, log] });
+    setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
   };
 
   return (
@@ -698,15 +966,15 @@ function InventoryView({ state, updateState }) {
       {/* Freezer Status */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>FREEZER (KITCHEN)</div>
-        <FreezerItem type="veg" stock={state.inventory.veg.freezer} cart={state.inventory.veg.cart} onLoad={loadToCart} />
-        <FreezerItem type="paneer" stock={state.inventory.paneer.freezer} cart={state.inventory.paneer.cart} onLoad={loadToCart} />
-        <FreezerItem type="corn" stock={state.inventory.corn.freezer} cart={state.inventory.corn.cart} onLoad={loadToCart} />
+        <FreezerItem type="veg" stock={inv.veg.freezer} cart={inv.veg.cart} onLoad={loadToCart} />
+        <FreezerItem type="paneer" stock={inv.paneer.freezer} cart={inv.paneer.cart} onLoad={loadToCart} />
+        <FreezerItem type="corn" stock={inv.corn.freezer} cart={inv.corn.cart} onLoad={loadToCart} />
       </div>
 
       {/* Consumables */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>CONSUMABLES (AUTO-TRACKED)</div>
-        {Object.entries(state.inventory.consumables).map(([key, item]) => (
+        {Object.entries(inv.consumables).map(([key, item]) => (
           <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
             <div style={{ fontSize: 14, textTransform: 'capitalize' }}>{key}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -720,7 +988,7 @@ function InventoryView({ state, updateState }) {
       {/* Recent Logs */}
       <SectionHeader title="Activity Log" />
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {[...state.stockLogs, ...state.cartLoadings].sort((a, b) => b.id - a.id).slice(0, 8).map(log => (
+        {[...cartStockLogs, ...cartLoadLogs].sort((a, b) => b.id - a.id).slice(0, 8).map(log => (
           <div key={log.id} style={{ padding: '12px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: 10, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>{log.type.replace('_', ' ')}</div>
@@ -729,7 +997,7 @@ function InventoryView({ state, updateState }) {
             <div style={{ fontSize: 11, color: colors.muted }}>{log.time}</div>
           </div>
         ))}
-        {state.stockLogs.length === 0 && state.cartLoadings.length === 0 && (
+        {cartStockLogs.length === 0 && cartLoadLogs.length === 0 && (
           <div style={{ padding: 32, textAlign: 'center', color: colors.muted, fontSize: 14 }}>No activity logged yet</div>
         )}
       </div>
@@ -791,7 +1059,7 @@ function StockInModal({ onAdd, onClose }) {
 }
 
 // ─── OWNER: RECONCILIATION ───
-function Reconciliation({ state, updateState, todayOrders, cashRevenue, upiRevenue, piecesSold }) {
+function Reconciliation({ state, updateState, cartId, inv, todayOrders, cashRevenue, upiRevenue, piecesSold }) {
   const [physicalCash, setPhysicalCash] = useState('');
   const [phonePeAmount, setPhonePeAmount] = useState('');
   const [remainingVeg, setRemainingVeg] = useState('');
@@ -799,14 +1067,11 @@ function Reconciliation({ state, updateState, todayOrders, cashRevenue, upiReven
   const [remainingCorn, setRemainingCorn] = useState('');
   const [closed, setClosed] = useState(false);
 
-  const soldPieces = (key) => todayOrders.reduce((s, o) => s + o.items.reduce((sm, i) => {
-    const m = MENU_ITEMS.find(x => x.id === i.id);
-    return m && m.stockKey === key ? sm + (i.type === 'half' ? m.pcsHalf : m.pcsFull) * i.qty : sm;
-  }, 0), 0);
-
-  const expectedVeg = state.inventory.veg.cart - soldPieces('veg');
-  const expectedPaneer = state.inventory.paneer.cart - soldPieces('paneer');
-  const expectedCorn = state.inventory.corn.cart - soldPieces('corn');
+  // Stock is deducted as orders are settled, so the cart count already
+  // reflects sales — expected remaining is simply the current cart stock.
+  const expectedVeg = inv.veg.cart;
+  const expectedPaneer = inv.paneer.cart;
+  const expectedCorn = inv.corn.cart;
 
   const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - cashRevenue : null;
   const upiDiff = phonePeAmount !== '' ? parseInt(phonePeAmount) - upiRevenue : null;
@@ -817,6 +1082,7 @@ function Reconciliation({ state, updateState, todayOrders, cashRevenue, upiReven
   const closeDay = () => {
     const dayClose = {
       id: Date.now(),
+      cartId,
       date: TODAY,
       totalOrders: todayOrders.length,
       systemCash: cashRevenue,
@@ -951,14 +1217,13 @@ function ReconcileBlock({ title, systemValue, label, value, onChange, diff, unit
 }
 
 // ─── OWNER: STAFF REGISTRY ───
-function StaffRegistry({ state, updateState }) {
+function StaffRegistry({ state, updateState, cartId, cart }) {
   const [showAdd, setShowAdd] = useState(false);
-  const staff = state.staff.filter(s => s.role === 'staff');
-  const owner = state.staff.find(s => s.role === 'owner');
+  const staff = state.staff.filter(s => s.cartId === cartId);
 
   const addStaff = async (name, mobile, password) => {
     const hash = await hashPassword(password);
-    const rec = { id: Date.now(), name, mobile, passwordHash: hash, role: 'staff', active: true };
+    const rec = { id: Date.now(), cartId, name, mobile, passwordHash: hash, active: true };
     updateState({ staff: [...state.staff, rec] });
     setShowAdd(false);
   };
@@ -973,26 +1238,34 @@ function StaffRegistry({ state, updateState }) {
     updateState({ staff: state.staff.map(s => s.id === id ? { ...s, passwordHash: hash } : s) });
     alert('Password updated.');
   };
+  const changeOwnerPassword = async () => {
+    const np = prompt('Enter a new owner password (min 4 characters):');
+    if (!np) return;
+    if (np.length < 4) { alert('Password must be at least 4 characters.'); return; }
+    const hash = await hashPassword(np);
+    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ownerPasswordHash: hash } : c) });
+    alert('Owner password updated.');
+  };
 
   return (
     <div>
-      <SectionHeader title="Staff Registry" subtitle="Only registered staff can log in" />
+      <SectionHeader title="Staff Registry" subtitle={`${cart?.name} · only registered staff can log in`} />
 
       <button onClick={() => setShowAdd(true)}
-        style={{ width: '100%', background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        style={{ width: '100%', background: brand.navy, color: '#fff', padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
         <Plus size={18}/> Register New Staff
       </button>
 
-      {showAdd && <AddStaffModal existing={state.staff} onAdd={addStaff} onClose={() => setShowAdd(false)} />}
+      {showAdd && <AddStaffModal existing={state.staff} ownerMobile={cart?.ownerMobile} onAdd={addStaff} onClose={() => setShowAdd(false)} />}
 
       {/* Owner card */}
-      <div style={{ background: colors.ink, color: colors.primary, borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div style={{ background: brand.navy, color: '#fff', borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1, fontWeight: 700 }}>OWNER</div>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>{owner?.mobile}</div>
-          <div style={{ fontSize: 11, opacity: 0.7 }}>{owner?.passwordHash ? 'Password set' : 'Password not set yet'}</div>
+          <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1, fontWeight: 700, color: brand.amber }}>CART OWNER</div>
+          <div style={{ fontWeight: 800, fontSize: 16 }}>{cart?.ownerMobile}</div>
+          <div style={{ fontSize: 11, opacity: 0.7 }}>{cart?.ownerPasswordHash ? 'Password set' : 'Password not set yet'}</div>
         </div>
-        <button onClick={() => resetPassword(owner.id)} style={{ background: 'rgba(255,214,10,0.15)', color: colors.primary, border: `1px solid rgba(255,214,10,0.4)`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Change Password</button>
+        <button onClick={changeOwnerPassword} style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: `1px solid rgba(255,255,255,0.4)`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Change Password</button>
       </div>
 
       <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>STAFF MEMBERS ({staff.length})</div>
@@ -1016,7 +1289,7 @@ function StaffRegistry({ state, updateState }) {
   );
 }
 
-function AddStaffModal({ existing, onAdd, onClose }) {
+function AddStaffModal({ existing, ownerMobile, onAdd, onClose }) {
   const [name, setName] = useState('');
   const [mobile, setMobile] = useState('');
   const [password, setPassword] = useState('');
@@ -1026,7 +1299,7 @@ function AddStaffModal({ existing, onAdd, onClose }) {
     setError('');
     if (!name.trim()) { setError('Enter a name.'); return; }
     if (!/^\d{10}$/.test(mobile)) { setError('Enter a 10-digit mobile number.'); return; }
-    if (mobile === OWNER_MOBILE || existing.some(s => s.mobile === mobile)) { setError('That number is already registered.'); return; }
+    if (mobile === ownerMobile || existing.some(s => s.mobile === mobile)) { setError('That number is already registered.'); return; }
     if (password.length < 4) { setError('Password must be at least 4 characters.'); return; }
     onAdd(name.trim(), mobile, password);
   };
@@ -1064,8 +1337,8 @@ function AddStaffModal({ existing, onAdd, onClose }) {
 }
 
 // ─── OWNER: REPORTS ───
-function Reports({ state }) {
-  const last7 = state.dayCloseLogs.slice(-7);
+function Reports({ state, cartId }) {
+  const last7 = state.dayCloseLogs.filter(d => d.cartId === cartId).slice(-7);
   const totalRevenue = last7.reduce((s, d) => s + d.revenue, 0);
   const totalLeakage = last7.reduce((s, d) => s + Math.min(0, d.cashDiff) + Math.min(0, d.upiDiff), 0);
 
@@ -1114,23 +1387,27 @@ function Reports({ state }) {
 // ═══════════════════════════════════════════════
 // STAFF APP — Order Entry
 // ═══════════════════════════════════════════════
-function StaffApp({ state, updateState, setRole }) {
+function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [tab, setTab] = useState('order');
   const [cart, setCart] = useState([]);
-  const staffName = state.staffOnDuty;
+  const cartInfo = state.carts.find(c => c.id === cartId);
+  const inv = state.inventory[cartId];
 
   // Login is gated at the role selector; this is just a safety net.
-  if (!staffName) { setRole(null); return null; }
+  if (!staffName) { onExit(); return null; }
 
-  const todayOrders = state.orders.filter(o => o.date === TODAY);
+  // Staff only ever sees orders for their own cart.
+  const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
   const myOrders = todayOrders.filter(o => o.staff === staffName);
   const pendingOrders = todayOrders.filter(o => o.payment === 'pending');
+  const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
 
   const placeOrder = (payment) => {
     if (cart.length === 0) return;
     const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
     const order = {
       id: Date.now(),
+      cartId,
       token: String(todayOrders.length + 1).padStart(3, '0'),
       date: TODAY,
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
@@ -1141,7 +1418,7 @@ function StaffApp({ state, updateState, setRole }) {
       source: 'staff-entry'
     };
     // Staff order is settled on the spot, so deduct stock now.
-    updateState({ orders: [...state.orders, order], inventory: deductInventory(state.inventory, cart) });
+    setCartInv(deductInventory(inv, cart), { orders: [...state.orders, order] });
     setCart([]);
   };
 
@@ -1150,9 +1427,8 @@ function StaffApp({ state, updateState, setRole }) {
   const settleOrder = (orderId, payment) => {
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment !== 'pending') return;
-    updateState({
+    setCartInv(deductInventory(inv, order.items), {
       orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
-      inventory: deductInventory(state.inventory, order.items),
     });
   };
   const cancelOrder = (orderId) => {
@@ -1162,13 +1438,13 @@ function StaffApp({ state, updateState, setRole }) {
 
   return (
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
-      <TopBar title={`Staff: ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); setRole(null); }} />
+      <TopBar title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={cancelOrder} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} />}
-        {tab === 'shift' && <ShiftStatus state={state} myOrders={myOrders} staffName={staffName} />}
+        {tab === 'shift' && <ShiftStatus inv={inv} myOrders={myOrders} staffName={staffName} />}
       </div>
 
       <BottomNav tab={tab} setTab={setTab} tabs={[
@@ -1374,7 +1650,7 @@ function MyOrdersScreen({ orders }) {
   );
 }
 
-function ShiftStatus({ state, myOrders, staffName }) {
+function ShiftStatus({ inv, myOrders, staffName }) {
   const cashTotal = myOrders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
   const upiTotal = myOrders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
 
@@ -1391,9 +1667,9 @@ function ShiftStatus({ state, myOrders, staffName }) {
 
       <div style={{ background: '#fff', padding: 16, borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>STOCK ON CART</div>
-        <StockRow label="Veg Momo (pcs)" value={state.inventory.veg.cart} unit="pcs"/>
-        <StockRow label="Paneer Momo (pcs)" value={state.inventory.paneer.cart} unit="pcs"/>
-        <StockRow label="Corn Cheese (pcs)" value={state.inventory.corn.cart} unit="pcs"/>
+        <StockRow label="Veg Momo (pcs)" value={inv.veg.cart} unit="pcs"/>
+        <StockRow label="Paneer Momo (pcs)" value={inv.paneer.cart} unit="pcs"/>
+        <StockRow label="Corn Cheese (pcs)" value={inv.corn.cart} unit="pcs"/>
       </div>
 
       <Alert
@@ -1412,25 +1688,9 @@ function ShiftStatus({ state, myOrders, staffName }) {
 const MAX_ADDON_ITEMS = 2;
 
 // ─── QSR CARTS (tenants on the Cartlyft platform) ───
-// Momo Wala is live today; more carts can be added here as they onboard.
-// 'menu: true' means this cart's menu is wired up in the app.
-const CARTS = [
-  {
-    id: 'momowala',
-    name: 'Momo Wala',
-    tagline: 'मोमो वाला',
-    cuisine: 'Steamed, Kurkure, Afghani & Tandoori momos · 100% pure veg',
-    location: 'Saketpuri Yojna, Ayodhya',
-    timing: 'Daily 4 PM – 11 PM',
-    emoji: '🥟',
-    accent: colors.primary,
-    ink: colors.ink,
-    menu: true,
-  },
-];
-
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
-function CartListing({ onSelect, onExit }) {
+// Reads the live, admin-managed carts from app state.
+function CartListing({ carts, onSelect, onExit }) {
   return (
     <div style={{ minHeight: '100vh', background: brand.bg, fontFamily: 'system-ui, sans-serif' }}>
       <div style={{ background: brand.navy, padding: '22px 20px' }}>
@@ -1445,10 +1705,10 @@ function CartListing({ onSelect, onExit }) {
         <div style={{ fontSize: 13, color: brand.muted, marginBottom: 20 }}>Pick a QSR cart to see its menu and place an order</div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {CARTS.map(c => (
+          {carts.map(c => (
             <button key={c.id} onClick={() => onSelect(c)}
               style={{ display: 'flex', gap: 14, alignItems: 'center', textAlign: 'left', width: '100%', background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 16, padding: 16, cursor: 'pointer' }}>
-              <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 14, background: c.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, border: `2px solid ${c.accent}` }}>{c.emoji}</div>
+              <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 14, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, border: `2px solid ${c.accent}` }}>{c.emoji}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                   <div style={{ fontWeight: 800, fontSize: 17, color: brand.text }}>{c.name}</div>
@@ -1480,7 +1740,7 @@ function CartListing({ onSelect, onExit }) {
   );
 }
 
-function CustomerApp({ state, updateState, setRole }) {
+function CustomerApp({ state, updateState, onExit }) {
   const [venue, setVenue] = useState(null);
   const [cart, setCart] = useState([]);
   const [step, setStep] = useState('menu'); // menu | confirm | success
@@ -1523,11 +1783,12 @@ function CustomerApp({ state, updateState, setRole }) {
 
   const placeOrder = () => {
     if (cart.length === 0) return;
-    const todayOrders = state.orders.filter(o => o.date === TODAY);
+    const venueOrders = state.orders.filter(o => o.cartId === venue.id && o.date === TODAY);
     const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
-    const token = String(todayOrders.length + 1).padStart(3, '0');
+    const token = String(venueOrders.length + 1).padStart(3, '0');
     const order = {
       id: Date.now(),
+      cartId: venue.id,
       token,
       date: TODAY,
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
@@ -1536,8 +1797,8 @@ function CustomerApp({ state, updateState, setRole }) {
       payment: 'pending',     // not paid until staff confirms at the cart
       staff: null,
       source: 'qr-order',
-      outlet: venue?.id,
-      outletName: venue?.name,
+      outlet: venue.id,
+      outletName: venue.name,
     };
     // Stock is NOT deducted here — only when staff marks the order paid,
     // so fake/abandoned QR orders never touch inventory or revenue.
@@ -1550,7 +1811,7 @@ function CustomerApp({ state, updateState, setRole }) {
   const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
 
   // Customer first picks a cart from the marketplace listing.
-  if (!venue) return <CartListing onSelect={(v) => { setVenue(v); setStep('menu'); }} onExit={() => setRole(null)} />;
+  if (!venue) return <CartListing carts={state.carts.filter(c => c.active)} onSelect={(v) => { setVenue(v); setStep('menu'); }} onExit={onExit} />;
 
   if (step === 'confirm') {
     return (

@@ -36,29 +36,45 @@ export const storage = {
 // columns; orders, staff and day_close_logs need camelCase ↔ snake_case.
 
 const orderToRow = (o) => ({
-  id: o.id, token: o.token, date: o.date, time: o.time, items: o.items,
+  id: o.id, cart_id: o.cartId ?? null, token: o.token, date: o.date, time: o.time, items: o.items,
   total: o.total, payment: o.payment, staff: o.staff, source: o.source,
   settled_at: o.settledAt ?? null,
   outlet: o.outlet ?? null, outlet_name: o.outletName ?? null,
 });
 const rowToOrder = (r) => ({
-  id: r.id, token: r.token, date: r.date, time: r.time, items: r.items,
+  id: r.id, cartId: r.cart_id ?? undefined, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
   settledAt: r.settled_at ?? undefined,
   outlet: r.outlet ?? undefined, outletName: r.outlet_name ?? undefined,
 });
 
 const staffToRow = (s) => ({
-  id: s.id, name: s.name, mobile: s.mobile, password_hash: s.passwordHash ?? null,
-  role: s.role, active: s.active, updated_at: new Date().toISOString(),
+  id: s.id, cart_id: s.cartId ?? null, name: s.name, mobile: s.mobile,
+  password_hash: s.passwordHash ?? null, active: s.active, updated_at: new Date().toISOString(),
 });
 const rowToStaff = (r) => ({
-  id: r.id, name: r.name, mobile: r.mobile, passwordHash: r.password_hash ?? null,
-  role: r.role, active: r.active,
+  id: r.id, cartId: r.cart_id ?? undefined, name: r.name, mobile: r.mobile,
+  passwordHash: r.password_hash ?? null, active: r.active,
+});
+
+// stock_logs / cart_loadings — rename cartId ↔ cart_id, otherwise 1:1
+const logToRow = (l) => { const { cartId, ...rest } = l; return { ...rest, cart_id: cartId ?? null }; };
+const rowToLog = ({ inserted_at, cart_id, ...rest }) => ({ ...rest, cartId: cart_id ?? undefined });
+
+const cartToRow = (c) => ({
+  id: c.id, name: c.name, tagline: c.tagline, cuisine: c.cuisine, location: c.location,
+  timing: c.timing, emoji: c.emoji, accent: c.accent, owner_mobile: c.ownerMobile,
+  owner_password_hash: c.ownerPasswordHash ?? null, active: c.active, created_at: c.createdAt,
+});
+const rowToCart = (r) => ({
+  id: r.id, name: r.name, tagline: r.tagline, cuisine: r.cuisine, location: r.location,
+  timing: r.timing, emoji: r.emoji, accent: r.accent, ownerMobile: r.owner_mobile,
+  ownerPasswordHash: r.owner_password_hash ?? null, active: r.active, createdAt: r.created_at,
 });
 
 const dayCloseToRow = (d) => ({
   id: d.id,
+  cart_id: d.cartId ?? null,
   date: d.date,
   total_orders: d.totalOrders,
   system_cash: d.systemCash,
@@ -83,6 +99,7 @@ const dayCloseToRow = (d) => ({
 
 const rowToDayClose = (r) => ({
   id: r.id,
+  cartId: r.cart_id ?? undefined,
   date: r.date,
   totalOrders: r.total_orders,
   systemCash: r.system_cash,
@@ -134,8 +151,11 @@ export function mergeStates(localState, cloud) {
     stockLogs: unionById(localState.stockLogs, cloud.stockLogs),
     cartLoadings: unionById(localState.cartLoadings, cloud.cartLoadings),
     dayCloseLogs: unionById(localState.dayCloseLogs, cloud.dayCloseLogs),
-    // staff is mutable and owner-managed; cloud copy wins on conflict
+    // mutable, owner/admin-managed; cloud copy wins on id conflict
     staff: cloud.staff?.length ? unionById(localState.staff, cloud.staff) : localState.staff,
+    carts: cloud.carts?.length ? unionById(localState.carts, cloud.carts) : localState.carts,
+    platform: cloud.platform ?? localState.platform,
+    // inventory is one keyed blob ({ [cartId]: inv }); cloud wins if present
     inventory: cloud.inventory ?? localState.inventory,
   };
 }
@@ -144,23 +164,27 @@ export function mergeStates(localState, cloud) {
 export async function loadCloudState() {
   if (!supabase) return null;
   try {
-    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff] = await Promise.all([
+    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform] = await Promise.all([
       supabase.from('orders').select('*').order('id'),
       supabase.from('stock_logs').select('*').order('id'),
       supabase.from('cart_loadings').select('*').order('id'),
       supabase.from('day_close_logs').select('*').order('id'),
       supabase.from('inventory').select('*').eq('id', 1).maybeSingle(),
       supabase.from('staff').select('*').order('id'),
+      supabase.from('carts').select('*').order('created_at'),
+      supabase.from('platform').select('*').eq('id', 1).maybeSingle(),
     ]);
-    const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff].find((r) => r.error);
+    const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform].find((r) => r.error);
     if (failed) throw failed.error;
     return {
       orders: orders.data.map((r) => rowToOrder(r)),
-      stockLogs: stockLogs.data.map(stripMeta),
-      cartLoadings: cartLoadings.data.map(stripMeta),
+      stockLogs: stockLogs.data.map(rowToLog),
+      cartLoadings: cartLoadings.data.map(rowToLog),
       dayCloseLogs: dayCloseLogs.data.map((r) => rowToDayClose(r)),
       inventory: inventory.data?.data ?? null,
       staff: staff.data.map((r) => rowToStaff(r)),
+      carts: carts.data.map((r) => rowToCart(r)),
+      platform: platform.data ? { adminMobile: platform.data.admin_mobile, adminPasswordHash: platform.data.admin_password_hash ?? null } : null,
     };
   } catch (e) {
     console.warn('Supabase load failed — running on local data only.', e.message);
@@ -190,10 +214,12 @@ async function pushState(state) {
     const results = await Promise.all(
       [
         merge('orders', state.orders.map(orderToRow)),
-        append('stock_logs', state.stockLogs),
-        append('cart_loadings', state.cartLoadings),
+        append('stock_logs', state.stockLogs.map(logToRow)),
+        append('cart_loadings', state.cartLoadings.map(logToRow)),
         append('day_close_logs', state.dayCloseLogs.map(dayCloseToRow)),
         merge('staff', state.staff.map(staffToRow)),
+        merge('carts', state.carts.map(cartToRow)),
+        supabase.from('platform').upsert({ id: 1, admin_mobile: state.platform.adminMobile, admin_password_hash: state.platform.adminPasswordHash, updated_at: new Date().toISOString() }),
         supabase
           .from('inventory')
           .upsert({ id: 1, data: state.inventory, updated_at: new Date().toISOString() }),
