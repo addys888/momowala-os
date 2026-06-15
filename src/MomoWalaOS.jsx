@@ -794,6 +794,19 @@ async function fileToBase64(file, maxDim = 1600, quality = 0.8) {
   return canvas.toDataURL('image/jpeg', quality).split(',')[1];
 }
 
+// A menu item's identity for duplicate detection: name (case-insensitive),
+// plus stock type for momos (Veg Steam vs Paneer Steam aren't dupes).
+const menuKeyOf = (section, it) => {
+  const n = (it.name || '').toLowerCase().trim();
+  return section === 'items' ? `${n}|${it.type || ''}` : n;
+};
+// ids of every row whose key appears more than once in the list
+const duplicateIds = (section, list) => {
+  const counts = {};
+  list.forEach(it => { const k = menuKeyOf(section, it); counts[k] = (counts[k] || 0) + 1; });
+  return new Set(list.filter(it => counts[menuKeyOf(section, it)] > 1).map(it => it.id));
+};
+
 function MenuEditor({ state, updateState, cartId, cart }) {
   const menu = menuFor(state, cartId);
   const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
@@ -802,7 +815,15 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   const [aiNote, setAiNote] = useState('');
   const fileRef = React.useRef();
 
+  const dupItems = duplicateIds('items', items), dupLassi = duplicateIds('lassi', lassi), dupAddons = duplicateIds('addons', addons);
+
   const setMenu = (next) => updateState({ menus: { ...state.menus, [cartId]: next } });
+  const dedupe = (section) => {
+    const list = menu[section] || [];
+    const seen = new Set(), kept = [];
+    list.forEach(it => { const k = menuKeyOf(section, it); if (!seen.has(k)) { seen.add(k); kept.push(it); } });
+    setMenu({ ...menu, [section]: kept });
+  };
   const saveItem = (section, item) => {
     const list = menu[section] || [];
     const exists = item.id && list.some(x => x.id === item.id);
@@ -834,11 +855,25 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       const count = extracted.items.length + extracted.lassi.length + extracted.addons.length;
       if (count === 0) { setAiNote('No menu items detected in that photo. Try a clearer shot.'); return; }
       const hasExisting = items.length + lassi.length + addons.length > 0;
-      const merge = hasExisting && confirm(`Found ${count} items. OK = add to the current menu, Cancel = replace it.`);
-      setMenu(merge
-        ? { items: [...items, ...extracted.items], lassi: [...lassi, ...extracted.lassi], addons: [...addons, ...extracted.addons] }
-        : extracted);
-      setAiNote(`Imported ${count} items — review and edit below, then they're saved automatically.`);
+      const merge = hasExisting && confirm(`Found ${count} items. OK = add to the current menu (skipping any already present), Cancel = replace it.`);
+      if (merge) {
+        // only add items whose name (+type for momos) isn't already on the menu — avoids double-scan duplicates
+        const addUnique = (section, cur, add) => {
+          const have = new Set(cur.map(it => menuKeyOf(section, it)));
+          return [...cur, ...add.filter(it => !have.has(menuKeyOf(section, it)))];
+        };
+        const next = {
+          items: addUnique('items', items, extracted.items),
+          lassi: addUnique('lassi', lassi, extracted.lassi),
+          addons: addUnique('addons', addons, extracted.addons),
+        };
+        const added = (next.items.length - items.length) + (next.lassi.length - lassi.length) + (next.addons.length - addons.length);
+        setMenu({ ...menu, ...next });
+        setAiNote(`Added ${added} new item${added !== 1 ? 's' : ''}, skipped ${count - added} already on the menu. Review below.`);
+      } else {
+        setMenu({ ...menu, ...extracted });
+        setAiNote(`Imported ${count} items — review and edit below, then they're saved automatically.`);
+      }
     } catch (err) {
       setAiNote(`Couldn't read the menu: ${err.message}. You can still add items manually.`);
     } finally {
@@ -858,19 +893,22 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       {aiNote && <div style={{ background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: brand.text, marginBottom: 16 }}>{aiNote}</div>}
 
       <MenuSection title="🥟 Momos" hint="Half / full price + pieces"
-        rows={items.map(i => ({ id: i.id, primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: `${i.cat || 'Momo'} · ${i.type} · ₹${i.half}/${i.full} · ${i.pcsHalf}/${i.pcsFull}pc` }))}
+        rows={items.map(i => ({ id: i.id, dup: dupItems.has(i.id), primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: `${i.cat || 'Momo'} · ${i.type} · ₹${i.half}/${i.full} · ${i.pcsHalf}/${i.pcsFull}pc` }))}
+        dupCount={dupItems.size} onDedupe={() => dedupe('items')}
         onAdd={() => setEdit({ section: 'items', item: { type: 'veg', cat: 'Steamed', pcsHalf: 5, pcsFull: 10 } })}
         onEdit={(id) => setEdit({ section: 'items', item: items.find(x => x.id === id) })}
         onRemove={(id) => removeItem('items', id)} />
 
       <MenuSection title="🥤 Drinks" hint="Single price"
-        rows={lassi.map(i => ({ id: i.id, primary: i.name, secondary: `₹${i.price}` }))}
+        rows={lassi.map(i => ({ id: i.id, dup: dupLassi.has(i.id), primary: i.name, secondary: `₹${i.price}` }))}
+        dupCount={dupLassi.size} onDedupe={() => dedupe('lassi')}
         onAdd={() => setEdit({ section: 'lassi', item: { price: 0 } })}
         onEdit={(id) => setEdit({ section: 'lassi', item: lassi.find(x => x.id === id) })}
         onRemove={(id) => removeItem('lassi', id)} />
 
       <MenuSection title="➕ Add-ons" hint="₹0 = free"
-        rows={addons.map(i => ({ id: i.id, primary: i.name, secondary: i.price === 0 ? 'Free' : `₹${i.price}` }))}
+        rows={addons.map(i => ({ id: i.id, dup: dupAddons.has(i.id), primary: i.name, secondary: i.price === 0 ? 'Free' : `₹${i.price}` }))}
+        dupCount={dupAddons.size} onDedupe={() => dedupe('addons')}
         onAdd={() => setEdit({ section: 'addons', item: { price: 0 } })}
         onEdit={(id) => setEdit({ section: 'addons', item: addons.find(x => x.id === id) })}
         onRemove={(id) => removeItem('addons', id)} />
@@ -881,18 +919,28 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   );
 }
 
-function MenuSection({ title, hint, rows, onAdd, onEdit, onRemove }) {
+function MenuSection({ title, hint, rows, dupCount = 0, onDedupe, onAdd, onEdit, onRemove }) {
   return (
     <div style={{ marginBottom: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <div><div style={{ fontWeight: 800, fontSize: 16 }}>{title}</div><div style={{ fontSize: 11, color: colors.muted }}>{hint}</div></div>
         <button onClick={onAdd} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={14}/> Add</button>
       </div>
+      {dupCount > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FFF7E0', border: `1px solid #E0B100`, borderRadius: 10, padding: '8px 12px', fontSize: 12.5, color: '#8A6D00', fontWeight: 600, marginBottom: 8 }}>
+          <AlertTriangle size={15} />
+          <span style={{ flex: 1 }}>{dupCount} duplicate row{dupCount > 1 ? 's' : ''} found (highlighted below).</span>
+          <button onClick={onDedupe} style={{ background: '#fff', border: `1px solid #E0B100`, color: '#8A6D00', padding: '5px 10px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Remove duplicates</button>
+        </div>
+      )}
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
         {rows.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${colors.border}` }}>
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, background: r.dup ? '#FFF7E0' : '#fff' }}>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14 }}>{r.primary}</div>
+              <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+                {r.primary}
+                {r.dup && <span style={{ fontSize: 10, fontWeight: 800, color: '#8A6D00', background: '#FCEAB0', borderRadius: 6, padding: '2px 6px' }}>DUPLICATE</span>}
+              </div>
               <div style={{ fontSize: 12, color: colors.muted }}>{r.secondary}</div>
             </div>
             <button onClick={() => onEdit(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={14}/></button>
