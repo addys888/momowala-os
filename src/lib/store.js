@@ -63,13 +63,15 @@ const rowToLog = ({ inserted_at, cart_id, ...rest }) => ({ ...rest, cartId: cart
 
 const cartToRow = (c) => ({
   id: c.id, name: c.name, tagline: c.tagline, cuisine: c.cuisine, location: c.location,
-  timing: c.timing, emoji: c.emoji, accent: c.accent, owner_name: c.ownerName ?? null,
+  timing: c.timing, emoji: c.emoji, accent: c.accent, phone: c.phone ?? null, instagram: c.instagram ?? null,
+  owner_name: c.ownerName ?? null,
   owner_mobile: c.ownerMobile, owner_password_hash: c.ownerPasswordHash ?? null,
   active: c.active, created_at: c.createdAt,
 });
 const rowToCart = (r) => ({
   id: r.id, name: r.name, tagline: r.tagline, cuisine: r.cuisine, location: r.location,
-  timing: r.timing, emoji: r.emoji, accent: r.accent, ownerName: r.owner_name ?? undefined,
+  timing: r.timing, emoji: r.emoji, accent: r.accent, phone: r.phone ?? undefined, instagram: r.instagram ?? undefined,
+  ownerName: r.owner_name ?? undefined,
   ownerMobile: r.owner_mobile, ownerPasswordHash: r.owner_password_hash ?? null,
   active: r.active, createdAt: r.created_at,
 });

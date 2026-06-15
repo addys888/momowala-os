@@ -104,6 +104,8 @@ create table if not exists carts (
   timing text,
   emoji text,
   accent text,
+  phone text,
+  instagram text,
   owner_name text,
   owner_mobile text,
   owner_password_hash text,
@@ -187,3 +189,5 @@ alter table staff drop constraint if exists staff_role_check;
 
 -- ── Migration: owner name on carts ──
 alter table carts add column if not exists owner_name text;
+alter table carts add column if not exists phone text;
+alter table carts add column if not exists instagram text;

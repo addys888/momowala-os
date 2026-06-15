@@ -142,6 +142,8 @@ const SEED_CARTS = [
     timing: 'Daily 4 PM – 11 PM',
     emoji: '🥟',
     accent: '#FFD60A',
+    phone: '+91 63075 16898',
+    instagram: '@momowalaindia',
     ownerName: 'Momo Wala Owner',
     ownerMobile: '9452661608',
     ownerPasswordHash: null,
@@ -1026,14 +1028,65 @@ function SimpleItemModal({ initial, section, onSave, onClose }) {
   );
 }
 
+// Owner edits their cart's display + contact details (same fields as onboarding,
+// minus login credentials, which stay admin-managed).
+function CartProfileModal({ cart, onSave, onClose }) {
+  const [f, setF] = useState({
+    name: cart?.name || '', emoji: cart?.emoji || '🛒', tagline: cart?.tagline || '',
+    cuisine: cart?.cuisine || '', location: cart?.location || '', timing: cart?.timing || '',
+    phone: cart?.phone || '', instagram: cart?.instagram || '', accent: cart?.accent || brand.teal,
+  });
+  const [error, setError] = useState('');
+  const set = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
+  const submit = () => {
+    if (!f.name.trim()) { setError('Cart name is required.'); return; }
+    if (!f.cuisine.trim()) { setError('Add a short food description.'); return; }
+    onSave({
+      name: f.name.trim(), emoji: f.emoji.trim() || '🛒', tagline: f.tagline.trim(),
+      cuisine: f.cuisine.trim(), location: f.location.trim(), timing: f.timing.trim(),
+      phone: f.phone.trim(), instagram: f.instagram.trim(), accent: f.accent,
+    });
+  };
+  return (
+    <EditModalShell title="Edit cart details" onClose={onClose} onSave={submit} error={error}>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ width: 96 }}><div style={editLabel}>EMOJI</div><input value={f.emoji} onChange={set('emoji')} placeholder="🛒" style={{ ...editInput, textAlign: 'center', fontSize: 22 }} /></div>
+        <div style={{ flex: 1 }}><div style={editLabel}>CART NAME</div><input value={f.name} onChange={set('name')} style={editInput} /></div>
+      </div>
+      <div style={editLabel}>TAGLINE (optional)</div>
+      <input value={f.tagline} onChange={set('tagline')} placeholder="मोमो वाला" style={editInput} />
+      <div style={editLabel}>FOOD DESCRIPTION</div>
+      <input value={f.cuisine} onChange={set('cuisine')} placeholder="Steamed, Kurkure & Tandoori momos…" style={editInput} />
+      <div style={editLabel}>LOCATION / ADDRESS</div>
+      <input value={f.location} onChange={set('location')} placeholder="Area, city" style={editInput} />
+      <div style={editLabel}>TIMING</div>
+      <input value={f.timing} onChange={set('timing')} placeholder="Daily 4 PM – 11 PM" style={editInput} />
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><div style={editLabel}>CONTACT PHONE</div><input type="tel" value={f.phone} onChange={set('phone')} placeholder="+91 …" style={editInput} /></div>
+        <div style={{ flex: 1 }}><div style={editLabel}>INSTAGRAM</div><input value={f.instagram} onChange={set('instagram')} placeholder="@handle" style={editInput} /></div>
+      </div>
+      <div style={editLabel}>BRAND COLOUR</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+        <input type="color" value={f.accent} onChange={set('accent')} style={{ width: 48, height: 40, border: `1px solid ${colors.border}`, borderRadius: 8, cursor: 'pointer', background: '#fff' }} />
+        <span style={{ fontSize: 13, color: colors.muted }}>{f.accent}</span>
+      </div>
+    </EditModalShell>
+  );
+}
+
 // ═══════════════════════════════════════════════
 // OWNER APP
 // ═══════════════════════════════════════════════
 function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
+  const [showProfile, setShowProfile] = useState(false);
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
+  const saveProfile = (fields) => {
+    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ...fields } : c) });
+    setShowProfile(false);
+  };
 
   const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
   const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.payment === 'pending' ? 0 : o.total), 0);
@@ -1051,8 +1104,10 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
       <TopBar title={`${cart?.name ?? 'Cart'} · Owner`} onExit={onExit} />
 
+      {showProfile && <CartProfileModal cart={cart} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
+
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard inv={inv} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'dashboard' && <Dashboard inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
@@ -1111,7 +1166,7 @@ function BottomNav({ tab, setTab, tabs }) {
 }
 
 // ─── OWNER: DASHBOARD ───
-function Dashboard({ inv, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
+function Dashboard({ inv, cart, onEditProfile, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
   const expectedRevenue = piecesSold * 12; // avg ₹12/piece
   const variance = todayRevenue - expectedRevenue;
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
@@ -1119,6 +1174,16 @@ function Dashboard({ inv, stockTypes = [], todayRevenue, cashRevenue, upiRevenue
 
   return (
     <div>
+      {/* Cart profile bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12, marginBottom: 16 }}>
+        <div style={{ flexShrink: 0, width: 42, height: 42, borderRadius: 10, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, border: `2px solid ${cart?.accent || brand.teal}` }}>{cart?.emoji || '🛒'}</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>{cart?.name}</div>
+          <div style={{ fontSize: 11.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 {cart?.location || '—'} · 🕒 {cart?.timing || '—'}</div>
+        </div>
+        <button onClick={onEditProfile} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Edit3 size={13}/> Edit</button>
+      </div>
+
       <SectionHeader title="Today's Snapshot" subtitle={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} />
 
       {/* Hero metric */}
@@ -2372,12 +2437,13 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           </div>
         </>}
 
-        {/* Contact footer — Momo Wala only */}
-        {venue.id === 'momowala' && <div style={{ background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, textAlign: 'center', fontSize: 12, fontWeight: 600, lineHeight: 1.9, marginBottom: 100 }}>
-          📞 +91 63075 16898 · 📷 @momowalaindia<br/>
-          🛵 Free delivery nearby on orders above ₹200<br/>
-          <span style={{ color: colors.pilgrim, fontWeight: 700 }}>|| जय श्री राम ||</span>
-        </div>}
+        {/* Contact footer — built from the cart's own details */}
+        {(venue.phone || venue.instagram || venue.id === 'momowala') && (
+          <div style={{ background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, textAlign: 'center', fontSize: 12, fontWeight: 600, lineHeight: 1.9, marginBottom: 100 }}>
+            {(venue.phone || venue.instagram) && <>{[venue.phone && `📞 ${venue.phone}`, venue.instagram && `📷 ${venue.instagram}`].filter(Boolean).join(' · ')}<br/></>}
+            {venue.id === 'momowala' && <>🛵 Free delivery nearby on orders above ₹200<br/><span style={{ color: colors.pilgrim, fontWeight: 700 }}>|| जय श्री राम ||</span></>}
+          </div>
+        )}
       </div>
 
       {/* Customer cart bar */}
