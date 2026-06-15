@@ -1198,6 +1198,7 @@ function SectionHeader({ title, subtitle }) {
 function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const [showAddStock, setShowAddStock] = useState(false);
   const [showTypes, setShowTypes] = useState(false);
+  const [adjusting, setAdjusting] = useState(null); // { key, label } | null
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
   const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
   const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
@@ -1225,6 +1226,24 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     setShowAddStock(false);
   };
 
+  // Adjust freezer up or down (wastage, spoilage, recount correction).
+  const adjustStock = (type, delta, reason) => {
+    const newInv = { ...inv };
+    const cur = newInv[type]?.freezer ?? 0;
+    const next = Math.max(0, cur + delta);
+    const applied = next - cur; // actual change after clamping at 0
+    newInv[type] = { ...newInv[type], freezer: next };
+    const verb = applied >= 0 ? 'Added' : 'Removed';
+    const log = {
+      id: Date.now(), cartId, date: TODAY,
+      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      type: 'STOCK_ADJUST', item: type, qty: applied,
+      note: `${verb} ${Math.abs(applied)} ${labelFor(type)} in freezer — ${reason}`
+    };
+    setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
+    setAdjusting(null);
+  };
+
   const loadToCart = (type, qty) => {
     const newInv = { ...inv };
     if (newInv[type].freezer < qty) { alert('Not enough stock in freezer!'); return; }
@@ -1249,6 +1268,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
 
       {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
       {showTypes && <StockTypesModal stockTypes={stockTypes} onSave={setStockTypes} onClose={() => setShowTypes(false)} />}
+      {adjusting && <AdjustStockModal label={adjusting.label} current={inv[adjusting.key]?.freezer ?? 0} onApply={(delta, reason) => adjustStock(adjusting.key, delta, reason)} onClose={() => setAdjusting(null)} />}
 
       {/* Freezer Status */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
@@ -1258,7 +1278,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
         </div>
         {stockTypes.map(st => {
           const b = inv[st.key] || { freezer: 0, cart: 0 };
-          return <FreezerItem key={st.key} typeKey={st.key} label={st.label} stock={b.freezer} cart={b.cart} onLoad={loadToCart} />;
+          return <FreezerItem key={st.key} typeKey={st.key} label={st.label} stock={b.freezer} cart={b.cart} onLoad={loadToCart} onAdjust={() => setAdjusting({ key: st.key, label: st.label })} />;
         })}
         {stockTypes.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No stock types yet. Tap "Edit stock types" to add the items this cart freezes.</div>}
       </div>
@@ -1297,7 +1317,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   );
 }
 
-function FreezerItem({ typeKey, label, stock, cart, onLoad }) {
+function FreezerItem({ typeKey, label, stock, cart, onLoad, onAdjust }) {
   const [loadQty, setLoadQty] = useState(50);
   return (
     <div style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
@@ -1308,10 +1328,56 @@ function FreezerItem({ typeKey, label, stock, cart, onLoad }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input type="number" value={loadQty} onChange={e => setLoadQty(parseInt(e.target.value) || 0)} style={{ width: 80, padding: '6px 10px', border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 13 }} />
+        <input type="number" value={loadQty} onChange={e => setLoadQty(parseInt(e.target.value) || 0)} style={{ width: 70, padding: '6px 10px', border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 13 }} />
         <button onClick={() => onLoad(typeKey, loadQty)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '6px 14px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 1 }}>
           Load to Cart
         </button>
+        <button onClick={onAdjust} style={{ background: '#fff', color: brand.navy, border: `1px solid ${colors.border}`, padding: '6px 12px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+          Adjust
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Reduce or correct freezer stock (wastage, spoilage, recount).
+const ADJUST_REASONS = ['Wastage', 'Spoilage', 'Recount correction', 'Other'];
+function AdjustStockModal({ label, current, onApply, onClose }) {
+  const [dir, setDir] = useState('remove'); // remove | add
+  const [qty, setQty] = useState('');
+  const [reason, setReason] = useState(ADJUST_REASONS[0]);
+  const [error, setError] = useState('');
+  const n = parseInt(qty) || 0;
+  const submit = () => {
+    if (n <= 0) { setError('Enter a quantity.'); return; }
+    onApply(dir === 'remove' ? -n : n, reason);
+  };
+  const after = Math.max(0, current + (dir === 'remove' ? -n : n));
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, color: brand.navy }}>Adjust {label}</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Freezer now: <strong>{current}</strong> pcs → after: <strong>{after}</strong> pcs</div>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          {[['remove', 'Remove'], ['add', 'Add']].map(([k, lab]) => (
+            <button key={k} onClick={() => setDir(k)} style={{ flex: 1, padding: 12, border: `2px solid ${dir === k ? colors.ink : colors.border}`, background: dir === k ? colors.ink : '#fff', color: dir === k ? colors.primary : colors.ink, borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 14 }}>{lab}</button>
+          ))}
+        </div>
+
+        <div style={editLabel}>QUANTITY (PIECES)</div>
+        <input type="number" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" style={editInput} />
+
+        <div style={editLabel}>REASON</div>
+        <select value={reason} onChange={e => setReason(e.target.value)} style={editInput}>
+          {ADJUST_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+
+        {error && <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}><AlertCircle size={15}/> {error}</div>}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
+          <button onClick={submit} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Apply</button>
+        </div>
       </div>
     </div>
   );
