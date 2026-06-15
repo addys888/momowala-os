@@ -160,11 +160,18 @@ const PAY_BADGE = {
 // Each cart owns its menu. Momo Wala is seeded from the constants above;
 // carts onboarded later start empty and are filled via the menu editor
 // (manually or by AI photo extraction).
+// stockTypes: the freezer item types this cart tracks (configurable per cart).
+const MOMO_STOCK_TYPES = [
+  { key: 'veg', label: 'Veg Momo' },
+  { key: 'paneer', label: 'Paneer Momo' },
+  { key: 'corn', label: 'Corn Cheese Momo' },
+];
 const SEED_MENUS = {
-  momowala: { items: MENU_ITEMS, lassi: LASSI, addons: ADDONS },
+  momowala: { items: MENU_ITEMS, lassi: LASSI, addons: ADDONS, stockTypes: MOMO_STOCK_TYPES },
 };
-const EMPTY_MENU = { items: [], lassi: [], addons: [] };
+const EMPTY_MENU = { items: [], lassi: [], addons: [], stockTypes: [] };
 const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
+const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
 
 // Deduct an order's pieces from cart stock, looking item details up in the
 // cart's own menu. Returns a new inventory object.
@@ -172,6 +179,7 @@ function deductInventory(inventory, items, menuItems = MENU_ITEMS) {
   const next = { ...inventory };
   items.forEach(item => {
     const menu = menuItems.find(m => m.id === item.id);
+    if (menu && !next[menu.stockKey]) return; // item not tied to a tracked stock type
     if (menu) {
       const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
       next[menu.stockKey] = { ...next[menu.stockKey], cart: next[menu.stockKey].cart - pcs };
@@ -237,7 +245,18 @@ const getInitialState = () => {
   // ── menus, keyed by cartId ──
   let menus = storage.get('menus', null);
   if (!menus) menus = { ...SEED_MENUS };
-  carts.forEach(c => { if (!menus[c.id]) menus[c.id] = { items: [], lassi: [], addons: [] }; });
+  carts.forEach(c => { if (!menus[c.id]) menus[c.id] = { items: [], lassi: [], addons: [], stockTypes: [] }; });
+  // back-fill stockTypes for menus saved before stock types existed
+  Object.entries(menus).forEach(([id, m]) => {
+    if (!m.stockTypes) m.stockTypes = id === 'momowala' ? MOMO_STOCK_TYPES : [];
+  });
+  // make sure every tracked stock type has an inventory bucket
+  Object.entries(menus).forEach(([id, m]) => {
+    if (!inventory[id]) inventory[id] = freshInventory();
+    (m.stockTypes || []).forEach(st => {
+      if (!inventory[id][st.key]) inventory[id][st.key] = { freezer: 0, cart: 0 };
+    });
+  });
 
   // tag any legacy event rows with the momowala cart
   const tag = (arr) => (arr || []).map(x => x.cartId ? x : { ...x, cartId: 'momowala' });
@@ -256,6 +275,24 @@ const getInitialState = () => {
   };
 };
 
+// Ensure every menu has stockTypes and every stock type has an inventory bucket.
+// Runs on init AND after cloud merge (cloud blobs saved before stock types
+// existed have no stockTypes — back-fill momowala's defaults).
+function normalize(state) {
+  const menus = { ...(state.menus || {}) };
+  const inventory = { ...(state.inventory || {}) };
+  Object.keys(menus).forEach(id => {
+    const m = menus[id] || {};
+    const stockTypes = m.stockTypes === undefined
+      ? (id === 'momowala' ? MOMO_STOCK_TYPES : [])
+      : m.stockTypes;
+    menus[id] = { ...m, stockTypes };
+    if (!inventory[id]) inventory[id] = freshInventory();
+    stockTypes.forEach(st => { if (!inventory[id][st.key]) inventory[id][st.key] = { freezer: 0, cart: 0 }; });
+  });
+  return { ...state, menus, inventory };
+}
+
 // ═══════════════════════════════════════════════
 // STORE CONTEXT + SESSION
 // ═══════════════════════════════════════════════
@@ -263,14 +300,14 @@ const StoreContext = createContext(null);
 const useStore = () => useContext(StoreContext);
 
 export default function App() {
-  const [state, setState] = useState(getInitialState());
+  const [state, setState] = useState(() => normalize(getInitialState()));
   // session: null | { role: 'admin'|'owner'|'staff', cartId?, name? } — persisted
   const [session, setSession] = useState(() => storage.get('session', null));
 
   // Hydrate from Supabase once on load (no-op when env keys are missing)
   useEffect(() => {
     loadCloudState().then(cloud => {
-      if (cloud) setState(prev => mergeStates(prev, cloud));
+      if (cloud) setState(prev => normalize(mergeStates(prev, cloud)));
     });
   }, []);
 
@@ -838,7 +875,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
         onEdit={(id) => setEdit({ section: 'addons', item: addons.find(x => x.id === id) })}
         onRemove={(id) => removeItem('addons', id)} />
 
-      {edit?.section === 'items' && <MomoItemModal initial={edit.item} onSave={(it) => saveItem('items', it)} onClose={() => setEdit(null)} />}
+      {edit?.section === 'items' && <MomoItemModal initial={edit.item} stockTypes={menu.stockTypes || []} onSave={(it) => saveItem('items', it)} onClose={() => setEdit(null)} />}
       {edit && edit.section !== 'items' && <SimpleItemModal initial={edit.item} section={edit.section} onSave={(it) => saveItem(edit.section, it)} onClose={() => setEdit(null)} />}
     </div>
   );
@@ -886,14 +923,14 @@ function EditModalShell({ title, onClose, onSave, error, children }) {
   );
 }
 
-function MomoItemModal({ initial, onSave, onClose }) {
-  const [f, setF] = useState({ cat: 'Steamed', type: 'veg', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, ...initial });
+function MomoItemModal({ initial, stockTypes = [], onSave, onClose }) {
+  const [f, setF] = useState({ cat: 'Steamed', type: stockTypes[0]?.key || '', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, ...initial });
   const [error, setError] = useState('');
   const num = (v) => parseInt(v) || 0;
   const submit = () => {
     if (!f.name?.trim()) { setError('Enter an item name.'); return; }
     if (!num(f.half) && !num(f.full)) { setError('Enter at least one price.'); return; }
-    onSave({ ...f, name: f.name.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type });
+    onSave({ ...f, name: f.name.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type || null });
   };
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   return (
@@ -904,7 +941,8 @@ function MomoItemModal({ initial, onSave, onClose }) {
         <div style={{ flex: 1 }}><div style={editLabel}>CATEGORY</div><input value={f.cat} onChange={e => set('cat', e.target.value)} placeholder="Steamed" style={editInput} /></div>
         <div style={{ flex: 1 }}><div style={editLabel}>STOCK TYPE</div>
           <select value={f.type} onChange={e => set('type', e.target.value)} style={editInput}>
-            <option value="veg">Veg</option><option value="paneer">Paneer</option><option value="corn">Corn Cheese</option>
+            {stockTypes.map(st => <option key={st.key} value={st.key}>{st.label}</option>)}
+            <option value="">No stock tracking</option>
           </select>
         </div>
       </div>
@@ -966,9 +1004,9 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       <TopBar title={`${cart?.name ?? 'Cart'} · Owner`} onExit={onExit} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard inv={inv} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
-        {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} />}
-        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
+        {tab === 'dashboard' && <Dashboard inv={inv} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
+        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'reports' && <Reports state={state} cartId={cartId} />}
@@ -1025,13 +1063,11 @@ function BottomNav({ tab, setTab, tabs }) {
 }
 
 // ─── OWNER: DASHBOARD ───
-function Dashboard({ inv, todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
+function Dashboard({ inv, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
   const expectedRevenue = piecesSold * 12; // avg ₹12/piece
   const variance = todayRevenue - expectedRevenue;
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
-  const vegLow = inv.veg.freezer < 100;
-  const paneerLow = inv.paneer.freezer < 50;
-  const cornLow = inv.corn.freezer < 50;
+  const lowTypes = stockTypes.filter(st => (inv[st.key]?.freezer ?? 0) < 100);
 
   return (
     <div>
@@ -1065,19 +1101,24 @@ function Dashboard({ inv, todayRevenue, cashRevenue, upiRevenue, piecesSold, tod
       )}
 
       {/* Stock alerts */}
-      {(vegLow || paneerLow || cornLow) && (
-        <Alert type="danger" title="Low stock alert" message={`${[vegLow && 'Veg', paneerLow && 'Paneer', cornLow && 'Corn Cheese'].filter(Boolean).join(' & ')} momo running low. Order before tomorrow.`} />
+      {lowTypes.length > 0 && (
+        <Alert type="danger" title="Low stock alert" message={`${lowTypes.map(st => st.label).join(' & ')} running low. Order before tomorrow.`} />
       )}
 
+      {stockTypes.length > 0 && <>
       <SectionHeader title="Live Inventory" />
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
-        <StockRow label="Veg Momo · Freezer" value={inv.veg.freezer} unit="pcs" low={vegLow} />
-        <StockRow label="Veg Momo · On Cart" value={inv.veg.cart} unit="pcs" />
-        <StockRow label="Paneer Momo · Freezer" value={inv.paneer.freezer} unit="pcs" low={paneerLow} />
-        <StockRow label="Paneer Momo · On Cart" value={inv.paneer.cart} unit="pcs" />
-        <StockRow label="Corn Cheese · Freezer" value={inv.corn.freezer} unit="pcs" low={cornLow} />
-        <StockRow label="Corn Cheese · On Cart" value={inv.corn.cart} unit="pcs" />
+        {stockTypes.map(st => {
+          const b = inv[st.key] || { freezer: 0, cart: 0 };
+          return (
+            <React.Fragment key={st.key}>
+              <StockRow label={`${st.label} · Freezer`} value={b.freezer} unit="pcs" low={b.freezer < 100} />
+              <StockRow label={`${st.label} · On Cart`} value={b.cart} unit="pcs" />
+            </React.Fragment>
+          );
+        })}
       </div>
+      </>}
 
       <SectionHeader title="Recent Orders" />
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
@@ -1154,11 +1195,23 @@ function SectionHeader({ title, subtitle }) {
 }
 
 // ─── OWNER: INVENTORY ───
-function InventoryView({ state, updateState, cartId, inv }) {
+function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const [showAddStock, setShowAddStock] = useState(false);
+  const [showTypes, setShowTypes] = useState(false);
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
   const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
   const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
+  const labelFor = (key) => stockTypes.find(st => st.key === key)?.label || key;
+
+  const setStockTypes = (next) => {
+    const menu = menuFor(state, cartId);
+    const newInv = { ...inv };
+    next.forEach(st => { if (!newInv[st.key]) newInv[st.key] = { freezer: 0, cart: 0 }; });
+    updateState({
+      menus: { ...state.menus, [cartId]: { ...menu, stockTypes: next } },
+      inventory: { ...state.inventory, [cartId]: newInv },
+    });
+  };
 
   const addStock = (type, qty) => {
     const newInv = { ...inv };
@@ -1166,7 +1219,7 @@ function InventoryView({ state, updateState, cartId, inv }) {
     const log = {
       id: Date.now(), cartId, date: TODAY,
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-      type: 'STOCK_IN', item: type, qty, note: `Added ${qty} pieces of ${type}`
+      type: 'STOCK_IN', item: type, qty, note: `Added ${qty} pieces of ${labelFor(type)}`
     };
     setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
     setShowAddStock(false);
@@ -1179,7 +1232,7 @@ function InventoryView({ state, updateState, cartId, inv }) {
     const log = {
       id: Date.now(), cartId, date: TODAY,
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
-      type: 'CART_LOAD', item: type, qty, note: `Moved ${qty} ${type} pieces to cart`
+      type: 'CART_LOAD', item: type, qty, note: `Moved ${qty} ${labelFor(type)} pieces to cart`
     };
     setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
   };
@@ -1194,14 +1247,20 @@ function InventoryView({ state, updateState, cartId, inv }) {
         <Plus size={18}/> Record New Supplier Delivery
       </button>
 
-      {showAddStock && <StockInModal onAdd={addStock} onClose={() => setShowAddStock(false)} />}
+      {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
+      {showTypes && <StockTypesModal stockTypes={stockTypes} onSave={setStockTypes} onClose={() => setShowTypes(false)} />}
 
       {/* Freezer Status */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>FREEZER (KITCHEN)</div>
-        <FreezerItem type="veg" stock={inv.veg.freezer} cart={inv.veg.cart} onLoad={loadToCart} />
-        <FreezerItem type="paneer" stock={inv.paneer.freezer} cart={inv.paneer.cart} onLoad={loadToCart} />
-        <FreezerItem type="corn" stock={inv.corn.freezer} cart={inv.corn.cart} onLoad={loadToCart} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>FREEZER (KITCHEN)</div>
+          <button onClick={() => setShowTypes(true)} style={{ ...adminBtn, color: brand.navy }}>Edit stock types</button>
+        </div>
+        {stockTypes.map(st => {
+          const b = inv[st.key] || { freezer: 0, cart: 0 };
+          return <FreezerItem key={st.key} typeKey={st.key} label={st.label} stock={b.freezer} cart={b.cart} onLoad={loadToCart} />;
+        })}
+        {stockTypes.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No stock types yet. Tap "Edit stock types" to add the items this cart freezes.</div>}
       </div>
 
       {/* Consumables */}
@@ -1238,19 +1297,19 @@ function InventoryView({ state, updateState, cartId, inv }) {
   );
 }
 
-function FreezerItem({ type, stock, cart, onLoad }) {
+function FreezerItem({ typeKey, label, stock, cart, onLoad }) {
   const [loadQty, setLoadQty] = useState(50);
   return (
     <div style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-        <div style={{ fontWeight: 700, textTransform: 'capitalize' }}>{type === 'corn' ? 'Corn Cheese' : type} Momo</div>
+        <div style={{ fontWeight: 700 }}>{label}</div>
         <div style={{ fontSize: 13 }}>
           <span style={{ color: colors.muted }}>Freezer: </span><strong>{stock}</strong> · <span style={{ color: colors.muted }}>Cart: </span><strong>{cart}</strong>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
         <input type="number" value={loadQty} onChange={e => setLoadQty(parseInt(e.target.value) || 0)} style={{ width: 80, padding: '6px 10px', border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 13 }} />
-        <button onClick={() => onLoad(type, loadQty)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '6px 14px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 1 }}>
+        <button onClick={() => onLoad(typeKey, loadQty)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '6px 14px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 1 }}>
           Load to Cart
         </button>
       </div>
@@ -1258,8 +1317,44 @@ function FreezerItem({ type, stock, cart, onLoad }) {
   );
 }
 
-function StockInModal({ onAdd, onClose }) {
-  const [type, setType] = useState('veg');
+// Add / rename / remove the freezer stock types this cart tracks.
+function StockTypesModal({ stockTypes, onSave, onClose }) {
+  const [rows, setRows] = useState(stockTypes.map(st => ({ ...st })));
+  const [name, setName] = useState('');
+  const add = () => {
+    const label = name.trim();
+    if (!label) return;
+    const key = slugify(label) || `s${Date.now().toString(36)}`;
+    if (rows.some(r => r.key === key)) { setName(''); return; }
+    setRows([...rows, { key, label }]);
+    setName('');
+  };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 440, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, color: brand.navy }}>Stock types</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>The freezer items this cart tracks (e.g. Veg Momo, Paneer Momo). Menu items link to these for stock counting.</div>
+        {rows.map((r, i) => (
+          <div key={r.key} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
+            <input value={r.label} onChange={e => setRows(rows.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} style={{ ...editInput, marginBottom: 0 }} />
+            <button onClick={() => setRows(rows.filter((_, j) => j !== i))} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 9, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={15} color={colors.red}/></button>
+          </div>
+        ))}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} placeholder="New stock type, e.g. Chicken Momo" style={{ ...editInput, marginBottom: 0 }} />
+          <button onClick={add} style={{ ...adminBtn, color: brand.navy }}><Plus size={16}/></button>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
+          <button onClick={() => { onSave(rows.filter(r => r.label.trim()).map(r => ({ key: r.key, label: r.label.trim() }))); onClose(); }} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StockInModal({ stockTypes = [], onAdd, onClose }) {
+  const [type, setType] = useState(stockTypes[0]?.key || '');
   const [qty, setQty] = useState(500);
 
   return (
@@ -1269,9 +1364,9 @@ function StockInModal({ onAdd, onClose }) {
 
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>ITEM TYPE</div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            {[['veg', 'Veg'], ['paneer', 'Paneer'], ['corn', 'Corn Cheese']].map(([key, label]) => (
-              <button key={key} onClick={() => setType(key)} style={{ flex: 1, padding: 12, border: `2px solid ${type === key ? colors.ink : colors.border}`, background: type === key ? colors.ink : '#fff', color: type === key ? colors.primary : colors.ink, borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{label}</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {stockTypes.map(st => (
+              <button key={st.key} onClick={() => setType(st.key)} style={{ flex: '1 1 30%', padding: 12, border: `2px solid ${type === st.key ? colors.ink : colors.border}`, background: type === st.key ? colors.ink : '#fff', color: type === st.key ? colors.primary : colors.ink, borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{st.label}</button>
             ))}
           </div>
         </div>
@@ -1292,25 +1387,22 @@ function StockInModal({ onAdd, onClose }) {
 }
 
 // ─── OWNER: RECONCILIATION ───
-function Reconciliation({ state, updateState, cartId, inv, todayOrders, cashRevenue, upiRevenue, piecesSold }) {
+function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold }) {
   const [physicalCash, setPhysicalCash] = useState('');
   const [phonePeAmount, setPhonePeAmount] = useState('');
-  const [remainingVeg, setRemainingVeg] = useState('');
-  const [remainingPaneer, setRemainingPaneer] = useState('');
-  const [remainingCorn, setRemainingCorn] = useState('');
+  const [remaining, setRemaining] = useState({}); // { [stockKey]: '' }
   const [closed, setClosed] = useState(false);
-
-  // Stock is deducted as orders are settled, so the cart count already
-  // reflects sales — expected remaining is simply the current cart stock.
-  const expectedVeg = inv.veg.cart;
-  const expectedPaneer = inv.paneer.cart;
-  const expectedCorn = inv.corn.cart;
 
   const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - cashRevenue : null;
   const upiDiff = phonePeAmount !== '' ? parseInt(phonePeAmount) - upiRevenue : null;
-  const vegDiff = remainingVeg !== '' ? parseInt(remainingVeg) - expectedVeg : null;
-  const paneerDiff = remainingPaneer !== '' ? parseInt(remainingPaneer) - expectedPaneer : null;
-  const cornDiff = remainingCorn !== '' ? parseInt(remainingCorn) - expectedCorn : null;
+  // Stock is deducted as orders settle, so expected remaining = current cart count.
+  const stockRows = stockTypes.map(st => {
+    const expected = inv[st.key]?.cart ?? 0;
+    const val = remaining[st.key] ?? '';
+    const diff = val !== '' ? parseInt(val) - expected : null;
+    return { ...st, expected, val, diff };
+  });
+  const allStockFilled = stockRows.every(r => r.val !== '');
 
   const closeDay = () => {
     const dayClose = {
@@ -1324,9 +1416,7 @@ function Reconciliation({ state, updateState, cartId, inv, todayOrders, cashReve
       systemUpi: upiRevenue,
       phonePeAmount: parseInt(phonePeAmount) || 0,
       upiDiff: upiDiff || 0,
-      expectedVeg, actualVeg: parseInt(remainingVeg) || 0, vegDiff: vegDiff || 0,
-      expectedPaneer, actualPaneer: parseInt(remainingPaneer) || 0, paneerDiff: paneerDiff || 0,
-      expectedCorn, actualCorn: parseInt(remainingCorn) || 0, cornDiff: cornDiff || 0,
+      stock: stockRows.map(r => ({ key: r.key, label: r.label, expected: r.expected, actual: parseInt(r.val) || 0, diff: r.diff || 0 })),
       piecesSold,
       revenue: cashRevenue + upiRevenue,
       closedAt: new Date().toISOString()
@@ -1388,40 +1478,23 @@ function Reconciliation({ state, updateState, cartId, inv, todayOrders, cashReve
         unit="₹"
       />
 
-      {/* Stock reconciliation */}
-      <ReconcileBlock
-        title="🥟 Veg Momo Stock"
-        systemValue={`${expectedVeg} pcs expected`}
-        label="Actual pieces remaining on cart"
-        value={remainingVeg}
-        onChange={setRemainingVeg}
-        diff={vegDiff}
-        unit="pcs"
-      />
-
-      <ReconcileBlock
-        title="🥟 Paneer Momo Stock"
-        systemValue={`${expectedPaneer} pcs expected`}
-        label="Actual pieces remaining on cart"
-        value={remainingPaneer}
-        onChange={setRemainingPaneer}
-        diff={paneerDiff}
-        unit="pcs"
-      />
-
-      <ReconcileBlock
-        title="🥟 Corn Cheese Stock"
-        systemValue={`${expectedCorn} pcs expected`}
-        label="Actual pieces remaining on cart"
-        value={remainingCorn}
-        onChange={setRemainingCorn}
-        diff={cornDiff}
-        unit="pcs"
-      />
+      {/* Stock reconciliation — one block per stock type */}
+      {stockRows.map(r => (
+        <ReconcileBlock
+          key={r.key}
+          title={`🥟 ${r.label}`}
+          systemValue={`${r.expected} pcs expected`}
+          label="Actual pieces remaining on cart"
+          value={r.val}
+          onChange={(v) => setRemaining(prev => ({ ...prev, [r.key]: v }))}
+          diff={r.diff}
+          unit="pcs"
+        />
+      ))}
 
       {/* Close day button */}
       <button onClick={closeDay}
-        disabled={physicalCash === '' || phonePeAmount === '' || remainingVeg === '' || remainingPaneer === '' || remainingCorn === ''}
+        disabled={physicalCash === '' || phonePeAmount === '' || !allStockFilled}
         style={{ width: '100%', background: physicalCash === '' || phonePeAmount === '' ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: 'pointer', marginTop: 16 }}>
         Close Day & Save Report
       </button>
@@ -1678,7 +1751,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={cancelOrder} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} />}
-        {tab === 'shift' && <ShiftStatus inv={inv} myOrders={myOrders} staffName={staffName} />}
+        {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
       </div>
 
       <BottomNav tab={tab} setTab={setTab} tabs={[
@@ -1888,7 +1961,7 @@ function MyOrdersScreen({ orders }) {
   );
 }
 
-function ShiftStatus({ inv, myOrders, staffName }) {
+function ShiftStatus({ inv, stockTypes = [], myOrders, staffName }) {
   const cashTotal = myOrders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
   const upiTotal = myOrders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
 
@@ -1905,9 +1978,10 @@ function ShiftStatus({ inv, myOrders, staffName }) {
 
       <div style={{ background: '#fff', padding: 16, borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>STOCK ON CART</div>
-        <StockRow label="Veg Momo (pcs)" value={inv.veg.cart} unit="pcs"/>
-        <StockRow label="Paneer Momo (pcs)" value={inv.paneer.cart} unit="pcs"/>
-        <StockRow label="Corn Cheese (pcs)" value={inv.corn.cart} unit="pcs"/>
+        {stockTypes.map(st => (
+          <StockRow key={st.key} label={`${st.label} (pcs)`} value={inv[st.key]?.cart ?? 0} unit="pcs"/>
+        ))}
+        {stockTypes.length === 0 && <div style={{ fontSize: 13, color: colors.muted, textAlign: 'center', padding: 8 }}>No stock tracked</div>}
       </div>
 
       <Alert
