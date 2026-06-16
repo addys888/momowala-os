@@ -61,6 +61,11 @@ const rowToStaff = (r) => ({
 const logToRow = (l) => { const { cartId, ...rest } = l; return { ...rest, cart_id: cartId ?? null }; };
 const rowToLog = ({ inserted_at, cart_id, ...rest }) => ({ ...rest, cartId: cart_id ?? undefined });
 
+const wastageToRow = (w) => ({ id: w.id, cart_id: w.cartId ?? null, date: w.date, time: w.time, stock_key: w.stockKey, label: w.label, qty: w.qty, reason: w.reason, staff: w.staff });
+const rowToWastage = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, date: r.date, time: r.time, stockKey: r.stock_key, label: r.label, qty: r.qty, reason: r.reason, staff: r.staff });
+const expenseToRow = (e) => ({ id: e.id, cart_id: e.cartId ?? null, date: e.date, category: e.category, amount: e.amount, note: e.note ?? null });
+const rowToExpense = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, date: r.date, category: r.category, amount: r.amount, note: r.note ?? undefined });
+
 const cartToRow = (c) => ({
   id: c.id, name: c.name, tagline: c.tagline, cuisine: c.cuisine, location: c.location,
   timing: c.timing, emoji: c.emoji, accent: c.accent, logo: c.logo ?? null,
@@ -161,6 +166,8 @@ export function mergeStates(localState, cloud) {
     stockLogs: unionById(localState.stockLogs, cloud.stockLogs),
     cartLoadings: unionById(localState.cartLoadings, cloud.cartLoadings),
     dayCloseLogs: unionById(localState.dayCloseLogs, cloud.dayCloseLogs),
+    wastageLogs: unionById(localState.wastageLogs, cloud.wastageLogs),
+    expenses: unionById(localState.expenses, cloud.expenses),
     // mutable, owner/admin-managed; cloud copy wins on id conflict
     staff: cloud.staff?.length ? unionById(localState.staff, cloud.staff) : localState.staff,
     carts: cloud.carts?.length ? unionById(localState.carts, cloud.carts) : localState.carts,
@@ -175,7 +182,7 @@ export function mergeStates(localState, cloud) {
 export async function loadCloudState() {
   if (!supabase) return null;
   try {
-    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus] = await Promise.all([
+    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses] = await Promise.all([
       supabase.from('orders').select('*').order('id'),
       supabase.from('stock_logs').select('*').order('id'),
       supabase.from('cart_loadings').select('*').order('id'),
@@ -185,6 +192,8 @@ export async function loadCloudState() {
       supabase.from('carts').select('*').order('created_at'),
       supabase.from('platform').select('*').eq('id', 1).maybeSingle(),
       supabase.from('menus').select('*').eq('id', 1).maybeSingle(),
+      supabase.from('wastage_logs').select('*').order('id'),
+      supabase.from('expenses').select('*').order('id'),
     ]);
     const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform].find((r) => r.error);
     if (failed) throw failed.error;
@@ -193,6 +202,8 @@ export async function loadCloudState() {
       stockLogs: stockLogs.data.map(rowToLog),
       cartLoadings: cartLoadings.data.map(rowToLog),
       dayCloseLogs: dayCloseLogs.data.map((r) => rowToDayClose(r)),
+      wastageLogs: (wastage.data || []).map(rowToWastage),
+      expenses: (expenses.data || []).map(rowToExpense),
       inventory: inventory.data?.data ?? null,
       staff: staff.data.map((r) => rowToStaff(r)),
       carts: carts.data.map((r) => rowToCart(r)),
@@ -230,6 +241,8 @@ async function pushState(state) {
         append('stock_logs', state.stockLogs.map(logToRow)),
         append('cart_loadings', state.cartLoadings.map(logToRow)),
         append('day_close_logs', state.dayCloseLogs.map(dayCloseToRow)),
+        append('wastage_logs', (state.wastageLogs || []).map(wastageToRow)),
+        merge('expenses', (state.expenses || []).map(expenseToRow)),
         merge('staff', state.staff.map(staffToRow)),
         merge('carts', state.carts.map(cartToRow)),
         supabase.from('platform').upsert({ id: 1, admin_mobile: state.platform.adminMobile, admin_password_hash: state.platform.adminPasswordHash, updated_at: new Date().toISOString() }),

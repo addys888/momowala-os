@@ -134,6 +134,31 @@ create table if not exists menus (
   updated_at timestamptz not null default now()
 );
 
+-- Staff-logged damaged / wasted momos (deducted from cart stock).
+create table if not exists wastage_logs (
+  id bigint primary key,
+  cart_id text,
+  date date not null,
+  time text,
+  stock_key text,
+  label text,
+  qty integer,
+  reason text,
+  staff text,
+  inserted_at timestamptz not null default now()
+);
+
+-- Owner-recorded raw-material / stock expenses.
+create table if not exists expenses (
+  id bigint primary key,
+  cart_id text,
+  date date not null,
+  category text,
+  amount integer,
+  note text,
+  inserted_at timestamptz not null default now()
+);
+
 -- ── Row Level Security ──
 -- v1 has no user accounts: the app talks to Supabase with the anon key, so
 -- these policies allow anon read/write. That means anyone who has your URL
@@ -152,7 +177,7 @@ alter table platform enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform','menus']
+  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform','menus','wastage_logs','expenses']
   loop
     execute format('drop policy if exists "anon full access" on %I', t);
     execute format('create policy "anon full access" on %I for all to anon using (true) with check (true)', t);

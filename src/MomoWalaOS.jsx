@@ -293,6 +293,8 @@ const getInitialState = () => {
     stockLogs: tag(storage.get('stockLogs', [])),
     cartLoadings: tag(storage.get('cartLoadings', [])),
     dayCloseLogs: tag(storage.get('dayCloseLogs', [])),
+    wastageLogs: tag(storage.get('wastageLogs', [])),
+    expenses: tag(storage.get('expenses', [])),
     staffOnDuty: storage.get('staffOnDuty', null),
   };
 };
@@ -346,6 +348,8 @@ export default function App() {
     storage.set('stockLogs', state.stockLogs);
     storage.set('cartLoadings', state.cartLoadings);
     storage.set('dayCloseLogs', state.dayCloseLogs);
+    storage.set('wastageLogs', state.wastageLogs);
+    storage.set('expenses', state.expenses);
     syncToCloud(state);
   }, [state]);
 
@@ -1197,7 +1201,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
-        {tab === 'reports' && <Reports state={state} cartId={cartId} />}
+        {tab === 'reports' && <Reports state={state} updateState={updateState} cartId={cartId} />}
       </div>
 
       <BottomNav tab={tab} setTab={setTab} tabs={[
@@ -1919,50 +1923,115 @@ function AddStaffModal({ existing, ownerMobile, onAdd, onClose }) {
 }
 
 // ─── OWNER: REPORTS ───
-function Reports({ state, cartId }) {
-  const last7 = state.dayCloseLogs.filter(d => d.cartId === cartId).slice(-7);
-  const totalRevenue = last7.reduce((s, d) => s + d.revenue, 0);
-  const totalLeakage = last7.reduce((s, d) => s + Math.min(0, d.cashDiff) + Math.min(0, d.upiDiff), 0);
+const EXPENSE_CATEGORIES = ['Frozen momo stock', 'Vegetables / paneer', 'Oil & consumables', 'Gas / fuel', 'Packaging', 'Rent / pitch', 'Other'];
+// inclusive date-string range for a period, computed from real settled orders.
+function periodStart(period) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  if (period === 'today') return d;
+  if (period === 'week') { const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d; } // Monday
+  if (period === 'month') { d.setDate(1); return d; }
+  return new Date(0);
+}
+const dstr = (d) => d.toISOString().split('T')[0];
+
+function Reports({ state, updateState, cartId }) {
+  const [period, setPeriod] = useState('today');
+  const [showExpense, setShowExpense] = useState(false);
+  const from = dstr(periodStart(period));
+
+  const orders = state.orders.filter(o => o.cartId === cartId && o.payment !== 'pending' && o.date >= from);
+  const expenses = (state.expenses || []).filter(e => e.cartId === cartId && e.date >= from);
+  const wastage = (state.wastageLogs || []).filter(w => w.cartId === cartId && w.date >= from);
+
+  const revenue = orders.reduce((s, o) => s + o.total, 0);
+  const cash = orders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
+  const upi = orders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
+  const spend = expenses.reduce((s, e) => s + e.amount, 0);
+  const wasted = wastage.reduce((s, w) => s + w.qty, 0);
+  const net = revenue - spend;
+
+  const addExpense = (category, amount, note) => {
+    const e = { id: Date.now(), cartId, date: TODAY, category, amount, note };
+    updateState({ expenses: [...(state.expenses || []), e] });
+    setShowExpense(false);
+  };
+  const removeExpense = (id) => { if (confirm('Delete this expense?')) updateState({ expenses: state.expenses.filter(e => e.id !== id) }); };
+
+  const label = { today: 'Today', week: 'This week', month: 'This month' }[period];
 
   return (
     <div>
-      <SectionHeader title="7-Day Performance" subtitle="Trends & insights" />
+      <SectionHeader title="Records" subtitle="Sales · expenses · wastage" />
 
-      {last7.length === 0 ? (
-        <div style={{ background: '#fff', borderRadius: 12, padding: 40, textAlign: 'center', border: `1px solid ${colors.border}` }}>
-          <BarChart3 size={40} color={colors.muted} style={{ margin: '0 auto 12px' }}/>
-          <div style={{ color: colors.muted, fontSize: 14 }}>Close a few days first to see trends here</div>
-        </div>
-      ) : (
-        <>
-          <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 12, marginBottom: 16 }}>
-            <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5, marginBottom: 4 }}>LAST 7 DAYS</div>
-            <div style={{ fontSize: 34, fontWeight: 900 }}>₹{totalRevenue.toLocaleString('en-IN')}</div>
-            <div style={{ fontSize: 13, opacity: 0.8, marginTop: 4 }}>Avg ₹{Math.round(totalRevenue/last7.length).toLocaleString('en-IN')}/day</div>
+      {/* Period toggle */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
+        {[['today', 'Today'], ['week', 'This week'], ['month', 'This month']].map(([k, lab]) => (
+          <button key={k} onClick={() => setPeriod(k)} style={{ flex: 1, padding: '9px 0', background: period === k ? colors.ink : '#fff', color: period === k ? colors.primary : colors.ink, border: `1px solid ${period === k ? colors.ink : colors.border}`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{lab}</button>
+        ))}
+      </div>
+
+      {/* Sales + net */}
+      <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 14, marginBottom: 12 }}>
+        <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5 }}>{label.toUpperCase()} · SALES</div>
+        <div style={{ fontSize: 34, fontWeight: 900 }}>₹{revenue.toLocaleString('en-IN')}</div>
+        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{orders.length} orders · 💵 ₹{cash} · 📱 ₹{upi}</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        <MetricCard label="Expenses" value={`₹${spend.toLocaleString('en-IN')}`} icon={<IndianRupee size={16}/>} color={colors.red} />
+        <MetricCard label="Net (sales − spend)" value={`₹${net.toLocaleString('en-IN')}`} icon={<TrendingUp size={16}/>} color={net >= 0 ? colors.green : colors.red} />
+      </div>
+      {wasted > 0 && <Alert type="warn" title={`${wasted} pcs wasted ${label.toLowerCase()}`} message={`${wastage.length} wastage entr${wastage.length > 1 ? 'ies' : 'y'} logged by staff.`} />}
+
+      {/* Expenses */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 4 }}>
+        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>EXPENSES — {label.toUpperCase()}</div>
+        <button onClick={() => setShowExpense(true)} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={14}/> Add</button>
+      </div>
+      {showExpense && <ExpenseModal onAdd={addExpense} onClose={() => setShowExpense(false)} />}
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden', marginBottom: 16 }}>
+        {expenses.slice().reverse().map(e => (
+          <div key={e.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{e.category}</div><div style={{ fontSize: 12, color: colors.muted }}>{e.date}{e.note ? ` · ${e.note}` : ''}</div></div>
+            <div style={{ fontWeight: 800 }}>₹{e.amount}</div>
+            <button onClick={() => removeExpense(e.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
           </div>
+        ))}
+        {expenses.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No expenses logged {label.toLowerCase()}. Tap Add to record stock/raw-material spend.</div>}
+      </div>
 
-          {totalLeakage < 0 && (
-            <Alert type="danger" title={`Total cash leakage: ₹${Math.abs(totalLeakage)}`} message="Investigate days with cash shortfall. Tighten controls." />
-          )}
-
-          <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-            {last7.reverse().map(d => (
-              <div key={d.id} style={{ padding: 16, borderBottom: `1px solid ${colors.border}` }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <div style={{ fontWeight: 700 }}>{new Date(d.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-                  <div style={{ fontWeight: 800, fontSize: 18 }}>₹{d.revenue}</div>
-                </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: colors.muted }}>
-                  <span>📦 {d.totalOrders} orders</span>
-                  <span>🥟 {d.piecesSold} pcs</span>
-                  {d.cashDiff !== 0 && <span style={{ color: d.cashDiff < 0 ? colors.red : colors.green }}>Cash: {d.cashDiff > 0 ? '+' : ''}₹{d.cashDiff}</span>}
-                </div>
-              </div>
-            ))}
+      {/* Day-close history */}
+      <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>DAY-CLOSE HISTORY</div>
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+        {state.dayCloseLogs.filter(d => d.cartId === cartId).slice(-14).reverse().map(d => (
+          <div key={d.id} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ fontWeight: 700 }}>{new Date(d.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+              <div style={{ fontWeight: 800 }}>₹{d.revenue}</div>
+            </div>
+            <div style={{ fontSize: 11, color: colors.muted }}>📦 {d.totalOrders} orders · 🥟 {d.piecesSold} pcs</div>
           </div>
-        </>
-      )}
+        ))}
+        {state.dayCloseLogs.filter(d => d.cartId === cartId).length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>Close a day to start the history.</div>}
+      </div>
     </div>
+  );
+}
+
+function ExpenseModal({ onAdd, onClose }) {
+  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onAdd(category, a, note.trim()); };
+  return (
+    <EditModalShell title="Add expense" onClose={onClose} onSave={submit} error={error}>
+      <div style={editLabel}>CATEGORY</div>
+      <select value={category} onChange={e => setCategory(e.target.value)} style={editInput}>{EXPENSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}</select>
+      <div style={editLabel}>AMOUNT ₹</div>
+      <input type="number" inputMode="numeric" value={amount} onChange={e => setAmount(e.target.value)} placeholder="e.g. 1200" style={editInput} />
+      <div style={editLabel}>NOTE (optional)</div>
+      <input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. 6 packets veg momo" style={editInput} />
+    </EditModalShell>
   );
 }
 
@@ -2019,6 +2088,19 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     updateState({ orders: state.orders.filter(o => o.id !== orderId) });
   };
 
+  // Staff logs damaged/wasted momos — deducts from cart stock + records it.
+  const logWastage = (stockKey, qty, reason) => {
+    const st = (menu.stockTypes || []).find(s => s.key === stockKey);
+    const newInv = { ...inv };
+    if (newInv[stockKey]) newInv[stockKey] = { ...newInv[stockKey], cart: Math.max(0, newInv[stockKey].cart - qty) };
+    const log = {
+      id: Date.now(), cartId, date: TODAY,
+      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      stockKey, label: st?.label || stockKey, qty, reason, staff: staffName,
+    };
+    setCartInv(newInv, { wastageLogs: [...state.wastageLogs, log] });
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
       <TopBar title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
@@ -2027,6 +2109,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={cancelOrder} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} />}
+        {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
       </div>
 
@@ -2034,6 +2117,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         { id: 'order', icon: <Plus size={20}/>, label: 'New Order' },
         { id: 'pending', icon: <Clock size={20}/>, label: 'Pending', badge: pendingOrders.length },
         { id: 'myorders', icon: <FileText size={20}/>, label: 'My Orders' },
+        { id: 'wastage', icon: <Trash2 size={20}/>, label: 'Wastage' },
         { id: 'shift', icon: <Award size={20}/>, label: 'Shift' },
       ]} />
     </div>
@@ -2265,6 +2349,62 @@ function ShiftStatus({ inv, stockTypes = [], myOrders, staffName }) {
         title="Late shift handover?"
         message="If you're staying late after chef leaves, your orders are still tracked separately. Owner sees both shifts clearly."
       />
+    </div>
+  );
+}
+
+// ─── STAFF: WASTAGE LOG ───
+const WASTE_REASONS = ['Damaged while cooking', 'Dropped / spilled', 'Burnt', 'Expired / spoiled', 'Other'];
+function WastageScreen({ stockTypes, inv, logs, onLog }) {
+  const [stockKey, setStockKey] = useState(stockTypes[0]?.key || '');
+  const [qty, setQty] = useState('');
+  const [reason, setReason] = useState(WASTE_REASONS[0]);
+  const [done, setDone] = useState('');
+  const n = parseInt(qty) || 0;
+  const submit = () => {
+    if (!stockKey || n <= 0) return;
+    onLog(stockKey, n, reason);
+    setDone(`Logged ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage.`);
+    setQty(''); setTimeout(() => setDone(''), 2500);
+  };
+  const todayTotal = logs.reduce((s, l) => s + l.qty, 0);
+
+  return (
+    <div>
+      <SectionHeader title="Wastage" subtitle="Damaged / spoiled momos" />
+      {stockTypes.length === 0 ? (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 32, textAlign: 'center', border: `1px solid ${colors.border}`, color: colors.muted }}>No stock types set up for this cart.</div>
+      ) : (
+        <>
+          <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
+            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>ITEM</div>
+            <select value={stockKey} onChange={e => setStockKey(e.target.value)} style={{ ...editInput, marginBottom: 12 }}>
+              {stockTypes.map(st => <option key={st.key} value={st.key}>{st.label} (cart: {inv[st.key]?.cart ?? 0})</option>)}
+            </select>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <div style={{ flex: 1 }}><div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>PIECES</div>
+                <input type="number" inputMode="numeric" value={qty} onChange={e => setQty(e.target.value)} placeholder="0" style={editInput} /></div>
+              <div style={{ flex: 2 }}><div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>REASON</div>
+                <select value={reason} onChange={e => setReason(e.target.value)} style={editInput}>{WASTE_REASONS.map(r => <option key={r}>{r}</option>)}</select></div>
+            </div>
+            <button onClick={submit} style={{ width: '100%', background: colors.red, color: '#fff', border: 'none', padding: 14, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Log wastage (removes from cart)</button>
+            {done && <div style={{ marginTop: 10, background: '#E7F5E7', color: colors.green, borderRadius: 8, padding: 10, fontSize: 13, fontWeight: 600, textAlign: 'center' }}>{done}</div>}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+            <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>TODAY'S WASTAGE</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: colors.red }}>{todayTotal} pcs</div>
+          </div>
+          <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+            {logs.slice().reverse().map(l => (
+              <div key={l.id} style={{ padding: '12px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div><div style={{ fontWeight: 700, fontSize: 14 }}>{l.qty}× {l.label}</div><div style={{ fontSize: 12, color: colors.muted }}>{l.reason} · {l.time} · {l.staff}</div></div>
+              </div>
+            ))}
+            {logs.length === 0 && <div style={{ padding: 28, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No wastage logged today</div>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
