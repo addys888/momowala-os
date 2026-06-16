@@ -468,11 +468,11 @@ function LoginFields({ mobile, setMobile, mobileLocked, pw, setPw, pw2, setPw2, 
         placeholder="10-digit number"
         style={{ ...inputStyle, background: mobileLocked ? '#F5F4F0' : '#fff', fontWeight: 700, letterSpacing: 1 }} />
       <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>{showConfirm ? 'NEW PASSWORD' : 'PASSWORD'}</div>
-      <input type="password" inputMode="numeric" value={pw} onChange={e => setPw(e.target.value)}
+      <input type="password" value={pw} onChange={e => setPw(e.target.value)}
         onKeyDown={e => e.key === 'Enter' && !showConfirm && onSubmit()} placeholder="••••" style={inputStyle} />
       {showConfirm && (<>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>CONFIRM PASSWORD</div>
-        <input type="password" inputMode="numeric" value={pw2} onChange={e => setPw2(e.target.value)}
+        <input type="password" value={pw2} onChange={e => setPw2(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && onSubmit()} placeholder="••••" style={inputStyle} />
       </>)}
       {error && <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}><AlertCircle size={15} /> {error}</div>}
