@@ -1,6 +1,6 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword } from './lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
 
 // ============================================
@@ -191,6 +191,34 @@ const groupByCat = (items) => {
   return order.map(c => ({ cat: c, items: map[c] }));
 };
 
+// Per-category band colour + Hindi name. Picked to feel like the dish:
+// teal=steam/water, oranges/browns=fried & crispy, red=tandoor, olive=herby
+// afghani malai, purple=mixed cocktail. Falls back to ink for unknown cats.
+const CAT_STYLE = {
+  Steamed:  { bg: '#0E7490', hi: 'स्टीम' },
+  Kurkure:  { bg: '#C2410C', hi: 'कुरकुरे' },
+  Fried:    { bg: '#B45309', hi: 'फ्राइड' },
+  Tandoori: { bg: '#B91C1C', hi: 'तंदूरी' },
+  Afghani:  { bg: '#4D7C0F', hi: 'अफ़ग़ानी' },
+  Cocktail: { bg: '#7C3AED', hi: 'कॉकटेल' },
+};
+const HINDI_FONT = "'Noto Sans Devanagari','Hind','Mangal','Nirmala UI',system-ui,sans-serif";
+
+// Distinct, dish-appropriate header band shown above each menu category, used
+// by both the staff order screen and the customer menu.
+function CategoryBand({ cat, count }) {
+  const cs = CAT_STYLE[cat] || { bg: '#0A0A0A', hi: '' };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: cs.bg, color: '#fff', borderRadius: 8, padding: '9px 13px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}>
+      <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase' }}>🥟 {cat}</span>
+      {cs.hi && <span style={{ fontSize: 15, fontWeight: 600, opacity: 0.92, fontFamily: HINDI_FONT }}>{cs.hi}</span>}
+      {typeof count === 'number' && (
+        <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, opacity: 0.95, background: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: '2px 9px' }}>{count}</span>
+      )}
+    </div>
+  );
+}
+
 // Whether a cart is currently open: respects a manual close, then the
 // daily open/close window (HH:MM). No window set ⇒ treated as open.
 function cartOpenState(cart) {
@@ -226,6 +254,15 @@ function deductInventory(inventory, items, menuItems = MENU_ITEMS) {
 // localStorage (offline-first) + Supabase cloud sync — see src/lib/store.js
 
 const TODAY = new Date().toISOString().split('T')[0];
+
+// Offline fallback only: highest token seen today for this cart + 1. The
+// server RPC (nextOrderToken) is the source of truth when online.
+const localNextToken = (orders, cartId) => {
+  const nums = (orders || [])
+    .filter(o => o.cartId === cartId && o.date === TODAY)
+    .map(o => parseInt(o.token, 10) || 0);
+  return (nums.length ? Math.max(...nums) : 0) + 1;
+};
 
 // ─── INITIAL STATE ───
 const DEFAULT_INVENTORY = {
@@ -2077,13 +2114,17 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const pendingOrders = todayOrders.filter(o => o.payment === 'pending');
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
 
-  const placeOrder = (payment) => {
+  const placeOrder = async (payment) => {
     if (cart.length === 0) return;
     const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
+    // Shared per-cart/day counter (same RPC the customer QR flow uses) so staff
+    // and customer tokens never collide; local count is the offline fallback.
+    const serverNum = await nextOrderToken(cartId, TODAY);
+    const token = String(serverNum ?? localNextToken(state.orders, cartId)).padStart(3, '0');
     const order = {
       id: Date.now(),
       cartId,
-      token: String(todayOrders.length + 1).padStart(3, '0'),
+      token,
       date: TODAY,
       time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
       items: cart,
@@ -2231,7 +2272,7 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, menu }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 100 }}>
         {category === 'momos' && groupByCat(items).map(g => (
           <div key={g.cat} style={{ marginBottom: 6 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: colors.ink, color: colors.primary, borderRadius: 8, padding: '8px 12px', margin: '14px 0 10px', fontSize: 13, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase' }}>🥟 {g.cat} <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7, fontWeight: 600 }}>{g.items.length}</span></div>
+            <CategoryBand cat={g.cat} count={g.items.length} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
             </div>
@@ -2514,6 +2555,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const [step, setStep] = useState('menu'); // menu | confirm | success
   const [orderToken, setOrderToken] = useState('');
   const [addonNote, setAddonNote] = useState('');
+  const [placing, setPlacing] = useState(false);
 
   const menu = menuFor(state, venue.id);
   const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
@@ -2552,12 +2594,15 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     });
   };
 
-  const placeOrder = () => {
+  const placeOrder = async () => {
     if (!openState.open) { setStep('menu'); return; }
-    if (cart.length === 0) return;
-    const venueOrders = state.orders.filter(o => o.cartId === venue.id && o.date === TODAY);
+    if (cart.length === 0 || placing) return;
+    setPlacing(true);
+    // Token is allocated atomically server-side so two phones can't clash;
+    // only when offline do we fall back to a local count.
+    const serverNum = await nextOrderToken(venue.id, TODAY);
+    const token = String(serverNum ?? localNextToken(state.orders, venue.id)).padStart(3, '0');
     const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
-    const token = String(venueOrders.length + 1).padStart(3, '0');
     const order = {
       id: Date.now(),
       cartId: venue.id,
@@ -2578,6 +2623,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     setOrderToken(token);
     setStep('success');
     setCart([]);
+    setPlacing(false);
   };
 
   const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
@@ -2613,9 +2659,9 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
 
           <Alert type="warn" title="Pay at the cart" message="Place your order to get a token number, then pay by cash or UPI at the cart. Your order is confirmed only after payment." />
 
-          <button onClick={placeOrder} disabled={cart.length === 0}
-            style={{ width: '100%', background: cart.length === 0 ? colors.border : colors.ink, color: colors.primary, border: 'none', padding: 18, borderRadius: 12, fontWeight: 800, fontSize: 16, cursor: cart.length === 0 ? 'not-allowed' : 'pointer' }}>
-            Confirm Order & Get Token
+          <button onClick={placeOrder} disabled={cart.length === 0 || placing}
+            style={{ width: '100%', background: (cart.length === 0 || placing) ? colors.border : colors.ink, color: colors.primary, border: 'none', padding: 18, borderRadius: 12, fontWeight: 800, fontSize: 16, cursor: (cart.length === 0 || placing) ? 'not-allowed' : 'pointer' }}>
+            {placing ? 'Getting your token…' : 'Confirm Order & Get Token'}
           </button>
         </div>
       </div>
@@ -2690,7 +2736,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <div style={{ marginBottom: 24 }}>
             {groupByCat(items).map(g => (
               <div key={g.cat} style={{ marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: colors.ink, color: colors.primary, borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 13, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase' }}>🥟 {g.cat}</div>
+                <CategoryBand cat={g.cat} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
                 </div>

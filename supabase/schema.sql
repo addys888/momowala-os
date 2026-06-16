@@ -159,6 +159,37 @@ create table if not exists expenses (
   inserted_at timestamptz not null default now()
 );
 
+-- Per-cart, per-day order token counter. Tokens are allocated atomically by
+-- the next_order_token() RPC so two devices ordering at once can never get the
+-- same number (the old client-side count+1 collided across phones).
+create table if not exists order_counters (
+  cart_id text not null,
+  date date not null,
+  last_token integer not null default 0,
+  primary key (cart_id, date)
+);
+
+-- Atomically bump and return the next token for (cart, day). The INSERT ... ON
+-- CONFLICT DO UPDATE ... RETURNING is a single atomic row operation, so
+-- concurrent callers are serialised and each gets a distinct number.
+create or replace function next_order_token(p_cart_id text, p_date date)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare v integer;
+begin
+  insert into order_counters (cart_id, date, last_token)
+  values (p_cart_id, p_date, 1)
+  on conflict (cart_id, date)
+  do update set last_token = order_counters.last_token + 1
+  returning last_token into v;
+  return v;
+end;
+$$;
+grant execute on function next_order_token(text, date) to anon;
+
 -- ── Row Level Security ──
 -- v1 has no user accounts: the app talks to Supabase with the anon key, so
 -- these policies allow anon read/write. That means anyone who has your URL
@@ -177,7 +208,7 @@ alter table platform enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform','menus','wastage_logs','expenses']
+  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform','menus','wastage_logs','expenses','order_counters']
   loop
     execute format('drop policy if exists "anon full access" on %I', t);
     execute format('create policy "anon full access" on %I for all to anon using (true) with check (true)', t);

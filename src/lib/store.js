@@ -178,6 +178,23 @@ export function mergeStates(localState, cloud) {
   };
 }
 
+// ─── ATOMIC ORDER TOKEN ───
+// Allocate the next per-cart, per-day token server-side so two phones ordering
+// at the same time can never land on the same number. Returns null when
+// offline or the RPC isn't deployed yet — the caller then falls back to a
+// local count (rare, only matters with no network).
+export async function nextOrderToken(cartId, date) {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.rpc('next_order_token', { p_cart_id: cartId, p_date: date });
+    if (error) throw error;
+    return typeof data === 'number' ? data : null;
+  } catch (e) {
+    console.warn('Order token RPC failed — falling back to local count.', e.message);
+    return null;
+  }
+}
+
 // ─── CLOUD LOAD ───
 export async function loadCloudState() {
   if (!supabase) return null;
