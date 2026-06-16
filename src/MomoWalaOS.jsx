@@ -144,6 +144,10 @@ const SEED_CARTS = [
     accent: '#FFD60A',
     phone: '+91 63075 16898',
     instagram: '@momowalaindia',
+    upiId: 'Q424348747@ybl',
+    openTime: '16:00',
+    closeTime: '23:00',
+    closedManually: false,
     ownerName: 'Momo Wala Owner',
     ownerMobile: '9452661608',
     ownerPasswordHash: null,
@@ -174,6 +178,22 @@ const SEED_MENUS = {
 const EMPTY_MENU = { items: [], lassi: [], addons: [], stockTypes: [] };
 const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
 const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
+
+// Whether a cart is currently open: respects a manual close, then the
+// daily open/close window (HH:MM). No window set ⇒ treated as open.
+function cartOpenState(cart) {
+  if (!cart) return { open: false, reason: 'Cart unavailable' };
+  if (cart.closedManually) return { open: false, reason: 'Closed by the owner right now' };
+  const { openTime, closeTime } = cart;
+  if (!openTime || !closeTime) return { open: true, reason: '' };
+  const now = new Date();
+  const mins = now.getHours() * 60 + now.getMinutes();
+  const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
+  const o = toMin(openTime), c = toMin(closeTime);
+  // handle windows that cross midnight (e.g. 16:00–01:00)
+  const open = o <= c ? (mins >= o && mins < c) : (mins >= o || mins < c);
+  return { open, reason: open ? '' : `Open ${openTime}–${closeTime}` };
+}
 
 // Deduct an order's pieces from cart stock, looking item details up in the
 // cart's own menu. Returns a new inventory object.
@@ -301,10 +321,13 @@ function normalize(state) {
 const StoreContext = createContext(null);
 const useStore = () => useContext(StoreContext);
 
+const SESSION_MS = 8 * 60 * 60 * 1000; // stay logged in for an 8-hour shift
+const liveSession = (s) => (s && (!s.expiresAt || s.expiresAt > Date.now())) ? s : null;
+
 export default function App() {
   const [state, setState] = useState(() => normalize(getInitialState()));
-  // session: null | { role: 'admin'|'owner'|'staff', cartId?, name? } — persisted
-  const [session, setSession] = useState(() => storage.get('session', null));
+  // session: null | { role, cartId?, name?, expiresAt } — persisted, 8h lifetime
+  const [session, setSession] = useState(() => liveSession(storage.get('session', null)));
 
   // Hydrate from Supabase once on load (no-op when env keys are missing)
   useEffect(() => {
@@ -328,8 +351,17 @@ export default function App() {
 
   useEffect(() => { storage.set('session', session); }, [session]);
 
+  // expire the session 8h after login (no idle logout in between)
+  useEffect(() => {
+    if (!session?.expiresAt) return;
+    const ms = session.expiresAt - Date.now();
+    if (ms <= 0) { setSession(null); return; }
+    const t = setTimeout(() => setSession(null), ms);
+    return () => clearTimeout(t);
+  }, [session]);
+
   const updateState = (updates) => setState(prev => ({ ...prev, ...updates }));
-  const login = (sess) => setSession(sess);
+  const login = (sess) => setSession({ ...sess, expiresAt: Date.now() + SESSION_MS });
   const logout = () => setSession(null);
 
   return (
@@ -356,7 +388,7 @@ export default function App() {
 // Route guards — bounce to the right login if the session doesn't match.
 function RequireRole({ role, children }) {
   const { session } = useStore();
-  if (!session || session.role !== role) {
+  if (!liveSession(session) || session.role !== role) {
     return <Navigate to={role === 'admin' ? '/admin/login' : '/login'} replace />;
   }
   return children;
@@ -1032,45 +1064,97 @@ function SimpleItemModal({ initial, section, onSave, onClose }) {
 // minus login credentials, which stay admin-managed).
 function CartProfileModal({ cart, onSave, onClose }) {
   const [f, setF] = useState({
-    name: cart?.name || '', emoji: cart?.emoji || '🛒', tagline: cart?.tagline || '',
+    name: cart?.name || '', emoji: cart?.emoji || '🛒', logo: cart?.logo || '', tagline: cart?.tagline || '',
     cuisine: cart?.cuisine || '', location: cart?.location || '', timing: cart?.timing || '',
     phone: cart?.phone || '', instagram: cart?.instagram || '', accent: cart?.accent || brand.teal,
+    upiId: cart?.upiId || '', upiQr: cart?.upiQr || '',
+    openTime: cart?.openTime || '', closeTime: cart?.closeTime || '',
   });
   const [error, setError] = useState('');
+  const logoRef = React.useRef(), qrRef = React.useRef();
   const set = (k) => (e) => setF(p => ({ ...p, [k]: e.target.value }));
+  const setFile = (k, max) => async (e) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    try { const b64 = await fileToBase64(file, max, 0.8); setF(p => ({ ...p, [k]: `data:image/jpeg;base64,${b64}` })); }
+    catch { setError('Could not read that image.'); }
+  };
   const submit = () => {
     if (!f.name.trim()) { setError('Cart name is required.'); return; }
     if (!f.cuisine.trim()) { setError('Add a short food description.'); return; }
     onSave({
-      name: f.name.trim(), emoji: f.emoji.trim() || '🛒', tagline: f.tagline.trim(),
+      name: f.name.trim(), emoji: f.emoji.trim() || '🛒', logo: f.logo || null, tagline: f.tagline.trim(),
       cuisine: f.cuisine.trim(), location: f.location.trim(), timing: f.timing.trim(),
       phone: f.phone.trim(), instagram: f.instagram.trim(), accent: f.accent,
+      upiId: f.upiId.trim(), upiQr: f.upiQr || null,
+      openTime: f.openTime || null, closeTime: f.closeTime || null,
     });
   };
   return (
     <EditModalShell title="Edit cart details" onClose={onClose} onSave={submit} error={error}>
+      {/* Logo / icon */}
+      <div style={editLabel}>CART LOGO</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        <div style={{ width: 56, height: 56, borderRadius: 12, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, border: `2px solid ${f.accent}`, overflow: 'hidden', flexShrink: 0 }}>
+          {f.logo ? <img src={f.logo} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : f.emoji}
+        </div>
+        <input ref={logoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={setFile('logo', 400)} />
+        <button onClick={() => logoRef.current?.click()} style={{ ...adminBtn, color: brand.navy }}>{f.logo ? 'Change' : 'Upload'} image</button>
+        {f.logo && <button onClick={() => setF(p => ({ ...p, logo: '' }))} style={{ ...adminBtn, color: colors.red }}>Remove</button>}
+      </div>
+
       <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ width: 96 }}><div style={editLabel}>EMOJI</div><input value={f.emoji} onChange={set('emoji')} placeholder="🛒" style={{ ...editInput, textAlign: 'center', fontSize: 22 }} /></div>
+        <div style={{ width: 86 }}><div style={editLabel}>EMOJI</div><input value={f.emoji} onChange={set('emoji')} placeholder="🛒" style={{ ...editInput, textAlign: 'center', fontSize: 22 }} /></div>
         <div style={{ flex: 1 }}><div style={editLabel}>CART NAME</div><input value={f.name} onChange={set('name')} style={editInput} /></div>
       </div>
+      <div style={{ fontSize: 11, color: colors.muted, marginTop: -6, marginBottom: 12 }}>Uploaded logo is shown when present; otherwise the emoji is used.</div>
+
       <div style={editLabel}>TAGLINE (optional)</div>
       <input value={f.tagline} onChange={set('tagline')} placeholder="मोमो वाला" style={editInput} />
       <div style={editLabel}>FOOD DESCRIPTION</div>
       <input value={f.cuisine} onChange={set('cuisine')} placeholder="Steamed, Kurkure & Tandoori momos…" style={editInput} />
       <div style={editLabel}>LOCATION / ADDRESS</div>
       <input value={f.location} onChange={set('location')} placeholder="Area, city" style={editInput} />
-      <div style={editLabel}>TIMING</div>
-      <input value={f.timing} onChange={set('timing')} placeholder="Daily 4 PM – 11 PM" style={editInput} />
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 2 }}><div style={editLabel}>TIMING (display)</div><input value={f.timing} onChange={set('timing')} placeholder="Daily 4 PM – 11 PM" style={editInput} /></div>
+      </div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}><div style={editLabel}>OPENS</div><input type="time" value={f.openTime} onChange={set('openTime')} style={editInput} /></div>
+        <div style={{ flex: 1 }}><div style={editLabel}>CLOSES</div><input type="time" value={f.closeTime} onChange={set('closeTime')} style={editInput} /></div>
+      </div>
+      <div style={{ fontSize: 11, color: colors.muted, marginTop: -6, marginBottom: 12 }}>Outside these hours customers see the cart as closed and can't order.</div>
+
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}><div style={editLabel}>CONTACT PHONE</div><input type="tel" value={f.phone} onChange={set('phone')} placeholder="+91 …" style={editInput} /></div>
         <div style={{ flex: 1 }}><div style={editLabel}>INSTAGRAM</div><input value={f.instagram} onChange={set('instagram')} placeholder="@handle" style={editInput} /></div>
       </div>
+
+      <div style={editLabel}>UPI ID (for online payment)</div>
+      <input value={f.upiId} onChange={set('upiId')} placeholder="name@bank" style={editInput} />
+      <div style={editLabel}>UPI QR CODE (optional)</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+        {f.upiQr && <img src={f.upiQr} alt="UPI QR" style={{ width: 56, height: 56, borderRadius: 8, objectFit: 'contain', background: '#fff', border: `1px solid ${colors.border}` }} />}
+        <input ref={qrRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={setFile('upiQr', 600)} />
+        <button onClick={() => qrRef.current?.click()} style={{ ...adminBtn, color: brand.navy }}>{f.upiQr ? 'Change' : 'Upload'} QR</button>
+        {f.upiQr && <button onClick={() => setF(p => ({ ...p, upiQr: '' }))} style={{ ...adminBtn, color: colors.red }}>Remove</button>}
+      </div>
+
       <div style={editLabel}>BRAND COLOUR</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <input type="color" value={f.accent} onChange={set('accent')} style={{ width: 48, height: 40, border: `1px solid ${colors.border}`, borderRadius: 8, cursor: 'pointer', background: '#fff' }} />
         <span style={{ fontSize: 13, color: colors.muted }}>{f.accent}</span>
       </div>
     </EditModalShell>
+  );
+}
+
+// Small reusable cart icon — uploaded logo if present, else emoji.
+function CartIcon({ cart, size = 44, radius = 12 }) {
+  return (
+    <div style={{ width: size, height: size, borderRadius: radius, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.5, border: `2px solid ${cart?.accent || brand.teal}`, overflow: 'hidden', flexShrink: 0 }}>
+      {cart?.logo ? <img src={cart.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (cart?.emoji || '🛒')}
+    </div>
   );
 }
 
@@ -1087,6 +1171,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
     updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ...fields } : c) });
     setShowProfile(false);
   };
+  const toggleOpen = () => updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: !c.closedManually } : c) });
 
   const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
   const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.payment === 'pending' ? 0 : o.total), 0);
@@ -1107,7 +1192,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       {showProfile && <CartProfileModal cart={cart} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'dashboard' && <Dashboard inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
@@ -1166,22 +1251,34 @@ function BottomNav({ tab, setTab, tabs }) {
 }
 
 // ─── OWNER: DASHBOARD ───
-function Dashboard({ inv, cart, onEditProfile, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
+function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
   const expectedRevenue = piecesSold * 12; // avg ₹12/piece
   const variance = todayRevenue - expectedRevenue;
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
   const lowTypes = stockTypes.filter(st => (inv[st.key]?.freezer ?? 0) < 100);
+  const openState = cartOpenState(cart);
 
   return (
     <div>
       {/* Cart profile bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12, marginBottom: 16 }}>
-        <div style={{ flexShrink: 0, width: 42, height: 42, borderRadius: 10, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, border: `2px solid ${cart?.accent || brand.teal}` }}>{cart?.emoji || '🛒'}</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
+        <CartIcon cart={cart} size={42} radius={10} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 800, fontSize: 15 }}>{cart?.name}</div>
           <div style={{ fontSize: 11.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 {cart?.location || '—'} · 🕒 {cart?.timing || '—'}</div>
         </div>
         <button onClick={onEditProfile} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Edit3 size={13}/> Edit</button>
+      </div>
+
+      {/* Open / closed control */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: openState.open ? '#E7F5E7' : '#FFE7E7', border: `1px solid ${openState.open ? colors.green : colors.red}`, borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 800, fontSize: 14, color: openState.open ? colors.green : colors.red }}>{openState.open ? '🟢 Cart is OPEN' : '🔴 Cart is CLOSED'}</div>
+          <div style={{ fontSize: 11.5, color: colors.muted }}>{cart?.closedManually ? 'Closed manually — customers can’t order' : openState.open ? 'Taking online orders' : openState.reason}</div>
+        </div>
+        <button onClick={onToggleOpen} style={{ background: cart?.closedManually ? colors.green : colors.red, color: '#fff', border: 'none', padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+          {cart?.closedManually ? 'Re-open' : 'Close now'}
+        </button>
       </div>
 
       <SectionHeader title="Today's Snapshot" subtitle={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} />
@@ -2196,14 +2293,17 @@ function CartListing({ carts, onSelect }) {
         <div style={{ fontSize: 13, color: brand.muted, marginBottom: 20 }}>Pick a QSR cart to see its menu and place an order</div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {carts.map(c => (
+          {carts.map(c => {
+            const st = cartOpenState(c);
+            return (
             <button key={c.id} onClick={() => onSelect(c)}
-              style={{ display: 'flex', gap: 14, alignItems: 'center', textAlign: 'left', width: '100%', background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 16, padding: 16, cursor: 'pointer' }}>
-              <div style={{ flexShrink: 0, width: 56, height: 56, borderRadius: 14, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, border: `2px solid ${c.accent}` }}>{c.emoji}</div>
+              style={{ display: 'flex', gap: 14, alignItems: 'center', textAlign: 'left', width: '100%', background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 16, padding: 16, cursor: 'pointer', opacity: st.open ? 1 : 0.6 }}>
+              <CartIcon cart={c} size={56} radius={14} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
                   <div style={{ fontWeight: 800, fontSize: 17, color: brand.text }}>{c.name}</div>
                   <div style={{ fontSize: 12, color: brand.muted }}>{c.tagline}</div>
+                  {!st.open && <span style={{ fontSize: 10, fontWeight: 800, color: colors.red, background: '#FFE7E7', borderRadius: 6, padding: '2px 6px' }}>CLOSED</span>}
                 </div>
                 <div style={{ fontSize: 12.5, color: brand.muted, margin: '3px 0 6px', lineHeight: 1.4 }}>{c.cuisine}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', fontSize: 11.5, color: brand.muted }}>
@@ -2213,7 +2313,7 @@ function CartListing({ carts, onSelect }) {
               </div>
               <ArrowRight size={20} color={brand.navy} style={{ flexShrink: 0 }} />
             </button>
-          ))}
+          );})}
 
           {/* Forward-looking placeholder so the directory reads as a platform */}
           <div style={{ display: 'flex', gap: 14, alignItems: 'center', background: 'transparent', border: `1px dashed ${brand.border}`, borderRadius: 16, padding: 16, color: brand.muted }}>
@@ -2244,6 +2344,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const menu = menuFor(state, venue.id);
   const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
   const isAddon = (id) => addons.some(a => a.id === id);
+  const openState = cartOpenState(venue);
 
   // Functional updates so rapid taps always see the latest cart (no stale state).
   const addToCart = (id, name, price, type = null) => {
@@ -2278,6 +2379,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   };
 
   const placeOrder = () => {
+    if (!openState.open) { setStep('menu'); return; }
     if (cart.length === 0) return;
     const venueOrders = state.orders.filter(o => o.cartId === venue.id && o.date === TODAY);
     const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
@@ -2353,11 +2455,12 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <CheckCircle2 size={60} style={{ margin: '0 auto 16px' }} color={colors.primary}/>
           <div style={{ fontSize: 16, opacity: 0.7, letterSpacing: 1 }}>YOUR ORDER TOKEN</div>
           <div style={{ fontSize: 80, fontWeight: 900, lineHeight: 1, margin: '8px 0' }}>#{orderToken}</div>
-          <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 24 }}>Show this number at the cart<br/>Ready in 5-8 minutes</div>
+          <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 24 }}>Show this number at the cart<br/>Ready in ~{venue.defaultPrepMins || 8} minutes</div>
           <div style={{ borderTop: '1px solid rgba(255,214,10,0.3)', paddingTop: 20 }}>
             <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 8 }}>💵 Pay at the cart — cash or UPI</div>
-            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>UPI:</div>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>momowala@upi</div>
+            {venue.upiQr && <img src={venue.upiQr} alt="UPI QR" style={{ width: 150, height: 150, objectFit: 'contain', borderRadius: 10, background: '#fff', padding: 6, margin: '0 auto 10px', display: 'block' }} />}
+            {venue.upiId && <><div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>UPI ID:</div>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{venue.upiId}</div></>}
           </div>
           <button onClick={() => { setStep('menu'); onDone(); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
         </div>
@@ -2396,7 +2499,13 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           </div>
         )}
 
-        {venue.id === 'momowala' && items.length > 0 && (
+        {!openState.open && (
+          <div style={{ background: '#FFE7E7', color: colors.red, border: `1px solid ${colors.red}`, borderRadius: 12, padding: 14, marginBottom: 16, fontSize: 13, fontWeight: 600, textAlign: 'center' }}>
+            🔴 {venue.name} is currently closed{openState.reason ? ` · ${openState.reason}` : ''}. You can browse the menu, but ordering is paused.
+          </div>
+        )}
+
+        {venue.id === 'momowala' && items.length > 0 && openState.open && (
           <div style={{ background: colors.ink, color: colors.primary, padding: 14, borderRadius: 12, marginBottom: 16, fontSize: 12, fontWeight: 700, textAlign: 'center', letterSpacing: 1 }}>
             ⭐ BESTSELLERS — KURKURE · PANEER AFGHANI · PANEER TANDOORI ⭐
           </div>
@@ -2466,8 +2575,8 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
                 <div style={{ fontSize: 11, opacity: 0.7 }}>TOTAL</div>
                 <div style={{ fontSize: 26, fontWeight: 900 }}>₹{total}</div>
               </div>
-              <button onClick={() => setStep('confirm')} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '14px 24px', borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
-                Review Order <ArrowRight size={16}/>
+              <button onClick={() => openState.open && setStep('confirm')} disabled={!openState.open} style={{ background: openState.open ? colors.primary : 'rgba(255,255,255,0.25)', color: openState.open ? colors.ink : 'rgba(255,255,255,0.7)', border: 'none', padding: '14px 24px', borderRadius: 10, fontWeight: 800, fontSize: 15, cursor: openState.open ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
+                {openState.open ? <>Review Order <ArrowRight size={16}/></> : 'Cart closed'}
               </button>
             </div>
           </div>

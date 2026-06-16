@@ -63,14 +63,20 @@ const rowToLog = ({ inserted_at, cart_id, ...rest }) => ({ ...rest, cartId: cart
 
 const cartToRow = (c) => ({
   id: c.id, name: c.name, tagline: c.tagline, cuisine: c.cuisine, location: c.location,
-  timing: c.timing, emoji: c.emoji, accent: c.accent, phone: c.phone ?? null, instagram: c.instagram ?? null,
+  timing: c.timing, emoji: c.emoji, accent: c.accent, logo: c.logo ?? null,
+  phone: c.phone ?? null, instagram: c.instagram ?? null,
+  upi_id: c.upiId ?? null, upi_qr: c.upiQr ?? null,
+  open_time: c.openTime ?? null, close_time: c.closeTime ?? null, closed_manually: !!c.closedManually,
   owner_name: c.ownerName ?? null,
   owner_mobile: c.ownerMobile, owner_password_hash: c.ownerPasswordHash ?? null,
   active: c.active, created_at: c.createdAt,
 });
 const rowToCart = (r) => ({
   id: r.id, name: r.name, tagline: r.tagline, cuisine: r.cuisine, location: r.location,
-  timing: r.timing, emoji: r.emoji, accent: r.accent, phone: r.phone ?? undefined, instagram: r.instagram ?? undefined,
+  timing: r.timing, emoji: r.emoji, accent: r.accent, logo: r.logo ?? undefined,
+  phone: r.phone ?? undefined, instagram: r.instagram ?? undefined,
+  upiId: r.upi_id ?? undefined, upiQr: r.upi_qr ?? undefined,
+  openTime: r.open_time ?? undefined, closeTime: r.close_time ?? undefined, closedManually: !!r.closed_manually,
   ownerName: r.owner_name ?? undefined,
   ownerMobile: r.owner_mobile, ownerPasswordHash: r.owner_password_hash ?? null,
   active: r.active, createdAt: r.created_at,

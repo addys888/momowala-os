@@ -104,8 +104,14 @@ create table if not exists carts (
   timing text,
   emoji text,
   accent text,
+  logo text,
   phone text,
   instagram text,
+  upi_id text,
+  upi_qr text,
+  open_time text,
+  close_time text,
+  closed_manually boolean default false,
   owner_name text,
   owner_mobile text,
   owner_password_hash text,
@@ -191,3 +197,9 @@ alter table staff drop constraint if exists staff_role_check;
 alter table carts add column if not exists owner_name text;
 alter table carts add column if not exists phone text;
 alter table carts add column if not exists instagram text;
+alter table carts add column if not exists logo text;
+alter table carts add column if not exists upi_id text;
+alter table carts add column if not exists upi_qr text;
+alter table carts add column if not exists open_time text;
+alter table carts add column if not exists close_time text;
+alter table carts add column if not exists closed_manually boolean default false;
