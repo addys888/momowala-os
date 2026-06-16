@@ -191,26 +191,27 @@ const groupByCat = (items) => {
   return order.map(c => ({ cat: c, items: map[c] }));
 };
 
-// Per-category band colour + Hindi name. Picked to feel like the dish:
-// teal=steam/water, oranges/browns=fried & crispy, red=tandoor, olive=herby
-// afghani malai, purple=mixed cocktail. Falls back to ink for unknown cats.
+// Per-category band: a dish-appropriate emoji, colour and Hindi name. Colours
+// and icons are picked to feel like the dish — steam, crispy, fried, tandoor
+// fire, creamy malai, mixed cocktail. Falls back to a dumpling for unknown cats.
 const CAT_STYLE = {
-  Steamed:  { bg: '#0E7490', hi: 'स्टीम' },
-  Kurkure:  { bg: '#C2410C', hi: 'कुरकुरे' },
-  Fried:    { bg: '#B45309', hi: 'फ्राइड' },
-  Tandoori: { bg: '#B91C1C', hi: 'तंदूरी' },
-  Afghani:  { bg: '#4D7C0F', hi: 'अफ़ग़ानी' },
-  Cocktail: { bg: '#7C3AED', hi: 'कॉकटेल' },
+  Steamed:  { icon: '♨️', bg: '#0E7490', hi: 'स्टीम' },   // rising steam
+  Kurkure:  { icon: '🍤', bg: '#C2410C', hi: 'कुरकुरे' }, // crunchy / crispy
+  Fried:    { icon: '🍳', bg: '#B45309', hi: 'फ्राइड' },  // pan-fried
+  Tandoori: { icon: '🔥', bg: '#B91C1C', hi: 'तंदूरी' },  // tandoor fire
+  Afghani:  { icon: '🥛', bg: '#4D7C0F', hi: 'अफ़ग़ानी' },// creamy malai
+  Cocktail: { icon: '🍸', bg: '#7C3AED', hi: 'कॉकटेल' },  // mixed cocktail
 };
 const HINDI_FONT = "'Noto Sans Devanagari','Hind','Mangal','Nirmala UI',system-ui,sans-serif";
 
 // Distinct, dish-appropriate header band shown above each menu category, used
 // by both the staff order screen and the customer menu.
 function CategoryBand({ cat, count }) {
-  const cs = CAT_STYLE[cat] || { bg: '#0A0A0A', hi: '' };
+  const cs = CAT_STYLE[cat] || { icon: '🥟', bg: '#0A0A0A', hi: '' };
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: cs.bg, color: '#fff', borderRadius: 8, padding: '9px 13px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}>
-      <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase' }}>🥟 {cat}</span>
+      <span style={{ fontSize: 16, lineHeight: 1 }}>{cs.icon}</span>
+      <span style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.5, textTransform: 'uppercase' }}>{cat}</span>
       {cs.hi && <span style={{ fontSize: 15, fontWeight: 600, opacity: 0.92, fontFamily: HINDI_FONT }}>{cs.hi}</span>}
       {typeof count === 'number' && (
         <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, opacity: 0.95, background: 'rgba(255,255,255,0.2)', borderRadius: 20, padding: '2px 9px' }}>{count}</span>
