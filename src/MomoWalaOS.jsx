@@ -179,6 +179,18 @@ const EMPTY_MENU = { items: [], lassi: [], addons: [], stockTypes: [] };
 const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
 const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
 
+// Group momo items by category (Steamed, Kurkure…), preserving first-seen order,
+// so the menu reads category → variants (Veg / Paneer / Corn) under it.
+const groupByCat = (items) => {
+  const order = [], map = {};
+  (items || []).forEach(it => {
+    const c = (it.cat || 'Other').trim() || 'Other';
+    if (!map[c]) { map[c] = []; order.push(c); }
+    map[c].push(it);
+  });
+  return order.map(c => ({ cat: c, items: map[c] }));
+};
+
 // Whether a cart is currently open: respects a manual close, then the
 // daily open/close window (HH:MM). No window set ⇒ treated as open.
 function cartOpenState(cart) {
@@ -930,8 +942,8 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       </button>
       {aiNote && <div style={{ background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: brand.text, marginBottom: 16 }}>{aiNote}</div>}
 
-      <MenuSection title="🥟 Momos" hint="Half / full price + pieces"
-        rows={items.map(i => ({ id: i.id, dup: dupItems.has(i.id), primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: `${i.cat || 'Momo'} · ${i.type} · ₹${i.half}/${i.full} · ${i.pcsHalf}/${i.pcsFull}pc` }))}
+      <MenuSection title="🥟 Momos" hint="Half / full price + pieces" grouped
+        rows={items.map(i => ({ id: i.id, dup: dupItems.has(i.id), group: (i.cat || 'Other'), primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: `${i.type} · ₹${i.half}/${i.full} · ${i.pcsHalf}/${i.pcsFull}pc` }))}
         dupCount={dupItems.size} onDedupe={() => dedupe('items')}
         onAdd={() => setEdit({ section: 'items', item: { type: 'veg', cat: 'Steamed', pcsHalf: 5, pcsFull: 10 } })}
         onEdit={(id) => setEdit({ section: 'items', item: items.find(x => x.id === id) })}
@@ -957,7 +969,21 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   );
 }
 
-function MenuSection({ title, hint, rows, dupCount = 0, onDedupe, onAdd, onEdit, onRemove }) {
+function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedupe, onAdd, onEdit, onRemove }) {
+  const rowEl = (r) => (
+    <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, background: r.dup ? '#FFF7E0' : '#fff' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {r.primary}
+          {r.dup && <span style={{ fontSize: 10, fontWeight: 800, color: '#8A6D00', background: '#FCEAB0', borderRadius: 6, padding: '2px 6px' }}>DUPLICATE</span>}
+        </div>
+        <div style={{ fontSize: 12, color: colors.muted }}>{r.secondary}</div>
+      </div>
+      <button onClick={() => onEdit(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={14}/></button>
+      <button onClick={() => onRemove(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
+    </div>
+  );
+  const groups = grouped ? groupByCat(rows.map(r => ({ ...r, cat: r.group }))) : null;
   return (
     <div style={{ marginBottom: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -971,22 +997,19 @@ function MenuSection({ title, hint, rows, dupCount = 0, onDedupe, onAdd, onEdit,
           <button onClick={onDedupe} style={{ background: '#fff', border: `1px solid #E0B100`, color: '#8A6D00', padding: '5px 10px', borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Remove duplicates</button>
         </div>
       )}
-      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {rows.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, background: r.dup ? '#FFF7E0' : '#fff' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
-                {r.primary}
-                {r.dup && <span style={{ fontSize: 10, fontWeight: 800, color: '#8A6D00', background: '#FCEAB0', borderRadius: 6, padding: '2px 6px' }}>DUPLICATE</span>}
-              </div>
-              <div style={{ fontSize: 12, color: colors.muted }}>{r.secondary}</div>
-            </div>
-            <button onClick={() => onEdit(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={14}/></button>
-            <button onClick={() => onRemove(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
+      {grouped && rows.length > 0 ? (
+        groups.map(g => (
+          <div key={g.cat} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '0 2px 6px' }}>{g.cat}</div>
+            <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>{g.items.map(rowEl)}</div>
           </div>
-        ))}
+        ))
+      ) : (
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+        {rows.map(rowEl)}
         {rows.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>None yet</div>}
       </div>
+      )}
     </div>
   );
 }
@@ -2206,8 +2229,13 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, menu }) {
 
       {/* Items list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 100 }}>
-        {category === 'momos' && items.map(item => (
-          <MenuItemRow key={item.id} item={item} onAdd={addToCart} />
+        {category === 'momos' && groupByCat(items).map(g => (
+          <div key={g.cat} style={{ marginBottom: 6 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '6px 2px 8px' }}>{g.cat}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
+            </div>
+          </div>
         ))}
         {category === 'lassi' && lassi.map(item => (
           <SimpleItemRow key={item.id} id={item.id} name={item.name} price={item.price} onAdd={() => addToCart(item.id, item.name, item.price)} />
@@ -2653,9 +2681,14 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
 
         {items.length > 0 && <>
           <SectionHeader title="🥟 Momos" />
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 24 }}>
-            {items.map(item => (
-              <MenuItemRow key={item.id} item={item} onAdd={addToCart} />
+          <div style={{ marginBottom: 24 }}>
+            {groupByCat(items).map(g => (
+              <div key={g.cat} style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '2px 2px 8px' }}>{g.cat}</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
+                </div>
+              </div>
             ))}
           </div>
         </>}
