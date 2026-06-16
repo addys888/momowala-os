@@ -2231,7 +2231,7 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, menu }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 100 }}>
         {category === 'momos' && groupByCat(items).map(g => (
           <div key={g.cat} style={{ marginBottom: 6 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '6px 2px 8px' }}>{g.cat}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: colors.ink, color: colors.primary, borderRadius: 8, padding: '8px 12px', margin: '14px 0 10px', fontSize: 13, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase' }}>🥟 {g.cat} <span style={{ marginLeft: 'auto', fontSize: 11, opacity: 0.7, fontWeight: 600 }}>{g.items.length}</span></div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
             </div>
@@ -2281,13 +2281,19 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, menu }) {
   );
 }
 
+const TYPE_CHIP = {
+  veg: { bg: '#E7F5E7', fg: '#0F7B0F', label: 'Veg' },
+  paneer: { bg: '#FFF1E7', fg: '#B5460B', label: 'Paneer' },
+  corn: { bg: '#FFF7E0', fg: '#8A6D00', label: 'Corn Cheese' },
+};
 function MenuItemRow({ item, onAdd }) {
+  const chip = TYPE_CHIP[item.type];
   return (
     <div style={{ background: '#fff', borderRadius: 10, padding: 12, border: `1px solid ${colors.border}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {chip && <span style={{ fontSize: 11, fontWeight: 800, color: chip.fg, background: chip.bg, borderRadius: 6, padding: '3px 8px', whiteSpace: 'nowrap' }}>{chip.label}</span>}
           <div style={{ fontWeight: 700, fontSize: 14 }}>{item.name} {item.star && '⭐'}</div>
-          <div style={{ fontSize: 11, color: colors.muted }}>{item.cat}</div>
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
@@ -2684,7 +2690,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <div style={{ marginBottom: 24 }}>
             {groupByCat(items).map(g => (
               <div key={g.cat} style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '2px 2px 8px' }}>{g.cat}</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: colors.ink, color: colors.primary, borderRadius: 8, padding: '8px 12px', marginBottom: 10, fontSize: 13, fontWeight: 800, letterSpacing: 1, textTransform: 'uppercase' }}>🥟 {g.cat}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
                 </div>
