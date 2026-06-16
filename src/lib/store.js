@@ -38,13 +38,13 @@ export const storage = {
 const orderToRow = (o) => ({
   id: o.id, cart_id: o.cartId ?? null, token: o.token, date: o.date, time: o.time, items: o.items,
   total: o.total, payment: o.payment, staff: o.staff, source: o.source,
-  settled_at: o.settledAt ?? null,
+  settled_at: o.settledAt ?? null, cancel_reason: o.cancelReason ?? null,
   outlet: o.outlet ?? null, outlet_name: o.outletName ?? null,
 });
 const rowToOrder = (r) => ({
   id: r.id, cartId: r.cart_id ?? undefined, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
-  settledAt: r.settled_at ?? undefined,
+  settledAt: r.settled_at ?? undefined, cancelReason: r.cancel_reason ?? undefined,
   outlet: r.outlet ?? undefined, outletName: r.outlet_name ?? undefined,
 });
 
@@ -72,6 +72,7 @@ const cartToRow = (c) => ({
   phone: c.phone ?? null, instagram: c.instagram ?? null,
   upi_id: c.upiId ?? null, upi_qr: c.upiQr ?? null,
   open_time: c.openTime ?? null, close_time: c.closeTime ?? null, closed_manually: !!c.closedManually,
+  default_prep_mins: c.defaultPrepMins ?? null,
   owner_name: c.ownerName ?? null,
   owner_mobile: c.ownerMobile, owner_password_hash: c.ownerPasswordHash ?? null,
   active: c.active, created_at: c.createdAt,
@@ -82,6 +83,7 @@ const rowToCart = (r) => ({
   phone: r.phone ?? undefined, instagram: r.instagram ?? undefined,
   upiId: r.upi_id ?? undefined, upiQr: r.upi_qr ?? undefined,
   openTime: r.open_time ?? undefined, closeTime: r.close_time ?? undefined, closedManually: !!r.closed_manually,
+  defaultPrepMins: r.default_prep_mins ?? undefined,
   ownerName: r.owner_name ?? undefined,
   ownerMobile: r.owner_mobile, ownerPasswordHash: r.owner_password_hash ?? null,
   active: r.active, createdAt: r.created_at,

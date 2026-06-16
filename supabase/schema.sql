@@ -13,7 +13,8 @@ create table if not exists orders (
   time text not null,
   items jsonb not null default '[]',
   total integer not null,
-  payment text not null check (payment in ('cash', 'upi', 'pending')),
+  payment text not null check (payment in ('cash', 'upi', 'pending', 'cancelled')),
+  cancel_reason text,
   staff text,
   source text,
   settled_at timestamptz,
@@ -112,6 +113,7 @@ create table if not exists carts (
   open_time text,
   close_time text,
   closed_manually boolean default false,
+  default_prep_mins integer,
   owner_name text,
   owner_mobile text,
   owner_password_hash text,
@@ -224,8 +226,9 @@ alter table day_close_logs add column if not exists corn_diff integer;
 -- ── Migration: pending payment + staff accounts ──
 -- Allow the new 'pending' payment status and record when an order is settled.
 alter table orders add column if not exists settled_at timestamptz;
+alter table orders add column if not exists cancel_reason text;
 alter table orders drop constraint if exists orders_payment_check;
-alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending'));
+alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending', 'cancelled'));
 
 -- ── Migration: multi-cart (which QSR cart an order belongs to) ──
 alter table orders add column if not exists outlet text;
@@ -259,3 +262,4 @@ alter table carts add column if not exists upi_qr text;
 alter table carts add column if not exists open_time text;
 alter table carts add column if not exists close_time text;
 alter table carts add column if not exists closed_manually boolean default false;
+alter table carts add column if not exists default_prep_mins integer;

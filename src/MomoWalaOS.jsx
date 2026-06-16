@@ -256,6 +256,13 @@ function deductInventory(inventory, items, menuItems = MENU_ITEMS) {
 
 const TODAY = new Date().toISOString().split('T')[0];
 
+// An order counts as real revenue only once paid (cash/UPI). 'pending' QR
+// orders and staff-'cancelled' orders never touch revenue or pieces sold.
+const isPaid = (o) => o.payment === 'cash' || o.payment === 'upi';
+
+// Reasons a staff member can give when cancelling a pending QR order.
+const CANCEL_REASONS = ['Customer left / no-show', 'Duplicate order', 'Wrong items ordered', 'Customer changed mind', 'Item out of stock', 'Test / mistake', 'Other'];
+
 // Offline fallback only: highest token seen today for this cart + 1. The
 // server RPC (nextOrderToken) is the source of truth when online.
 const localNextToken = (orders, cartId) => {
@@ -666,6 +673,12 @@ function AdminApp({ state, updateState, onExit }) {
 function AdminCarts({ state, updateState }) {
   const [showAdd, setShowAdd] = useState(false);
   const [menuCartId, setMenuCartId] = useState(null);
+  const [editOwnerCart, setEditOwnerCart] = useState(null);
+
+  const saveOwner = (cartId, fields) => {
+    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ...fields } : c) });
+    setEditOwnerCart(null);
+  };
 
   if (menuCartId) {
     const c = state.carts.find(x => x.id === menuCartId);
@@ -718,6 +731,7 @@ function AdminCarts({ state, updateState }) {
       </button>
 
       {showAdd && <AddCartModal onAdd={addCart} onClose={() => setShowAdd(false)} />}
+      {editOwnerCart && <EditOwnerModal cart={editOwnerCart} onSave={(fields) => saveOwner(editOwnerCart.id, fields)} onClose={() => setEditOwnerCart(null)} />}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         {state.carts.map(c => (
@@ -733,6 +747,7 @@ function AdminCarts({ state, updateState }) {
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button onClick={() => setMenuCartId(c.id)} style={{ ...adminBtn, color: brand.tealDark, borderColor: brand.teal }}>📋 Set up menu</button>
+              <button onClick={() => setEditOwnerCart(c)} style={adminBtn}>Edit owner</button>
               <button onClick={() => resetOwnerPw(c)} style={adminBtn}>Reset owner password</button>
               <button onClick={() => toggleActive(c.id)} style={adminBtn}>{c.active ? 'Disable' : 'Enable'}</button>
               <button onClick={() => removeCart(c)} style={{ ...adminBtn, color: colors.red }}>Remove</button>
@@ -814,11 +829,32 @@ function AddCartModal({ onAdd, onClose }) {
   );
 }
 
+// Platform admin edits a cart owner's name + contact number.
+function EditOwnerModal({ cart, onSave, onClose }) {
+  const [ownerName, setOwnerName] = useState(cart.ownerName || '');
+  const [ownerMobile, setOwnerMobile] = useState(cart.ownerMobile || '');
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!ownerName.trim()) { setError('Enter the owner’s name.'); return; }
+    if (!/^\d{10}$/.test(ownerMobile)) { setError('Enter a 10-digit mobile number.'); return; }
+    onSave({ ownerName: ownerName.trim(), ownerMobile });
+  };
+  return (
+    <EditModalShell title={`Edit owner · ${cart.name}`} onClose={onClose} onSave={submit} error={error}>
+      <div style={{ fontSize: 12, color: colors.muted, marginBottom: 12 }}>The owner logs in with this mobile number. Changing it changes their login.</div>
+      <div style={editLabel}>OWNER NAME</div>
+      <input value={ownerName} onChange={e => setOwnerName(e.target.value)} placeholder="e.g. Ramesh Kumar" style={editInput} />
+      <div style={editLabel}>OWNER MOBILE</div>
+      <input value={ownerMobile} onChange={e => setOwnerMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} inputMode="numeric" placeholder="10-digit number" style={editInput} />
+    </EditModalShell>
+  );
+}
+
 function AdminReports({ state }) {
   const rows = state.carts.map(c => {
     const orders = state.orders.filter(o => o.cartId === c.id);
-    const today = orders.filter(o => o.date === TODAY && o.payment !== 'pending');
-    const allTime = orders.filter(o => o.payment !== 'pending');
+    const today = orders.filter(o => o.date === TODAY && isPaid(o));
+    const allTime = orders.filter(o => isPaid(o));
     return {
       cart: c,
       todayRevenue: today.reduce((s, o) => s + o.total, 0),
@@ -829,6 +865,12 @@ function AdminReports({ state }) {
     };
   });
   const platformToday = rows.reduce((s, r) => s + r.todayRevenue, 0);
+  const cartName = (id) => state.carts.find(c => c.id === id)?.name || id;
+  // Recent cancellations across all carts — the admin activity feed.
+  const cancellations = state.orders
+    .filter(o => o.payment === 'cancelled')
+    .sort((a, b) => b.id - a.id)
+    .slice(0, 25);
 
   return (
     <div>
@@ -861,6 +903,22 @@ function AdminReports({ state }) {
             </div>
           </div>
         ))}
+      </div>
+
+      {/* Activity feed — cancelled orders across all carts */}
+      <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, margin: '24px 0 8px' }}>RECENT CANCELLATIONS</div>
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+        {cancellations.map(o => (
+          <div key={o.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>#{o.token} · {cartName(o.cartId)} <span style={{ color: colors.muted, fontWeight: 500 }}>· ₹{o.total}</span></div>
+              <div style={{ fontSize: 12, color: colors.red, fontWeight: 600 }}>{o.cancelReason || 'No reason given'}</div>
+              <div style={{ fontSize: 11, color: colors.muted }}>{o.date} {o.time}{o.staff ? ` · by ${o.staff}` : ''}</div>
+            </div>
+            <X size={16} color={colors.red} />
+          </div>
+        ))}
+        {cancellations.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No cancellations. 🎉</div>}
       </div>
     </div>
   );
@@ -1054,7 +1112,7 @@ function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedup
 
 const editLabel = { fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 };
 const editInput = { width: '100%', padding: '11px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 15, boxSizing: 'border-box', marginBottom: 12 };
-function EditModalShell({ title, onClose, onSave, error, children }) {
+function EditModalShell({ title, onClose, onSave, error, children, saveLabel = 'Save', closeLabel = 'Cancel', danger = false }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 440, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
@@ -1062,8 +1120,8 @@ function EditModalShell({ title, onClose, onSave, error, children }) {
         {children}
         {error && <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}><AlertCircle size={15}/> {error}</div>}
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
-          <button onClick={onSave} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>{closeLabel}</button>
+          <button onClick={onSave} style={{ flex: 2, padding: 14, background: danger ? colors.red : brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>{saveLabel}</button>
         </div>
       </div>
     </div>
@@ -1239,10 +1297,10 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   const toggleOpen = () => updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: !c.closedManually } : c) });
 
   const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
-  const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.payment === 'pending' ? 0 : o.total), 0);
+  const todayRevenue = todayOrders.reduce((sum, o) => sum + (isPaid(o) ? o.total : 0), 0);
   const cashRevenue = todayOrders.filter(o => o.payment === 'cash').reduce((sum, o) => sum + o.total, 0);
   const upiRevenue = todayOrders.filter(o => o.payment === 'upi').reduce((sum, o) => sum + o.total, 0);
-  const piecesSold = todayOrders.filter(o => o.payment !== 'pending').reduce((sum, o) => {
+  const piecesSold = todayOrders.filter(o => isPaid(o)).reduce((sum, o) => {
     return sum + o.items.reduce((s, item) => {
       const m = menu.items.find(x => x.id === item.id);
       if (!m) return s;
@@ -1287,7 +1345,7 @@ function TopBar({ title, onExit }) {
           <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
         </div>
       </div>
-      <button onClick={onExit} style={{ background: 'transparent', border: `1px solid rgba(255,255,255,0.5)`, color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <button onClick={() => { if (confirm('Log out and exit? You’ll need to sign in again to continue.')) onExit(); }} style={{ background: 'transparent', border: `1px solid rgba(255,255,255,0.5)`, color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
         <LogOut size={12}/> Exit
       </button>
     </div>
@@ -2000,7 +2058,7 @@ function Reports({ state, updateState, cartId }) {
   const [showExpense, setShowExpense] = useState(false);
   const from = dstr(periodStart(period));
 
-  const orders = state.orders.filter(o => o.cartId === cartId && o.payment !== 'pending' && o.date >= from);
+  const orders = state.orders.filter(o => o.cartId === cartId && isPaid(o) && o.date >= from);
   const expenses = (state.expenses || []).filter(e => e.cartId === cartId && e.date >= from);
   const wastage = (state.wastageLogs || []).filter(w => w.cartId === cartId && w.date >= from);
 
@@ -2102,6 +2160,7 @@ function ExpenseModal({ onAdd, onClose }) {
 function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [tab, setTab] = useState('order');
   const [cart, setCart] = useState([]);
+  const [cancelTarget, setCancelTarget] = useState(null);
   const cartInfo = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
@@ -2148,9 +2207,24 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
     });
   };
-  const cancelOrder = (orderId) => {
-    if (!confirm('Cancel this unpaid order?')) return;
-    updateState({ orders: state.orders.filter(o => o.id !== orderId) });
+  // Cancelling keeps the order (marked 'cancelled' with a required reason) so
+  // it stays in records and surfaces in the platform admin's activity feed —
+  // never silently deleted. No stock is deducted for a cancelled order.
+  const confirmCancel = (orderId, reason) => {
+    const order = state.orders.find(o => o.id === orderId);
+    if (!order || order.payment !== 'pending') { setCancelTarget(null); return; }
+    updateState({
+      orders: state.orders.map(o => o.id === orderId
+        ? { ...o, payment: 'cancelled', cancelReason: reason, staff: staffName, settledAt: new Date().toISOString() }
+        : o),
+    });
+    setCancelTarget(null);
+  };
+
+  // Staff adjusts the live prep/wait time customers see on their token screen.
+  const setPrepMins = (mins) => {
+    const m = Math.max(2, Math.min(10, mins));
+    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, defaultPrepMins: m } : c) });
   };
 
   // Staff logs damaged/wasted momos — deducts from cart stock + records it.
@@ -2171,8 +2245,8 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       <TopBar title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} />}
-        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={cancelOrder} />}
+        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
+        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
@@ -2185,7 +2259,39 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         { id: 'wastage', icon: <Trash2 size={20}/>, label: 'Wastage' },
         { id: 'shift', icon: <Award size={20}/>, label: 'Shift' },
       ]} />
+
+      {cancelTarget != null && (
+        <CancelReasonModal
+          order={state.orders.find(o => o.id === cancelTarget)}
+          onCancel={() => setCancelTarget(null)}
+          onConfirm={(reason) => confirmCancel(cancelTarget, reason)}
+        />
+      )}
     </div>
+  );
+}
+
+// Required-reason modal shown before a pending QR order is cancelled.
+function CancelReasonModal({ order, onCancel, onConfirm }) {
+  const [reason, setReason] = useState(CANCEL_REASONS[0]);
+  const [other, setOther] = useState('');
+  const submit = () => {
+    const r = reason === 'Other' ? other.trim() : reason;
+    if (!r) return;
+    onConfirm(r);
+  };
+  return (
+    <EditModalShell title={`Cancel order #${order?.token ?? ''}`} onClose={onCancel} onSave={submit} saveLabel="Cancel order" closeLabel="Keep order" danger>
+      <div style={{ fontSize: 13, color: colors.muted, marginBottom: 12 }}>Pick a reason — this is kept in records and shown to the platform admin.</div>
+      <div style={editLabel}>REASON</div>
+      <select value={reason} onChange={e => setReason(e.target.value)} style={editInput}>{CANCEL_REASONS.map(r => <option key={r}>{r}</option>)}</select>
+      {reason === 'Other' && (
+        <>
+          <div style={editLabel}>DETAILS</div>
+          <input value={other} onChange={e => setOther(e.target.value)} placeholder="Type the reason" style={editInput} autoFocus />
+        </>
+      )}
+    </EditModalShell>
   );
 }
 
@@ -2212,7 +2318,7 @@ function PendingOrders({ orders, onSettle, onCancel }) {
                 {o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}
               </div>
               <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 12 }}>₹{o.total}</div>
-              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 8, fontWeight: 600 }}>MARK AS PAID (deducts stock)</div>
+              <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>⚠️ Only after you’ve received the money — this serves the order & deducts stock</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => onSettle(o.id, 'cash')} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>💵 Cash</button>
                 <button onClick={() => onSettle(o.id, 'upi')} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>📱 UPI</button>
@@ -2226,7 +2332,7 @@ function PendingOrders({ orders, onSettle, onCancel }) {
   );
 }
 
-function NewOrderScreen({ cart, setCart, onPlaceOrder, menu }) {
+function NewOrderScreen({ cart, setCart, onPlaceOrder, menu, prepMins, onSetPrep }) {
   const [category, setCategory] = useState('momos');
   const items = menu?.items || [], lassi = menu?.lassi || [], addons = menu?.addons || [];
 
@@ -2254,6 +2360,17 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, menu }) {
   return (
     <div>
       <SectionHeader title="New Order" subtitle="Tap items to add" />
+
+      {/* Live prep/wait time shown to customers on their token screen */}
+      {onSetPrep && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '10px 14px', marginBottom: 16 }}>
+          <Clock size={16} color={colors.muted} />
+          <div style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>Wait time shown to customers</div>
+          <button onClick={() => onSetPrep(prepMins - 1)} disabled={prepMins <= 2} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${colors.border}`, background: '#fff', fontSize: 18, fontWeight: 800, cursor: prepMins <= 2 ? 'not-allowed' : 'pointer', opacity: prepMins <= 2 ? 0.4 : 1 }}>−</button>
+          <div style={{ minWidth: 56, textAlign: 'center', fontWeight: 800, fontSize: 15 }}>{prepMins} min</div>
+          <button onClick={() => onSetPrep(prepMins + 1)} disabled={prepMins >= 10} style={{ width: 32, height: 32, borderRadius: 8, border: `1px solid ${colors.border}`, background: '#fff', fontSize: 18, fontWeight: 800, cursor: prepMins >= 10 ? 'not-allowed' : 'pointer', opacity: prepMins >= 10 ? 0.4 : 1 }}>+</button>
+        </div>
+      )}
 
       {/* Category tabs */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
