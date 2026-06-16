@@ -48,9 +48,11 @@ const rowToOrder = (r) => ({
   outlet: r.outlet ?? undefined, outletName: r.outlet_name ?? undefined,
 });
 
+// Note: password_hash is deliberately NOT written here — the browser (anon
+// role) has no privilege on that column; it's set only via the auth RPCs.
 const staffToRow = (s) => ({
   id: s.id, cart_id: s.cartId ?? null, name: s.name, mobile: s.mobile,
-  password_hash: s.passwordHash ?? null, active: s.active, updated_at: new Date().toISOString(),
+  active: s.active, updated_at: new Date().toISOString(),
 });
 const rowToStaff = (r) => ({
   id: r.id, cartId: r.cart_id ?? undefined, name: r.name, mobile: r.mobile,
@@ -74,7 +76,8 @@ const cartToRow = (c) => ({
   open_time: c.openTime ?? null, close_time: c.closeTime ?? null, closed_manually: !!c.closedManually,
   default_prep_mins: c.defaultPrepMins ?? null,
   owner_name: c.ownerName ?? null,
-  owner_mobile: c.ownerMobile, owner_password_hash: c.ownerPasswordHash ?? null,
+  // owner_password_hash is NOT written here — set only via the auth RPCs.
+  owner_mobile: c.ownerMobile,
   active: c.active, created_at: c.createdAt,
 });
 const rowToCart = (r) => ({
@@ -197,24 +200,59 @@ export async function nextOrderToken(cartId, date) {
   }
 }
 
+// Columns the anon role may read once the credential lockdown is applied
+// (everything except the password-hash columns). Used as a fallback when
+// `select('*')` is rejected because the hash columns are no longer readable.
+const CART_COLS = 'id,name,tagline,cuisine,location,timing,emoji,accent,logo,phone,instagram,upi_id,upi_qr,open_time,close_time,closed_manually,default_prep_mins,owner_name,owner_mobile,active,created_at';
+const STAFF_COLS = 'id,cart_id,name,mobile,active,updated_at';
+
+// ─── AUTH (SECURITY DEFINER RPCs — hashes never reach the browser) ───
+// Shared caller: returns the function's JSON, or { status: 'rpc_missing' } when
+// the RPC isn't deployed yet (PostgREST 404/PGRST202) so callers can fall back
+// to legacy verification during the window before the lockdown SQL is applied.
+async function callRpc(fn, args) {
+  if (!supabase) return { status: 'rpc_missing' };
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) {
+    const missing = error.code === 'PGRST202' || /could not find the function|does not exist/i.test(error.message || '');
+    return { status: missing ? 'rpc_missing' : 'error', message: error.message };
+  }
+  return data;
+}
+export const authLogin = (mobile, password, context = 'team') => callRpc('app_login', { p_mobile: mobile, p_password: password, p_context: context });
+export const authSetPassword = (role, mobile, cartId, password) => callRpc('app_set_password', { p_role: role, p_mobile: mobile, p_cart_id: cartId ?? null, p_password: password });
+export const authChangeOwnerPassword = (token, password) => callRpc('app_change_owner_password', { p_token: token, p_password: password });
+export const authSetStaffPassword = (token, staffId, password) => callRpc('app_set_staff_password', { p_token: token, p_staff_id: staffId, p_password: password });
+export const authRegisterStaff = (token, id, name, mobile, password) => callRpc('app_register_staff', { p_token: token, p_id: id, p_name: name, p_mobile: mobile, p_password: password });
+export const authAdminResetOwner = (token, cartId, password) => callRpc('app_admin_reset_owner', { p_token: token, p_cart_id: cartId, p_password: password });
+
 // ─── CLOUD LOAD ───
 export async function loadCloudState() {
   if (!supabase) return null;
   try {
+    // Try `*` first (works before lockdown / lets the legacy fallback login read
+    // hashes); if the hash columns are locked, retry with the safe column list.
+    const resilient = async (table, cols, order) => {
+      let r = await supabase.from(table).select('*').order(order);
+      if (r.error) r = await supabase.from(table).select(cols).order(order);
+      return r;
+    };
     const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses] = await Promise.all([
       supabase.from('orders').select('*').order('id'),
       supabase.from('stock_logs').select('*').order('id'),
       supabase.from('cart_loadings').select('*').order('id'),
       supabase.from('day_close_logs').select('*').order('id'),
       supabase.from('inventory').select('*').eq('id', 1).maybeSingle(),
-      supabase.from('staff').select('*').order('id'),
-      supabase.from('carts').select('*').order('created_at'),
+      resilient('staff', STAFF_COLS, 'id'),
+      resilient('carts', CART_COLS, 'created_at'),
       supabase.from('platform').select('*').eq('id', 1).maybeSingle(),
       supabase.from('menus').select('*').eq('id', 1).maybeSingle(),
       supabase.from('wastage_logs').select('*').order('id'),
       supabase.from('expenses').select('*').order('id'),
     ]);
-    const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform].find((r) => r.error);
+    // platform is intentionally locked from anon once the lockdown is applied,
+    // so it's excluded from the hard-fail check (login goes through app_login).
+    const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts].find((r) => r.error);
     if (failed) throw failed.error;
     return {
       orders: orders.data.map((r) => rowToOrder(r)),
@@ -264,7 +302,8 @@ async function pushState(state) {
         merge('expenses', (state.expenses || []).map(expenseToRow)),
         merge('staff', state.staff.map(staffToRow)),
         merge('carts', state.carts.map(cartToRow)),
-        supabase.from('platform').upsert({ id: 1, admin_mobile: state.platform.adminMobile, admin_password_hash: state.platform.adminPasswordHash, updated_at: new Date().toISOString() }),
+        // platform + password hashes are never written from the browser — those
+        // go through the SECURITY DEFINER auth RPCs (see authLogin/authSetPassword).
         supabase
           .from('inventory')
           .upsert({ id: 1, data: state.inventory, updated_at: new Date().toISOString() }),

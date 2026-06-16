@@ -1,6 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken } from './lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
+  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
 
 // ============================================
@@ -422,7 +423,9 @@ export default function App() {
   }, [session]);
 
   const updateState = (updates) => setState(prev => ({ ...prev, ...updates }));
-  const login = (sess) => setSession({ ...sess, expiresAt: Date.now() + SESSION_MS });
+  // sess may carry a server-issued token + expiresAt (from app_login). Fall back
+  // to a local 8h window for the legacy path that doesn't return one.
+  const login = (sess) => setSession({ ...sess, expiresAt: sess.expiresAt || Date.now() + SESSION_MS });
   const logout = () => setSession(null);
 
   return (
@@ -553,57 +556,66 @@ function TeamLogin() {
   const [pw2, setPw2] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [setup, setSetup] = useState(null); // { role, cartId } once a first-time set is needed
 
   const m = mobile.trim();
-  const ownerCart = state.carts.find(c => c.ownerMobile === m && c.active);
-  const ownerNeedsSetup = ownerCart && !ownerCart.ownerPasswordHash;
+
+  // Legacy client-side verification — used ONLY if the auth RPC isn't deployed
+  // yet (the brief window before the lockdown SQL is applied).
+  const legacyLogin = async () => {
+    const ownerCart = state.carts.find(c => c.ownerMobile === m && c.active);
+    if (ownerCart) {
+      if (!ownerCart.ownerPasswordHash) {
+        if (pw !== pw2) { setError('The two passwords do not match.'); return; }
+        const hash = await hashPassword(pw);
+        updateState({ carts: state.carts.map(c => c.id === ownerCart.id ? { ...c, ownerPasswordHash: hash } : c) });
+        login({ role: 'owner', cartId: ownerCart.id }); nav('/manage'); return;
+      }
+      if ((await hashPassword(pw)) !== ownerCart.ownerPasswordHash) { setError('Wrong password.'); return; }
+      login({ role: 'owner', cartId: ownerCart.id }); nav('/manage'); return;
+    }
+    const rec = state.staff.find(s => s.mobile === m && s.active);
+    if (!rec) { setError('This number is not registered. Ask your cart owner or the admin.'); return; }
+    if (!rec.passwordHash) { setError('Your password has not been set yet. Ask your owner.'); return; }
+    if ((await hashPassword(pw)) !== rec.passwordHash) { setError('Wrong password.'); return; }
+    login({ role: 'staff', cartId: rec.cartId, name: rec.name }); nav('/work');
+  };
 
   const submit = async () => {
     setError('');
     if (!/^\d{10}$/.test(m)) { setError('Enter a 10-digit mobile number.'); return; }
-
-    if (ownerCart) {
-      if (ownerNeedsSetup) {
-        if (pw.length < 4) { setError('Choose a password of at least 4 digits.'); return; }
-        if (pw !== pw2) { setError('The two passwords do not match.'); return; }
-        setBusy(true);
-        const hash = await hashPassword(pw);
-        updateState({ carts: state.carts.map(c => c.id === ownerCart.id ? { ...c, ownerPasswordHash: hash } : c) });
-        login({ role: 'owner', cartId: ownerCart.id });
-        nav('/manage'); return;
-      }
-      setBusy(true);
-      const ok = (await hashPassword(pw)) === ownerCart.ownerPasswordHash;
-      setBusy(false);
-      if (!ok) { setError('Wrong password.'); return; }
-      login({ role: 'owner', cartId: ownerCart.id });
-      nav('/manage'); return;
-    }
-
-    const rec = state.staff.find(s => s.mobile === m && s.active);
-    if (!rec) { setError('This number is not registered. Ask your cart owner or the admin.'); return; }
-    if (!rec.passwordHash) { setError('Your password has not been set yet. Ask your owner.'); return; }
+    if (pw.length < 4) { setError('Enter a password of at least 4 characters.'); return; }
     setBusy(true);
-    const ok = (await hashPassword(pw)) === rec.passwordHash;
-    setBusy(false);
-    if (!ok) { setError('Wrong password.'); return; }
-    login({ role: 'staff', cartId: rec.cartId, name: rec.name });
-    nav('/work');
+    try {
+      if (setup) { // second step: confirm + set the first password
+        if (pw !== pw2) { setError('The two passwords do not match.'); return; }
+        const r = await authSetPassword(setup.role, m, setup.cartId, pw);
+        if (r.status === 'ok') { login({ role: r.role, cartId: r.cart_id, token: r.token, expiresAt: r.expiresAt }); nav('/manage'); return; }
+        setError(r.message || 'Could not set the password.'); return;
+      }
+      const r = await authLogin(m, pw);
+      if (r.status === 'rpc_missing') { await legacyLogin(); return; }
+      if (r.status === 'ok') { login({ role: r.role, cartId: r.cart_id, name: r.name, token: r.token, expiresAt: r.expiresAt }); nav(r.role === 'owner' ? '/manage' : '/work'); return; }
+      if (r.status === 'needs_setup') { setSetup({ role: r.role, cartId: r.cart_id }); return; }
+      if (r.status === 'no_password') { setError('Your password has not been set yet. Ask your owner.'); return; }
+      if (r.status === 'wrong_password') { setError('Wrong password.'); return; }
+      setError('This number is not registered. Ask your cart owner or the admin.');
+    } finally { setBusy(false); }
   };
 
   return (
     <LoginShell
-      title={ownerNeedsSetup ? 'Set your owner password' : 'Cart team login'}
-      subtitle={ownerNeedsSetup ? `First time — set a password for ${m}` : 'Owners and staff sign in here'}
+      title={setup ? 'Set your owner password' : 'Cart team login'}
+      subtitle={setup ? `First time — set a password for ${m}` : 'Owners and staff sign in here'}
       footer={
         <div style={{ marginTop: 22, textAlign: 'center' }}>
           <Link to="/" style={{ color: brand.tealDark, fontSize: 13, textDecoration: 'none', fontWeight: 600 }}>← Browse carts as a customer</Link>
           <div style={{ marginTop: 12 }}><Link to="/admin/login" style={{ color: brand.muted, fontSize: 12, textDecoration: 'none' }}>Cartlyft platform admin →</Link></div>
         </div>
       }>
-      <LoginFields mobile={mobile} setMobile={setMobile} pw={pw} setPw={setPw} pw2={pw2} setPw2={setPw2}
-        showConfirm={ownerNeedsSetup} error={error} busy={busy} onSubmit={submit}
-        cta={ownerNeedsSetup ? 'Set Password & Enter' : 'Login'} />
+      <LoginFields mobile={mobile} setMobile={setMobile} mobileLocked={!!setup} pw={pw} setPw={setPw} pw2={pw2} setPw2={setPw2}
+        showConfirm={!!setup} error={error} busy={busy} onSubmit={submit}
+        cta={setup ? 'Set Password & Enter' : 'Login'} />
     </LoginShell>
   );
 }
@@ -615,35 +627,48 @@ function AdminLogin() {
   const [pw2, setPw2] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [setup, setSetup] = useState(false); // first-time admin password set
 
   const adminMobile = state.platform.adminMobile;
-  const needsSetup = !state.platform.adminPasswordHash;
+
+  // Legacy client-side path — only if the auth RPC isn't deployed yet.
+  const legacyLogin = async () => {
+    if (!state.platform.adminPasswordHash) {
+      if (pw !== pw2) { setError('The two passwords do not match.'); return; }
+      updateState({ platform: { ...state.platform, adminPasswordHash: await hashPassword(pw) } });
+      login({ role: 'admin' }); nav('/admin'); return;
+    }
+    if ((await hashPassword(pw)) !== state.platform.adminPasswordHash) { setError('Wrong password.'); return; }
+    login({ role: 'admin' }); nav('/admin');
+  };
 
   const submit = async () => {
     setError('');
-    if (needsSetup) {
-      if (pw.length < 4) { setError('Choose a password of at least 4 digits.'); return; }
-      if (pw !== pw2) { setError('The two passwords do not match.'); return; }
-      setBusy(true);
-      const hash = await hashPassword(pw);
-      updateState({ platform: { ...state.platform, adminPasswordHash: hash } });
-      login({ role: 'admin' }); nav('/admin'); return;
-    }
+    if (pw.length < 4) { setError('Enter a password of at least 4 characters.'); return; }
     setBusy(true);
-    const ok = (await hashPassword(pw)) === state.platform.adminPasswordHash;
-    setBusy(false);
-    if (!ok) { setError('Wrong password.'); return; }
-    login({ role: 'admin' }); nav('/admin');
+    try {
+      if (setup) {
+        if (pw !== pw2) { setError('The two passwords do not match.'); return; }
+        const r = await authSetPassword('admin', adminMobile, null, pw);
+        if (r.status === 'ok') { login({ role: 'admin', token: r.token, expiresAt: r.expiresAt }); nav('/admin'); return; }
+        setError(r.message || 'Could not set the password.'); return;
+      }
+      const r = await authLogin(adminMobile, pw, 'admin');
+      if (r.status === 'rpc_missing') { await legacyLogin(); return; }
+      if (r.status === 'ok') { login({ role: 'admin', token: r.token, expiresAt: r.expiresAt }); nav('/admin'); return; }
+      if (r.status === 'needs_setup') { setSetup(true); return; }
+      setError('Wrong password.');
+    } finally { setBusy(false); }
   };
 
   return (
     <LoginShell
-      title={needsSetup ? 'Set admin password' : 'Cartlyft admin'}
+      title={setup ? 'Set admin password' : 'Cartlyft admin'}
       subtitle={`Platform super-admin · ${adminMobile}`}
       footer={<div style={{ marginTop: 22, textAlign: 'center' }}><Link to="/login" style={{ color: brand.muted, fontSize: 13, textDecoration: 'none' }}>← Cart team login</Link></div>}>
       <LoginFields mobile={adminMobile} mobileLocked pw={pw} setPw={setPw} pw2={pw2} setPw2={setPw2}
-        showConfirm={needsSetup} error={error} busy={busy} onSubmit={submit}
-        cta={needsSetup ? 'Set Password & Enter' : 'Login'} />
+        showConfirm={setup} error={error} busy={busy} onSubmit={submit}
+        cta={setup ? 'Set Password & Enter' : 'Login'} />
     </LoginShell>
   );
 }
@@ -671,6 +696,7 @@ function AdminApp({ state, updateState, onExit }) {
 }
 
 function AdminCarts({ state, updateState }) {
+  const { session } = useStore();
   const [showAdd, setShowAdd] = useState(false);
   const [menuCartId, setMenuCartId] = useState(null);
   const [editOwnerCart, setEditOwnerCart] = useState(null);
@@ -693,12 +719,13 @@ function AdminCarts({ state, updateState }) {
   const addCart = async (form) => {
     let id = slugify(form.name) || `cart-${Date.now()}`;
     if (state.carts.some(c => c.id === id)) id = `${id}-${Date.now().toString().slice(-4)}`;
-    const ownerPasswordHash = form.ownerPassword ? await hashPassword(form.ownerPassword) : null;
+    // The owner sets their own password on first login (needs_setup flow) — the
+    // admin never sets or sees it, and no hash is written from the browser.
     const cart = {
       id, name: form.name.trim(), tagline: form.tagline.trim(), cuisine: form.cuisine.trim(),
       location: form.location.trim(), timing: form.timing.trim(), emoji: form.emoji || '🛒',
       accent: form.accent || brand.teal, ownerName: form.ownerName.trim(), ownerMobile: form.ownerMobile,
-      ownerPasswordHash, active: true, createdAt: TODAY,
+      ownerPasswordHash: null, active: true, createdAt: TODAY,
     };
     updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInventory() }, menus: { ...state.menus, [id]: { items: [], lassi: [], addons: [] } } });
     setShowAdd(false);
@@ -709,9 +736,9 @@ function AdminCarts({ state, updateState }) {
     const np = prompt(`New owner password for ${cart.name} (min 4 chars):`);
     if (!np) return;
     if (np.length < 4) { alert('Password must be at least 4 characters.'); return; }
-    const hash = await hashPassword(np);
-    updateState({ carts: state.carts.map(c => c.id === cart.id ? { ...c, ownerPasswordHash: hash } : c) });
-    alert(`Owner password updated for ${cart.name}.`);
+    const r = await authAdminResetOwner(session?.token, cart.id, np);
+    if (r.status === 'ok') { alert(`Owner password updated for ${cart.name}.`); return; }
+    alert(r.message || 'Could not update the password — log in again and retry.');
   };
   const removeCart = (cart) => {
     const orders = state.orders.filter(o => o.cartId === cart.id).length;
@@ -742,7 +769,7 @@ function AdminCarts({ state, updateState }) {
                 <div style={{ fontWeight: 800, fontSize: 16 }}>{c.name} {!c.active && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>· disabled</span>}</div>
                 <div style={{ fontSize: 12, color: colors.muted }}>{c.location}</div>
                 <div style={{ fontSize: 12, color: colors.muted }}>Owner: {c.ownerName ? `${c.ownerName} · ` : ''}{c.ownerMobile}</div>
-                <div style={{ fontSize: 11, color: c.ownerPasswordHash ? colors.green : colors.accent, fontWeight: 600, marginTop: 2 }}>{c.ownerPasswordHash ? 'Owner password set' : 'Owner sets password on first login'}</div>
+                <div style={{ fontSize: 11, color: colors.muted, fontWeight: 600, marginTop: 2 }}>Owner sets/changes password at login</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1923,14 +1950,21 @@ function ReconcileBlock({ title, systemValue, label, value, onChange, diff, unit
 
 // ─── OWNER: STAFF REGISTRY ───
 function StaffRegistry({ state, updateState, cartId, cart }) {
+  const { session } = useStore();
   const [showAdd, setShowAdd] = useState(false);
   const staff = state.staff.filter(s => s.cartId === cartId);
+  const needsSql = 'Apply the security update (run schema.sql in Supabase) to manage passwords.';
 
+  // Registration goes through an authorised RPC so the row + password hash land
+  // together server-side; the browser never writes the hash column.
   const addStaff = async (name, mobile, password) => {
-    const hash = await hashPassword(password);
-    const rec = { id: Date.now(), cartId, name, mobile, passwordHash: hash, active: true };
-    updateState({ staff: [...state.staff, rec] });
-    setShowAdd(false);
+    const id = Date.now();
+    const r = await authRegisterStaff(session?.token, id, name, mobile, password);
+    if (r.status === 'ok') {
+      updateState({ staff: [...state.staff, { id, cartId, name, mobile, active: true }] });
+      setShowAdd(false); return;
+    }
+    alert(r.status === 'rpc_missing' ? needsSql : (r.message || 'Could not register staff.'));
   };
 
   const toggleActive = (id) => updateState({ staff: state.staff.map(s => s.id === id ? { ...s, active: !s.active } : s) });
@@ -1939,17 +1973,15 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
     const np = prompt('Enter a new password for this staff member (min 4 characters):');
     if (!np) return;
     if (np.length < 4) { alert('Password must be at least 4 characters.'); return; }
-    const hash = await hashPassword(np);
-    updateState({ staff: state.staff.map(s => s.id === id ? { ...s, passwordHash: hash } : s) });
-    alert('Password updated.');
+    const r = await authSetStaffPassword(session?.token, id, np);
+    alert(r.status === 'ok' ? 'Password updated.' : (r.status === 'rpc_missing' ? needsSql : (r.message || 'Could not update password.')));
   };
   const changeOwnerPassword = async () => {
     const np = prompt('Enter a new owner password (min 4 characters):');
     if (!np) return;
     if (np.length < 4) { alert('Password must be at least 4 characters.'); return; }
-    const hash = await hashPassword(np);
-    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ownerPasswordHash: hash } : c) });
-    alert('Owner password updated.');
+    const r = await authChangeOwnerPassword(session?.token, np);
+    alert(r.status === 'ok' ? 'Owner password updated.' : (r.status === 'rpc_missing' ? needsSql : (r.message || 'Could not update password.')));
   };
 
   return (
@@ -1968,7 +2000,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
         <div>
           <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1, fontWeight: 700, color: brand.amber }}>CART OWNER</div>
           <div style={{ fontWeight: 800, fontSize: 16 }}>{cart?.ownerMobile}</div>
-          <div style={{ fontSize: 11, opacity: 0.7 }}>{cart?.ownerPasswordHash ? 'Password set' : 'Password not set yet'}</div>
+          <div style={{ fontSize: 11, opacity: 0.7 }}>Tap to change your password</div>
         </div>
         <button onClick={changeOwnerPassword} style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: `1px solid rgba(255,255,255,0.4)`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Change Password</button>
       </div>

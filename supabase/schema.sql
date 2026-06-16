@@ -210,12 +210,185 @@ alter table platform enable row level security;
 do $$
 declare t text;
 begin
-  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','platform','menus','wastage_logs','expenses','order_counters']
+  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','menus','wastage_logs','expenses','order_counters']
   loop
     execute format('drop policy if exists "anon full access" on %I', t);
     execute format('create policy "anon full access" on %I for all to anon using (true) with check (true)', t);
   end loop;
 end $$;
+
+-- ════════════════════════════════════════════════════════════════
+-- CREDENTIAL LOCKDOWN — keep password hashes away from the browser
+-- ════════════════════════════════════════════════════════════════
+-- The browser uses the anon key. Without this section anyone with that key
+-- could read every owner/staff/admin password hash and overwrite them.
+-- Here we (1) hide the hash columns from anon via column-level grants,
+-- (2) lock the platform table entirely, and (3) expose login + password
+-- changes through SECURITY DEFINER functions that run as the table owner,
+-- so the hashes never leave the database.
+create extension if not exists pgcrypto;
+
+-- Same hash the app used client-side before: sha256('momowala:' || password).
+-- search_path includes extensions because pgcrypto's digest() lives there on Supabase.
+create or replace function app_hash(p text)
+returns text language sql immutable set search_path = public, extensions as $$
+  select encode(digest('momowala:' || p, 'sha256'), 'hex');
+$$;
+
+-- Server-side sessions: app_login mints an opaque token; privileged password
+-- changes are authorised by that token (no secret/JWT to manage, no re-prompt).
+create table if not exists app_sessions (
+  token uuid primary key default gen_random_uuid(),
+  role text not null,
+  cart_id text,
+  name text,
+  expires_at timestamptz not null
+);
+alter table app_sessions enable row level security;  -- no anon policy ⇒ only definer funcs touch it
+
+-- Column-level lockdown: revoke blanket access, then re-grant every column
+-- EXCEPT the password hash. Each privilege needs its OWN column list — a shared
+-- list would bind only to the last privilege and leave SELECT table-wide (which
+-- would still expose the hash). Service role / definer funcs are unaffected.
+revoke all on carts from anon;
+grant select (id, name, tagline, cuisine, location, timing, emoji, accent, logo, phone, instagram, upi_id, upi_qr, open_time, close_time, closed_manually, default_prep_mins, owner_name, owner_mobile, active, created_at) on carts to anon;
+grant insert (id, name, tagline, cuisine, location, timing, emoji, accent, logo, phone, instagram, upi_id, upi_qr, open_time, close_time, closed_manually, default_prep_mins, owner_name, owner_mobile, active, created_at) on carts to anon;
+grant update (name, tagline, cuisine, location, timing, emoji, accent, logo, phone, instagram, upi_id, upi_qr, open_time, close_time, closed_manually, default_prep_mins, owner_name, owner_mobile, active) on carts to anon;
+grant delete on carts to anon;
+
+revoke all on staff from anon;
+grant select (id, cart_id, name, mobile, active, updated_at) on staff to anon;
+grant insert (id, cart_id, name, mobile, active, updated_at) on staff to anon;
+grant update (cart_id, name, mobile, active, updated_at) on staff to anon;
+grant delete on staff to anon;
+
+-- platform holds the admin hash → no anon access at all (funcs handle it).
+drop policy if exists "anon full access" on platform;
+revoke all on platform from anon;
+-- Ensure the single platform row exists so the admin can set a password.
+insert into platform (id, admin_mobile) values (1, '9452661608') on conflict (id) do nothing;
+
+-- Helper: validate a session token, returning the row or null.
+create or replace function app_session(p_token uuid)
+returns app_sessions language sql security definer set search_path = public, extensions as $$
+  select * from app_sessions where token = p_token and expires_at > now();
+$$;
+
+-- LOGIN — verifies a role and, on success, returns a session token. The admin
+-- and a cart owner may share a mobile number, so the caller passes the context:
+-- 'admin' (from /admin/login) checks only the platform admin; anything else
+-- (the cart-team login) checks owner then staff.
+create or replace function app_login(p_mobile text, p_password text, p_context text default 'team')
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare adm record; r record; tok uuid; exp timestamptz := now() + interval '8 hours';
+begin
+  if p_context = 'admin' then
+    select admin_mobile, admin_password_hash into adm from platform where id = 1;
+    if adm.admin_mobile is null or adm.admin_mobile <> p_mobile then return json_build_object('status','not_registered'); end if;
+    if adm.admin_password_hash is null then return json_build_object('status','needs_setup','role','admin'); end if;
+    if adm.admin_password_hash <> app_hash(p_password) then return json_build_object('status','wrong_password'); end if;
+    insert into app_sessions(role, expires_at) values ('admin', exp) returning token into tok;
+    return json_build_object('status','ok','role','admin','token',tok,'expiresAt', extract(epoch from exp)*1000);
+  end if;
+
+  select id, owner_password_hash into r from carts where owner_mobile = p_mobile and active limit 1;
+  if found then
+    if r.owner_password_hash is null then return json_build_object('status','needs_setup','role','owner','cart_id',r.id); end if;
+    if r.owner_password_hash <> app_hash(p_password) then return json_build_object('status','wrong_password'); end if;
+    insert into app_sessions(role, cart_id, expires_at) values ('owner', r.id, exp) returning token into tok;
+    return json_build_object('status','ok','role','owner','cart_id',r.id,'token',tok,'expiresAt', extract(epoch from exp)*1000);
+  end if;
+
+  select id, cart_id, name, password_hash into r from staff where mobile = p_mobile and active limit 1;
+  if found then
+    if r.password_hash is null then return json_build_object('status','no_password'); end if;
+    if r.password_hash <> app_hash(p_password) then return json_build_object('status','wrong_password'); end if;
+    insert into app_sessions(role, cart_id, name, expires_at) values ('staff', r.cart_id, r.name, exp) returning token into tok;
+    return json_build_object('status','ok','role','staff','cart_id',r.cart_id,'name',r.name,'token',tok,'expiresAt', extract(epoch from exp)*1000);
+  end if;
+
+  return json_build_object('status','not_registered');
+end; $$;
+grant execute on function app_login(text, text, text) to anon;
+
+-- FIRST-TIME password set (owner/admin), only allowed while the hash is null.
+create or replace function app_set_password(p_role text, p_mobile text, p_cart_id text, p_password text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare tok uuid; exp timestamptz := now() + interval '8 hours';
+begin
+  if length(p_password) < 4 then return json_build_object('status','error','message','Password must be at least 4 characters'); end if;
+  if p_role = 'admin' then
+    update platform set admin_password_hash = app_hash(p_password)
+      where id = 1 and admin_mobile = p_mobile and admin_password_hash is null;
+    if not found then return json_build_object('status','error','message','Already set — please log in'); end if;
+    insert into app_sessions(role, expires_at) values ('admin', exp) returning token into tok;
+    return json_build_object('status','ok','role','admin','token',tok,'expiresAt', extract(epoch from exp)*1000);
+  elsif p_role = 'owner' then
+    update carts set owner_password_hash = app_hash(p_password)
+      where id = p_cart_id and active and owner_password_hash is null;
+    if not found then return json_build_object('status','error','message','Already set or cart not found'); end if;
+    insert into app_sessions(role, cart_id, expires_at) values ('owner', p_cart_id, exp) returning token into tok;
+    return json_build_object('status','ok','role','owner','cart_id',p_cart_id,'token',tok,'expiresAt', extract(epoch from exp)*1000);
+  end if;
+  return json_build_object('status','error','message','Unsupported role');
+end; $$;
+grant execute on function app_set_password(text, text, text, text) to anon;
+
+-- Owner changes their own password (authorised by their session token).
+create or replace function app_change_owner_password(p_token uuid, p_password text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare s app_sessions;
+begin
+  s := app_session(p_token);
+  if s.role is null or s.role <> 'owner' then return json_build_object('status','error','message','Not authorised'); end if;
+  if length(p_password) < 4 then return json_build_object('status','error','message','Password must be at least 4 characters'); end if;
+  update carts set owner_password_hash = app_hash(p_password) where id = s.cart_id;
+  return json_build_object('status','ok');
+end; $$;
+grant execute on function app_change_owner_password(uuid, text) to anon;
+
+-- Owner sets/resets a staff member's password (staff must be in their cart).
+create or replace function app_set_staff_password(p_token uuid, p_staff_id bigint, p_password text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare s app_sessions; sc text;
+begin
+  s := app_session(p_token);
+  if s.role is null or s.role <> 'owner' then return json_build_object('status','error','message','Not authorised'); end if;
+  if length(p_password) < 4 then return json_build_object('status','error','message','Password must be at least 4 characters'); end if;
+  select cart_id into sc from staff where id = p_staff_id;
+  if sc is distinct from s.cart_id then return json_build_object('status','error','message','Not your staff'); end if;
+  update staff set password_hash = app_hash(p_password) where id = p_staff_id;
+  return json_build_object('status','ok');
+end; $$;
+grant execute on function app_set_staff_password(uuid, bigint, text) to anon;
+
+-- Owner registers a new staff member (insert + password in one authorised call,
+-- so the row + hash land together — no client-side insert of the hash column).
+create or replace function app_register_staff(p_token uuid, p_id bigint, p_name text, p_mobile text, p_password text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare s app_sessions;
+begin
+  s := app_session(p_token);
+  if s.role is null or s.role <> 'owner' then return json_build_object('status','error','message','Not authorised'); end if;
+  if length(p_password) < 4 then return json_build_object('status','error','message','Password must be at least 4 characters'); end if;
+  if exists (select 1 from staff where mobile = p_mobile) then return json_build_object('status','error','message','That mobile is already registered'); end if;
+  insert into staff(id, cart_id, name, mobile, password_hash, active) values (p_id, s.cart_id, p_name, p_mobile, app_hash(p_password), true);
+  return json_build_object('status','ok','id',p_id,'cart_id',s.cart_id,'name',p_name,'mobile',p_mobile,'active',true);
+end; $$;
+grant execute on function app_register_staff(uuid, bigint, text, text, text) to anon;
+
+-- Admin resets a cart owner's password (authorised by admin session token).
+create or replace function app_admin_reset_owner(p_token uuid, p_cart_id text, p_password text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare s app_sessions;
+begin
+  s := app_session(p_token);
+  if s.role is null or s.role <> 'admin' then return json_build_object('status','error','message','Not authorised'); end if;
+  if length(p_password) < 4 then return json_build_object('status','error','message','Password must be at least 4 characters'); end if;
+  update carts set owner_password_hash = app_hash(p_password) where id = p_cart_id;
+  return json_build_object('status','ok');
+end; $$;
+grant execute on function app_admin_reset_owner(uuid, text, text) to anon;
 
 -- ── Migration: corn cheese stock ──
 -- Safe to run on databases created before corn cheese was added.
