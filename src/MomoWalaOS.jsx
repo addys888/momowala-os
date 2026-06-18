@@ -161,6 +161,7 @@ const PAY_BADGE = {
   cash: { bg: '#E7F5E7', fg: '#0F7B0F' },
   upi: { bg: '#E7EEFF', fg: '#0050B3' },
   pending: { bg: '#FFF1E7', fg: '#FF4D00' },
+  cancelled: { bg: '#FFE7E7', fg: '#C81E1E' },
 };
 
 // ─── PER-CART MENUS ───
@@ -247,6 +248,19 @@ function deductInventory(inventory, items, menuItems = MENU_ITEMS) {
     if (menu) {
       const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
       next[menu.stockKey] = { ...next[menu.stockKey], cart: next[menu.stockKey].cart - pcs };
+    }
+  });
+  return next;
+}
+
+// Inverse of deductInventory — puts pieces back when a settled order is cancelled.
+function restoreInventory(inventory, items, menuItems = MENU_ITEMS) {
+  const next = { ...inventory };
+  items.forEach(item => {
+    const menu = menuItems.find(m => m.id === item.id);
+    if (menu && next[menu.stockKey]) {
+      const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
+      next[menu.stockKey] = { ...next[menu.stockKey], cart: next[menu.stockKey].cart + pcs };
     }
   });
   return next;
@@ -1952,8 +1966,22 @@ function ReconcileBlock({ title, systemValue, label, value, onChange, diff, unit
 function StaffRegistry({ state, updateState, cartId, cart }) {
   const { session } = useStore();
   const [showAdd, setShowAdd] = useState(false);
+  const [viewStaff, setViewStaff] = useState(null); // drill into one staff's day
   const staff = state.staff.filter(s => s.cartId === cartId);
   const needsSql = 'Apply the security update (run schema.sql in Supabase) to manage passwords.';
+
+  // Today's per-staff activity (orders are linked to staff by name).
+  const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
+  const statFor = (name) => {
+    const os = todayOrders.filter(o => o.staff === name);
+    const paid = os.filter(isPaid);
+    return { paid: paid.length, revenue: paid.reduce((s, o) => s + o.total, 0), cancelled: os.filter(o => o.payment === 'cancelled').length };
+  };
+  const cartStats = {
+    paid: todayOrders.filter(isPaid).length,
+    pending: todayOrders.filter(o => o.payment === 'pending').length,
+    cancelled: todayOrders.filter(o => o.payment === 'cancelled').length,
+  };
 
   // Registration goes through an authorised RPC so the row + password hash land
   // together server-side; the browser never writes the hash column.
@@ -1984,9 +2012,46 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
     alert(r.status === 'ok' ? 'Owner password updated.' : (r.status === 'rpc_missing' ? needsSql : (r.message || 'Could not update password.')));
   };
 
+  if (viewStaff) {
+    const os = todayOrders.filter(o => o.staff === viewStaff.name).slice().reverse();
+    const st = statFor(viewStaff.name);
+    return (
+      <div>
+        <button onClick={() => setViewStaff(null)} style={{ background: 'transparent', border: 'none', color: brand.tealDark, fontSize: 14, cursor: 'pointer', marginBottom: 12, fontWeight: 600 }}>← Back to staff</button>
+        <SectionHeader title={viewStaff.name} subtitle={`Today · ${st.paid} order${st.paid !== 1 ? 's' : ''} · ₹${st.revenue}${st.cancelled ? ` · ${st.cancelled} cancelled` : ''}`} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {os.map(o => {
+            const cancelled = o.payment === 'cancelled';
+            return (
+              <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 14, opacity: cancelled ? 0.7 : 1 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>#{o.token} <span style={{ fontWeight: 500, fontSize: 12, color: colors.muted }}>· {o.time}</span></div>
+                  <div style={{ fontWeight: 800, fontSize: 16, textDecoration: cancelled ? 'line-through' : 'none', color: cancelled ? colors.muted : colors.ink }}>₹{o.total}</div>
+                </div>
+                <OrderItemLines items={o.items} muted={cancelled} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                  <span style={{ fontSize: 10, padding: '3px 9px', background: PAY_BADGE[o.payment].bg, color: PAY_BADGE[o.payment].fg, borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>{cancelled ? 'CANCELLED' : o.payment.toUpperCase()}</span>
+                  {cancelled && o.cancelReason && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>{o.cancelReason}</span>}
+                </div>
+              </div>
+            );
+          })}
+          {os.length === 0 && <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 40, textAlign: 'center', color: colors.muted }}>No orders by {viewStaff.name} today yet.</div>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <SectionHeader title="Staff Registry" subtitle={`${cart?.name} · only registered staff can log in`} />
+
+      {/* Today summary across the cart */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <MetricCard label="Orders today" value={cartStats.paid} icon={<FileText size={16}/>} color={colors.green} />
+        <MetricCard label="Pending" value={cartStats.pending} icon={<Clock size={16}/>} color={colors.accent} />
+        <MetricCard label="Cancelled" value={cartStats.cancelled} icon={<X size={16}/>} color={colors.red} />
+      </div>
 
       <button onClick={() => setShowAdd(true)}
         style={{ width: '100%', background: brand.navy, color: '#fff', padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -2007,11 +2072,14 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
 
       <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>STAFF MEMBERS ({staff.length})</div>
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {staff.map(s => (
+        {staff.map(s => {
+          const st = statFor(s.name);
+          return (
           <div key={s.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: s.active ? 1 : 0.5 }}>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: 15 }}>{s.name} {!s.active && <span style={{ fontSize: 11, color: colors.red }}>· disabled</span>}</div>
+            <div onClick={() => setViewStaff(s)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} title="View today's orders">
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{s.name} {!s.active && <span style={{ fontSize: 11, color: colors.red }}>· disabled</span>} <ArrowRight size={13} style={{ verticalAlign: 'middle', opacity: 0.4 }} /></div>
               <div style={{ fontSize: 13, color: colors.muted }}>{s.mobile}</div>
+              <div style={{ fontSize: 12, color: colors.muted, marginTop: 3, fontWeight: 600 }}>Today: {st.paid} order{st.paid !== 1 ? 's' : ''} · ₹{st.revenue}{st.cancelled ? ` · ${st.cancelled} cancelled` : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
               <button onClick={() => resetPassword(s.id)} title="Reset password" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Lock size={14}/></button>
@@ -2019,7 +2087,8 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
               <button onClick={() => removeStaff(s.id)} title="Remove" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
             </div>
           </div>
-        ))}
+          );
+        })}
         {staff.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: colors.muted, fontSize: 14 }}>No staff registered yet. Add your chef and helper above.</div>}
       </div>
     </div>
@@ -2193,6 +2262,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [tab, setTab] = useState('order');
   const [cart, setCart] = useState([]);
   const [cancelTarget, setCancelTarget] = useState(null);
+  const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
   const cartInfo = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
@@ -2228,6 +2298,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     // Staff order is settled on the spot, so deduct stock now.
     setCartInv(deductInventory(inv, cart, menu.items), { orders: [...state.orders, order] });
     setCart([]);
+    setJustPlaced({ token, total, payment });
   };
 
   // Customer QR orders arrive as 'pending'; staff confirms payment here,
@@ -2239,15 +2310,18 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
     });
   };
-  // Cancelling keeps the order (marked 'cancelled' with a required reason) so
-  // it stays in records and surfaces in the platform admin's activity feed —
-  // never silently deleted. No stock is deducted for a cancelled order.
+  // Cancelling keeps the order (marked 'cancelled' with a required reason) so it
+  // stays in records and surfaces in the admin's activity feed — never deleted.
+  // Works for pending QR orders AND already-settled staff orders (e.g. a counter
+  // customer backs out): if the order was paid, its pieces are returned to stock.
   const confirmCancel = (orderId, reason) => {
     const order = state.orders.find(o => o.id === orderId);
-    if (!order || order.payment !== 'pending') { setCancelTarget(null); return; }
+    if (!order || order.payment === 'cancelled') { setCancelTarget(null); return; }
+    const newInv = isPaid(order) ? restoreInventory(inv, order.items, menu.items) : inv;
     updateState({
+      inventory: { ...state.inventory, [cartId]: newInv },
       orders: state.orders.map(o => o.id === orderId
-        ? { ...o, payment: 'cancelled', cancelReason: reason, staff: staffName, settledAt: new Date().toISOString() }
+        ? { ...o, payment: 'cancelled', cancelReason: reason, staff: o.staff || staffName, settledAt: new Date().toISOString() }
         : o),
     });
     setCancelTarget(null);
@@ -2279,7 +2353,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} />}
-        {tab === 'myorders' && <MyOrdersScreen orders={myOrders} />}
+        {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onCancel={(id) => setCancelTarget(id)} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
       </div>
@@ -2299,6 +2373,24 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
           onConfirm={(reason) => confirmCancel(cancelTarget, reason)}
         />
       )}
+
+      {justPlaced && <OrderPlacedToast info={justPlaced} onClose={() => setJustPlaced(null)} />}
+    </div>
+  );
+}
+
+// Brief success confirmation after a staff order is registered.
+function OrderPlacedToast({ info, onClose }) {
+  useEffect(() => { const t = setTimeout(onClose, 2600); return () => clearTimeout(t); }, [info]);
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: colors.ink, color: colors.primary, borderRadius: 20, padding: '32px 28px', textAlign: 'center', maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)' }}>
+        <CheckCircle2 size={56} color={colors.primary} style={{ margin: '0 auto 12px' }} />
+        <div style={{ fontSize: 18, fontWeight: 800 }}>Order registered!</div>
+        <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div>
+        <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received</div>
+        <button onClick={onClose} style={{ marginTop: 18, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>Next order</button>
+      </div>
     </div>
   );
 }
@@ -2514,33 +2606,55 @@ function SimpleItemRow({ id, name, price, extra, onAdd, picked }) {
   );
 }
 
-function MyOrdersScreen({ orders }) {
+// A clean, stacked item list (qty chip + name) — replaces the cramped
+// comma-joined string used in order cards.
+function OrderItemLines({ items, muted }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {items.map((i, idx) => (
+        <div key={i.key || idx} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ minWidth: 30, textAlign: 'center', fontWeight: 800, fontSize: 12, color: colors.ink, background: '#F1EFE9', borderRadius: 6, padding: '2px 6px' }}>{i.qty}×</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: muted ? colors.muted : colors.ink }}>{i.name}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MyOrdersScreen({ orders, onCancel }) {
   const totalCash = orders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
   const totalUpi = orders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
+  const liveCount = orders.filter(o => o.payment !== 'cancelled').length;
 
   return (
     <div>
-      <SectionHeader title="My Shift Orders" subtitle={`${orders.length} orders so far`} />
+      <SectionHeader title="My Shift Orders" subtitle={`${liveCount} order${liveCount !== 1 ? 's' : ''} so far`} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         <MetricCard label="Cash" value={`₹${totalCash}`} icon={<IndianRupee size={16}/>} color={colors.green} />
         <MetricCard label="UPI" value={`₹${totalUpi}`} icon={<Smartphone size={16}/>} color={colors.ink} />
       </div>
 
-      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {orders.slice().reverse().map(o => (
-          <div key={o.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${colors.border}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
-              <div style={{ fontWeight: 700 }}>#{o.token} · {o.time}</div>
-              <div style={{ fontWeight: 800 }}>₹{o.total}</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {orders.slice().reverse().map(o => {
+          const cancelled = o.payment === 'cancelled';
+          return (
+            <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 14, opacity: cancelled ? 0.7 : 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>#{o.token} <span style={{ fontWeight: 500, fontSize: 12, color: colors.muted }}>· {o.time}</span></div>
+                <div style={{ fontWeight: 800, fontSize: 16, textDecoration: cancelled ? 'line-through' : 'none', color: cancelled ? colors.muted : colors.ink }}>₹{o.total}</div>
+              </div>
+              <OrderItemLines items={o.items} muted={cancelled} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                <span style={{ fontSize: 10, padding: '3px 9px', background: PAY_BADGE[o.payment].bg, color: PAY_BADGE[o.payment].fg, borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>{cancelled ? 'CANCELLED' : o.payment.toUpperCase()}</span>
+                {cancelled
+                  ? (o.cancelReason && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>{o.cancelReason}</span>)
+                  : <button onClick={() => onCancel(o.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, color: colors.red, padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}><X size={13} /> Cancel</button>}
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: colors.muted }}>
-              {o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}
-            </div>
-            <div style={{ fontSize: 10, padding: '2px 8px', background: PAY_BADGE[o.payment].bg, color: PAY_BADGE[o.payment].fg, borderRadius: 10, marginTop: 6, display: 'inline-block', fontWeight: 600 }}>{o.payment.toUpperCase()}</div>
-          </div>
-        ))}
-        {orders.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: colors.muted }}>No orders yet · Tap "New Order" to start</div>}
+          );
+        })}
+        {orders.length === 0 && <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 40, textAlign: 'center', color: colors.muted }}>No orders yet · Tap "New Order" to start</div>}
       </div>
     </div>
   );
