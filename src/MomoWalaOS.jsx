@@ -1437,8 +1437,6 @@ function BottomNav({ tab, setTab, tabs }) {
 
 // ─── OWNER: DASHBOARD ───
 function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
-  const expectedRevenue = piecesSold * 12; // avg ₹12/piece
-  const variance = todayRevenue - expectedRevenue;
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
   const lowTypes = stockTypes.filter(st => (inv[st.key]?.freezer ?? 0) < 100);
   const openState = cartOpenState(cart);
@@ -1480,15 +1478,6 @@ function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], to
         <MetricCard label="Cash" value={`₹${cashRevenue}`} icon={<IndianRupee size={16}/>} color={colors.green} />
         <MetricCard label="UPI / Online" value={`₹${upiRevenue}`} icon={<Smartphone size={16}/>} color={colors.ink} />
       </div>
-
-      {/* Variance alert */}
-      {Math.abs(variance) > 100 && (
-        <Alert
-          type={variance > 0 ? 'warn' : 'danger'}
-          title={variance > 0 ? 'Revenue HIGHER than expected' : 'Possible stock leakage'}
-          message={`Recorded ₹${todayRevenue} vs expected ₹${expectedRevenue} (based on pieces sold × avg ₹12). Difference: ₹${variance}`}
-        />
-      )}
 
       {/* Pending QR orders awaiting payment */}
       {pendingCount > 0 && (
