@@ -275,8 +275,15 @@ const TODAY = new Date().toISOString().split('T')[0];
 // orders and staff-'cancelled' orders never touch revenue or pieces sold.
 const isPaid = (o) => o.payment === 'cash' || o.payment === 'upi';
 
-// Reasons a staff member can give when cancelling a pending QR order.
+// Reasons a staff member can give when cancelling an order.
 const CANCEL_REASONS = ['Customer left / no-show', 'Duplicate order', 'Wrong items ordered', 'Customer changed mind', 'Item out of stock', 'Test / mistake', 'Other'];
+
+// Staff may cancel a settled COUNTER order (source 'staff-entry') only within
+// this window of it being punched; after that it's locked in the records.
+const CANCEL_WINDOW_MS = 5 * 60 * 1000;
+const withinCancelWindow = (o) => Date.now() - o.id <= CANCEL_WINDOW_MS;
+// A staff-side settled order the staff is still allowed to cancel.
+const staffCancellable = (o) => o.source === 'staff-entry' && o.payment !== 'cancelled' && withinCancelWindow(o);
 
 // Offline fallback only: highest token seen today for this cart + 1. The
 // server RPC (nextOrderToken) is the source of truth when online.
@@ -2317,7 +2324,12 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const confirmCancel = (orderId, reason) => {
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment === 'cancelled') { setCancelTarget(null); return; }
-    const newInv = isPaid(order) ? restoreInventory(inv, order.items, menu.items) : inv;
+    const settled = isPaid(order);
+    // A settled order can only be cancelled if it's a counter order still inside
+    // the 5-minute window. (Unpaid QR orders in the Pending tab aren't limited.)
+    if (settled && !staffCancellable(order)) { setCancelTarget(null); return; }
+    // Settled orders already deducted stock, so put the pieces back on cancel.
+    const newInv = settled ? restoreInventory(inv, order.items, menu.items) : inv;
     updateState({
       inventory: { ...state.inventory, [cartId]: newInv },
       orders: state.orders.map(o => o.id === orderId
@@ -2622,6 +2634,9 @@ function OrderItemLines({ items, muted }) {
 }
 
 function MyOrdersScreen({ orders, onCancel }) {
+  // Re-render every 20s so the 5-minute cancel window closes on its own.
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick(n => n + 1), 20000); return () => clearInterval(t); }, []);
   const totalCash = orders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
   const totalUpi = orders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
   const liveCount = orders.filter(o => o.payment !== 'cancelled').length;
@@ -2649,7 +2664,9 @@ function MyOrdersScreen({ orders, onCancel }) {
                 <span style={{ fontSize: 10, padding: '3px 9px', background: PAY_BADGE[o.payment].bg, color: PAY_BADGE[o.payment].fg, borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>{cancelled ? 'CANCELLED' : o.payment.toUpperCase()}</span>
                 {cancelled
                   ? (o.cancelReason && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>{o.cancelReason}</span>)
-                  : <button onClick={() => onCancel(o.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, color: colors.red, padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}><X size={13} /> Cancel</button>}
+                  : staffCancellable(o)
+                    ? <button onClick={() => onCancel(o.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, color: colors.red, padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}><X size={13} /> Cancel</button>
+                    : (o.source === 'staff-entry' && <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>Cancel window closed</span>)}
               </div>
             </div>
           );
