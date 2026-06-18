@@ -309,7 +309,21 @@ const DEFAULT_INVENTORY = {
 
 const freshInventory = () => JSON.parse(JSON.stringify(DEFAULT_INVENTORY));
 
+// Bump this to force every device to drop its local transactional data (orders,
+// logs, inventory) on next open and adopt the clean cloud — used for the Momo
+// Wala production launch so stale test rows aren't re-pushed. Accounts, carts
+// and menus are preserved.
+const DATA_EPOCH = '2026-06-18-momowala-launch';
+
 const getInitialState = () => {
+  // One-time launch reset.
+  if (storage.get('dataEpoch', null) !== DATA_EPOCH) {
+    ['orders', 'stockLogs', 'cartLoadings', 'dayCloseLogs', 'wastageLogs', 'expenses'].forEach(k => storage.set(k, []));
+    storage.set('inventoryByCart', null);
+    storage.set('staffOnDuty', null);
+    storage.set('dataEpoch', DATA_EPOCH);
+  }
+
   // Legacy single-tenant keys (pre multi-cart) — read only, for migration.
   const legacyStaff = storage.get('staff', null);
   const legacyInv = storage.get('inventory', null);
