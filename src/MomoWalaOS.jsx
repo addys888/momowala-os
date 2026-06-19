@@ -269,7 +269,15 @@ function restoreInventory(inventory, items, menuItems = MENU_ITEMS) {
 // ─── STORAGE ───
 // localStorage (offline-first) + Supabase cloud sync — see src/lib/store.js
 
-const TODAY = new Date().toISOString().split('T')[0];
+// LOCAL calendar date (YYYY-MM-DD). Must be local, not UTC — the cart runs in
+// IST, and an evening/night business day must not roll over at UTC midnight.
+// Using UTC here previously made "Today" leak in yesterday's orders so Today,
+// This week and This month all showed the same totals.
+const localDate = (d = new Date()) => {
+  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return z.toISOString().split('T')[0];
+};
+const TODAY = localDate();
 
 // An order counts as real revenue only once paid (cash/UPI). 'pending' QR
 // orders and staff-'cancelled' orders never touch revenue or pieces sold.
@@ -2234,12 +2242,39 @@ function periodStart(period) {
   if (period === 'month') { d.setDate(1); return d; }
   return new Date(0);
 }
-const dstr = (d) => d.toISOString().split('T')[0];
+const dstr = (d) => localDate(d);
+
+// Aggregate sold pieces from a set of paid orders against the cart's menu.
+// Returns pieces per stock category (veg/paneer/corn) and a per-item breakdown
+// (portions sold + pieces), sorted by portions sold descending.
+function soldBreakdown(orders, menuItems) {
+  const byCat = {};   // stockKey -> pieces
+  const byItem = {};  // key -> { name, qty, pieces }
+  (orders || []).forEach(o => (o.items || []).forEach(it => {
+    const m = menuItems.find(x => x.id === it.id);
+    if (!m) { // lassi / add-ons (no piece count)
+      const k = 'x:' + it.id;
+      byItem[k] = byItem[k] || { name: it.name, qty: 0, pieces: 0 };
+      byItem[k].qty += it.qty;
+      return;
+    }
+    const pcs = (it.type === 'half' ? m.pcsHalf : m.pcsFull) * it.qty;
+    if (m.stockKey) byCat[m.stockKey] = (byCat[m.stockKey] || 0) + pcs;
+    byItem[m.id] = byItem[m.id] || { name: m.name, qty: 0, pieces: 0 };
+    byItem[m.id].qty += it.qty;
+    byItem[m.id].pieces += pcs;
+  }));
+  const items = Object.values(byItem).sort((a, b) => b.qty - a.qty || b.pieces - a.pieces);
+  return { byCat, items };
+}
 
 function Reports({ state, updateState, cartId }) {
   const [period, setPeriod] = useState('today');
   const [showExpense, setShowExpense] = useState(false);
+  const [showAllItems, setShowAllItems] = useState(false);
+  const [delExpense, setDelExpense] = useState(null); // expense pending delete-confirm
   const from = dstr(periodStart(period));
+  const menu = menuFor(state, cartId);
 
   const orders = state.orders.filter(o => o.cartId === cartId && isPaid(o) && o.date >= from);
   const expenses = (state.expenses || []).filter(e => e.cartId === cartId && e.date >= from);
@@ -2252,12 +2287,18 @@ function Reports({ state, updateState, cartId }) {
   const wasted = wastage.reduce((s, w) => s + w.qty, 0);
   const net = revenue - spend;
 
+  // Sold pieces by category + top-selling items for the chosen period.
+  const { byCat, items: soldItems } = soldBreakdown(orders, menu.items || []);
+  const catRows = (menu.stockTypes || []).map(st => ({ key: st.key, label: st.label, pcs: byCat[st.key] || 0 }));
+  const maxQty = soldItems[0]?.qty || 1;
+  const shownItems = showAllItems ? soldItems : soldItems.slice(0, 5);
+
   const addExpense = (category, amount, note) => {
     const e = { id: Date.now(), cartId, date: TODAY, category, amount, note };
     updateState({ expenses: [...(state.expenses || []), e] });
     setShowExpense(false);
   };
-  const removeExpense = (id) => { if (confirm('Delete this expense?')) updateState({ expenses: state.expenses.filter(e => e.id !== id) }); };
+  const removeExpense = (id) => { updateState({ expenses: state.expenses.filter(e => e.id !== id) }); setDelExpense(null); };
 
   const label = { today: 'Today', week: 'This week', month: 'This month' }[period];
 
@@ -2282,7 +2323,55 @@ function Reports({ state, updateState, cartId }) {
         <MetricCard label="Expenses" value={`₹${spend.toLocaleString('en-IN')}`} icon={<IndianRupee size={16}/>} color={colors.red} />
         <MetricCard label="Net (sales − spend)" value={`₹${net.toLocaleString('en-IN')}`} icon={<TrendingUp size={16}/>} color={net >= 0 ? colors.green : colors.red} />
       </div>
-      {wasted > 0 && <Alert type="warn" title={`${wasted} pcs wasted ${label.toLowerCase()}`} message={`${wastage.length} wastage entr${wastage.length > 1 ? 'ies' : 'y'} logged by staff.`} />}
+      {/* Momos sold by category (pieces) — #5 */}
+      {catRows.length > 0 && (<>
+        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>MOMOS SOLD {label.toUpperCase()} (PIECES)</div>
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(catRows.length, 3)}, 1fr)`, gap: 10, marginBottom: 16 }}>
+          {catRows.map(c => (
+            <div key={c.key} style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '14px 12px', textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 900 }}>{c.pcs}</div>
+              <div style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>{c.label}</div>
+            </div>
+          ))}
+        </div>
+      </>)}
+
+      {/* Top selling items — #3 (period-aware, top 5 + see all) */}
+      <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>TOP SELLERS — {label.toUpperCase()}</div>
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 14, marginBottom: 16 }}>
+        {shownItems.map((it, i) => (
+          <div key={it.name + i} style={{ marginBottom: i === shownItems.length - 1 ? 0 : 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+              <span style={{ fontWeight: 700 }}>{i + 1}. {it.name}</span>
+              <span style={{ fontWeight: 700, color: colors.muted }}>{it.qty} sold{it.pieces ? ` · ${it.pieces} pcs` : ''}</span>
+            </div>
+            <div style={{ height: 8, background: colors.paper, borderRadius: 6, overflow: 'hidden' }}>
+              <div style={{ width: `${Math.max(6, (it.qty / maxQty) * 100)}%`, height: '100%', background: colors.ink, borderRadius: 6 }} />
+            </div>
+          </div>
+        ))}
+        {soldItems.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No sales {label.toLowerCase()} yet.</div>}
+        {soldItems.length > 5 && (
+          <button onClick={() => setShowAllItems(v => !v)} style={{ width: '100%', marginTop: 12, background: 'transparent', border: `1px solid ${colors.border}`, color: brand.navy, padding: 9, borderRadius: 8, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
+            {showAllItems ? 'Show top 5' : `See all ${soldItems.length} items`}
+          </button>
+        )}
+      </div>
+
+      {/* Wastage — owner day-wise view #1 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>WASTAGE — {label.toUpperCase()}</div>
+        {wasted > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: colors.red }}>{wasted} pcs</div>}
+      </div>
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden', marginBottom: 16 }}>
+        {wastage.slice().reverse().map(w => (
+          <div key={w.id} style={{ padding: '11px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div><div style={{ fontWeight: 700, fontSize: 14 }}>{w.qty}× {w.label}</div><div style={{ fontSize: 11.5, color: colors.muted }}>{w.reason} · {w.date}{w.staff ? ` · ${w.staff}` : ''}</div></div>
+            <div style={{ fontSize: 12, color: colors.red, fontWeight: 700 }}>−{w.qty}</div>
+          </div>
+        ))}
+        {wastage.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No wastage logged {label.toLowerCase()}. 👍</div>}
+      </div>
 
       {/* Expenses */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 4 }}>
@@ -2295,7 +2384,7 @@ function Reports({ state, updateState, cartId }) {
           <div key={e.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{e.category}</div><div style={{ fontSize: 12, color: colors.muted }}>{e.date}{e.note ? ` · ${e.note}` : ''}</div></div>
             <div style={{ fontWeight: 800 }}>₹{e.amount}</div>
-            <button onClick={() => removeExpense(e.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
+            <button onClick={() => setDelExpense(e)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
           </div>
         ))}
         {expenses.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No expenses logged {label.toLowerCase()}. Tap Add to record stock/raw-material spend.</div>}
@@ -2315,6 +2404,12 @@ function Reports({ state, updateState, cartId }) {
         ))}
         {state.dayCloseLogs.filter(d => d.cartId === cartId).length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>Close a day to start the history.</div>}
       </div>
+
+      {delExpense && (
+        <EditModalShell title="Delete expense?" onClose={() => setDelExpense(null)} onSave={() => removeExpense(delExpense.id)} saveLabel="Delete" closeLabel="Keep" danger>
+          <div style={{ fontSize: 14, color: colors.ink }}>Remove <strong>{delExpense.category} · ₹{delExpense.amount}</strong>{delExpense.note ? ` (${delExpense.note})` : ''} from {delExpense.date}? This can't be undone.</div>
+        </EditModalShell>
+      )}
     </div>
   );
 }
@@ -2791,9 +2886,15 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
   const [qty, setQty] = useState('');
   const [reason, setReason] = useState(WASTE_REASONS[0]);
   const [done, setDone] = useState('');
+  const [err, setErr] = useState('');
   const n = parseInt(qty) || 0;
+  const onCart = inv[stockKey]?.cart ?? 0;
   const submit = () => {
-    if (!stockKey || n <= 0) return;
+    setErr('');
+    if (!stockKey || n <= 0) { setErr('Enter how many pieces.'); return; }
+    // Can't waste more than is physically on the cart.
+    if (n > onCart) { setErr(`Only ${onCart} ${stockTypes.find(s => s.key === stockKey)?.label || ''} pcs on the cart — can't log ${n}.`); return; }
+    if (!confirm(`Log ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage? This removes them from cart stock.`)) return;
     onLog(stockKey, n, reason);
     setDone(`Logged ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage.`);
     setQty(''); setTimeout(() => setDone(''), 2500);
@@ -2819,6 +2920,7 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
                 <select value={reason} onChange={e => setReason(e.target.value)} style={editInput}>{WASTE_REASONS.map(r => <option key={r}>{r}</option>)}</select></div>
             </div>
             <button onClick={submit} style={{ width: '100%', background: colors.red, color: '#fff', border: 'none', padding: 14, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>Log wastage (removes from cart)</button>
+            {err && <div style={{ marginTop: 10, background: '#FFE7E7', color: colors.red, borderRadius: 8, padding: 10, fontSize: 13, fontWeight: 600, textAlign: 'center' }}>{err}</div>}
             {done && <div style={{ marginTop: 10, background: '#E7F5E7', color: colors.green, borderRadius: 8, padding: 10, fontSize: 13, fontWeight: 600, textAlign: 'center' }}>{done}</div>}
           </div>
 
