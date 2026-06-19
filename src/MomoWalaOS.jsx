@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
-  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner } from './lib/store';
+  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
 
 // ============================================
@@ -763,6 +763,9 @@ function AdminCarts({ state, updateState }) {
       ownerPasswordHash: null, active: true, createdAt: TODAY,
     };
     updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInventory() }, menus: { ...state.menus, [id]: { items: [], lassi: [], addons: [] } } });
+    // New carts can't be created via the recurring PATCH sync — insert explicitly.
+    const r = await insertCart(cart);
+    if (r.error) alert('Cart saved locally, but cloud insert failed: ' + r.error.message);
     setShowAdd(false);
   };
 
@@ -1491,16 +1494,31 @@ function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], to
 
       {stockTypes.length > 0 && <>
       <SectionHeader title="Live Inventory" />
-      <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
+      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, overflow: 'hidden' }}>
+        <div style={{ display: 'flex', padding: '10px 16px', background: '#FAF8F2', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: colors.muted }}>
+          <div style={{ flex: 1 }}>ITEM</div>
+          <div style={{ width: 88, textAlign: 'right' }}>❄️ FREEZER</div>
+          <div style={{ width: 88, textAlign: 'right' }}>🛒 ON CART</div>
+        </div>
         {stockTypes.map(st => {
           const b = inv[st.key] || { freezer: 0, cart: 0 };
+          const low = b.freezer < 100;
           return (
-            <React.Fragment key={st.key}>
-              <StockRow label={`${st.label} · Freezer`} value={b.freezer} unit="pcs" low={b.freezer < 100} />
-              <StockRow label={`${st.label} · On Cart`} value={b.cart} unit="pcs" />
-            </React.Fragment>
+            <div key={st.key} style={{ display: 'flex', alignItems: 'center', padding: '13px 16px', borderTop: `1px solid ${colors.border}` }}>
+              <div style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>{st.label}</div>
+              <div style={{ width: 88, textAlign: 'right' }}>
+                <span style={{ fontWeight: 800, fontSize: 16, color: low ? colors.red : colors.ink }}>{b.freezer}</span>
+                <span style={{ fontSize: 11, color: colors.muted }}> pcs</span>
+                {low && <span style={{ display: 'block', fontSize: 10, color: colors.red, fontWeight: 700 }}>LOW</span>}
+              </div>
+              <div style={{ width: 88, textAlign: 'right' }}>
+                <span style={{ fontWeight: 800, fontSize: 16 }}>{b.cart}</span>
+                <span style={{ fontSize: 11, color: colors.muted }}> pcs</span>
+              </div>
+            </div>
           );
         })}
+        {stockTypes.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13, borderTop: `1px solid ${colors.border}` }}>No stock types yet.</div>}
       </div>
       </>}
 
@@ -1583,6 +1601,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const [showAddStock, setShowAddStock] = useState(false);
   const [showTypes, setShowTypes] = useState(false);
   const [adjusting, setAdjusting] = useState(null); // { key, label } | null
+  const [moving, setMoving] = useState(null); // { type, label, dir:'load'|'return', qty } | null
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
   const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
   const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
@@ -1640,6 +1659,27 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
   };
 
+  // Move pieces back from the cart into the freezer (e.g. loaded too many).
+  const returnToFreezer = (type, qty) => {
+    const newInv = { ...inv };
+    if ((newInv[type]?.cart ?? 0) < qty) { alert('Not that many pieces on the cart.'); return; }
+    newInv[type] = { freezer: newInv[type].freezer + qty, cart: newInv[type].cart - qty };
+    const log = {
+      id: Date.now(), cartId, date: TODAY,
+      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      type: 'CART_UNLOAD', item: type, qty, note: `Returned ${qty} ${labelFor(type)} pieces to freezer`
+    };
+    setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
+  };
+
+  // Confirmed from the move modal (load to cart / return to freezer).
+  const confirmMove = () => {
+    if (!moving || moving.qty <= 0) { setMoving(null); return; }
+    if (moving.dir === 'load') loadToCart(moving.type, moving.qty);
+    else returnToFreezer(moving.type, moving.qty);
+    setMoving(null);
+  };
+
   return (
     <div>
       <SectionHeader title="Inventory Control" subtitle="Stock In · Cart Loading · Consumables" />
@@ -1653,6 +1693,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
       {showTypes && <StockTypesModal stockTypes={stockTypes} onSave={setStockTypes} onClose={() => setShowTypes(false)} />}
       {adjusting && <AdjustStockModal label={adjusting.label} current={inv[adjusting.key]?.freezer ?? 0} onApply={(delta, reason) => adjustStock(adjusting.key, delta, reason)} onClose={() => setAdjusting(null)} />}
+      {moving && <MoveStockConfirm move={moving} bucket={inv[moving.type] || { freezer: 0, cart: 0 }} onConfirm={confirmMove} onClose={() => setMoving(null)} />}
 
       {/* Freezer Status */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
@@ -1662,7 +1703,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
         </div>
         {stockTypes.map(st => {
           const b = inv[st.key] || { freezer: 0, cart: 0 };
-          return <FreezerItem key={st.key} typeKey={st.key} label={st.label} stock={b.freezer} cart={b.cart} onLoad={loadToCart} onAdjust={() => setAdjusting({ key: st.key, label: st.label })} />;
+          return <FreezerItem key={st.key} typeKey={st.key} label={st.label} stock={b.freezer} cart={b.cart} onMove={(dir, qty) => setMoving({ type: st.key, label: st.label, dir, qty })} onAdjust={() => setAdjusting({ key: st.key, label: st.label })} />;
         })}
         {stockTypes.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No stock types yet. Tap "Edit stock types" to add the items this cart freezes.</div>}
       </div>
@@ -1701,8 +1742,8 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   );
 }
 
-function FreezerItem({ typeKey, label, stock, cart, onLoad, onAdjust }) {
-  const [loadQty, setLoadQty] = useState(50);
+function FreezerItem({ typeKey, label, stock, cart, onMove, onAdjust }) {
+  const [qty, setQty] = useState(50);
   return (
     <div style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
@@ -1711,16 +1752,47 @@ function FreezerItem({ typeKey, label, stock, cart, onLoad, onAdjust }) {
           <span style={{ color: colors.muted }}>Freezer: </span><strong>{stock}</strong> · <span style={{ color: colors.muted }}>Cart: </span><strong>{cart}</strong>
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <input type="number" value={loadQty} onChange={e => setLoadQty(parseInt(e.target.value) || 0)} style={{ width: 70, padding: '6px 10px', border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 13 }} />
-        <button onClick={() => onLoad(typeKey, loadQty)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '6px 14px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 1 }}>
-          Load to Cart
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <input type="number" value={qty} onChange={e => setQty(parseInt(e.target.value) || 0)} style={{ width: 70, padding: '6px 10px', border: `1px solid ${colors.border}`, borderRadius: 6, fontSize: 13 }} />
+        <button onClick={() => onMove('load', qty)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '6px 12px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 1 }}>
+          Freezer → Cart
         </button>
-        <button onClick={onAdjust} style={{ background: '#fff', color: brand.navy, border: `1px solid ${colors.border}`, padding: '6px 12px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>
-          Adjust
+        <button onClick={() => onMove('return', qty)} style={{ background: '#fff', color: brand.navy, border: `1px solid ${colors.border}`, padding: '6px 12px', borderRadius: 6, fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 1 }}>
+          Cart → Freezer
         </button>
       </div>
+      <button onClick={onAdjust} style={{ background: 'transparent', color: colors.muted, border: 'none', padding: '2px 0', fontWeight: 600, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+        Adjust freezer (wastage / recount)
+      </button>
     </div>
+  );
+}
+
+// Confirmation before moving stock between freezer and cart, with a before→after
+// preview so the owner can sanity-check (and reverse an accidental over-load).
+function MoveStockConfirm({ move, bucket, onConfirm, onClose }) {
+  const load = move.dir === 'load';
+  const qty = move.qty;
+  const src = load ? bucket.freezer : bucket.cart;
+  const ok = qty > 0 && src >= qty;
+  const freezerAfter = load ? bucket.freezer - qty : bucket.freezer + qty;
+  const cartAfter = load ? bucket.cart + qty : bucket.cart - qty;
+  const cell = { background: colors.paper, borderRadius: 10, padding: '12px 14px', textAlign: 'center' };
+  const cap = { fontSize: 11, color: colors.muted, fontWeight: 600, marginBottom: 4 };
+  return (
+    <EditModalShell
+      title={load ? `Load ${move.label} to cart` : `Return ${move.label} to freezer`}
+      onClose={onClose}
+      onSave={() => { if (ok) onConfirm(); }}
+      saveLabel={load ? 'Load to cart' : 'Return to freezer'}
+      error={!ok ? (qty <= 0 ? 'Enter a quantity.' : `Only ${src} pcs in ${load ? 'freezer' : 'cart'}.`) : ''}
+    >
+      <div style={{ fontSize: 14, marginBottom: 14 }}>Move <strong>{qty} pcs</strong> {load ? 'from Freezer → Cart' : 'from Cart → Freezer'}?</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div style={cell}><div style={cap}>FREEZER</div><div style={{ fontWeight: 800 }}>{bucket.freezer} → {Math.max(0, freezerAfter)}</div></div>
+        <div style={cell}><div style={cap}>ON CART</div><div style={{ fontWeight: 800 }}>{bucket.cart} → {Math.max(0, cartAfter)}</div></div>
+      </div>
+    </EditModalShell>
   );
 }
 

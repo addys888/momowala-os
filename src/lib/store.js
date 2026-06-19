@@ -78,7 +78,10 @@ const cartToRow = (c) => ({
   owner_name: c.ownerName ?? null,
   // owner_password_hash is NOT written here — set only via the auth RPCs.
   owner_mobile: c.ownerMobile,
-  active: c.active, created_at: c.createdAt,
+  // created_at is intentionally omitted: anon has no UPDATE grant on it (it's
+  // set once at onboard), and including it here made the whole carts upsert fail
+  // the ON CONFLICT update — which silently blocked close/open + profile syncs.
+  active: c.active,
 });
 const rowToCart = (r) => ({
   id: r.id, name: r.name, tagline: r.tagline, cuisine: r.cuisine, location: r.location,
@@ -273,6 +276,13 @@ export async function loadCloudState() {
   }
 }
 
+// Insert a brand-new cart (admin onboard). Plain INSERT works with the
+// column-level grants; the recurring sync only PATCHes existing carts.
+export async function insertCart(cart) {
+  if (!supabase) return { error: null };
+  return supabase.from('carts').insert({ ...cartToRow(cart), created_at: cart.createdAt });
+}
+
 // ─── CLOUD SYNC (debounced; events are insert-once, inventory is upserted) ───
 let pushTimer = null;
 
@@ -289,9 +299,16 @@ async function pushState(state) {
       rows.length
         ? supabase.from(table).upsert(rows, { onConflict: 'id', ignoreDuplicates: true })
         : null;
-    // mutable rows: insert-or-update so edits (settlements, password resets) sync
+    // mutable rows: insert-or-update so edits (settlements) sync
     const merge = (table, rows) =>
       rows.length ? supabase.from(table).upsert(rows, { onConflict: 'id' }) : null;
+    // carts + staff have column-level (not table-level) grants since the security
+    // lockdown, so PostgREST upsert is rejected. Sync existing rows with per-row
+    // PATCH instead (new carts use insertCart at onboard; new staff via RPC).
+    const updateRows = (table, rows) => rows.map((r) => {
+      const { id, ...rest } = r;
+      return supabase.from(table).update(rest).eq('id', id);
+    });
     const results = await Promise.all(
       [
         merge('orders', state.orders.map(orderToRow)),
@@ -300,8 +317,8 @@ async function pushState(state) {
         append('day_close_logs', state.dayCloseLogs.map(dayCloseToRow)),
         append('wastage_logs', (state.wastageLogs || []).map(wastageToRow)),
         merge('expenses', (state.expenses || []).map(expenseToRow)),
-        merge('staff', state.staff.map(staffToRow)),
-        merge('carts', state.carts.map(cartToRow)),
+        ...updateRows('staff', state.staff.map(staffToRow)),
+        ...updateRows('carts', state.carts.map(cartToRow)),
         // platform + password hashes are never written from the browser — those
         // go through the SECURITY DEFINER auth RPCs (see authLogin/authSetPassword).
         supabase
