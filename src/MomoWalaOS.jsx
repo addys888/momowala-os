@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
-  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart } from './lib/store';
+  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
 
 // ============================================
@@ -308,10 +308,10 @@ const DEFAULT_INVENTORY = {
   paneer: { freezer: 200, cart: 50 },
   corn: { freezer: 200, cart: 50 },
   consumables: {
-    oil: { unit: 'L', stock: 5, perOrder: 0.02 },
-    cream: { unit: 'ml', stock: 1000, perOrder: 15 },
-    cheese: { unit: 'slices', stock: 50, perOrder: 1 },
-    schezwan: { unit: 'ml', stock: 500, perOrder: 10 },
+    oil: { name: 'Oil', unit: 'L', stock: 5, perOrder: 0.02 },
+    cream: { name: 'Cream', unit: 'ml', stock: 1000, perOrder: 15 },
+    cheese: { name: 'Cheese', unit: 'slices', stock: 50, perOrder: 1 },
+    schezwan: { name: 'Schezwan', unit: 'ml', stock: 500, perOrder: 10 },
   },
 };
 
@@ -1367,7 +1367,12 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
     updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ...fields } : c) });
     setShowProfile(false);
   };
-  const toggleOpen = () => updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: !c.closedManually } : c) });
+  const toggleOpen = () => {
+    const next = !cart?.closedManually;
+    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: next } : c) });
+    // Persist immediately (not via the debounced batch) so it survives a refresh.
+    setCartClosed(cartId, next);
+  };
 
   const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
   const todayRevenue = todayOrders.reduce((sum, o) => sum + (isPaid(o) ? o.total : 0), 0);
@@ -1464,14 +1469,15 @@ function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], to
         <button onClick={onEditProfile} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Edit3 size={13}/> Edit</button>
       </div>
 
-      {/* Open / closed control */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: openState.open ? '#E7F5E7' : '#FFE7E7', border: `1px solid ${openState.open ? colors.green : colors.red}`, borderRadius: 12, padding: '12px 14px', marginBottom: 16 }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontWeight: 800, fontSize: 14, color: openState.open ? colors.green : colors.red }}>{openState.open ? '🟢 Cart is OPEN' : '🔴 Cart is CLOSED'}</div>
-          <div style={{ fontSize: 11.5, color: colors.muted }}>{cart?.closedManually ? 'Closed manually — customers can’t order' : openState.open ? 'Taking online orders' : openState.reason}</div>
+      {/* Open / closed control — compact pill with a switch-style toggle */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '9px 9px 9px 14px', marginBottom: 16 }}>
+        <span style={{ width: 9, height: 9, borderRadius: '50%', background: openState.open ? colors.green : colors.red, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 13.5, color: openState.open ? '#0F7B0F' : colors.red }}>{openState.open ? 'Open' : 'Closed'}</div>
+          <div style={{ fontSize: 11, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cart?.closedManually ? 'You closed the cart' : openState.open ? 'Taking orders' : openState.reason}</div>
         </div>
-        <button onClick={onToggleOpen} style={{ background: cart?.closedManually ? colors.green : colors.red, color: '#fff', border: 'none', padding: '9px 14px', borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-          {cart?.closedManually ? 'Re-open' : 'Close now'}
+        <button onClick={onToggleOpen} style={{ background: cart?.closedManually ? colors.green : colors.red, color: '#fff', border: 'none', padding: '9px 16px', borderRadius: 20, fontWeight: 800, fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {cart?.closedManually ? <>🟢 Open cart</> : <>🔴 Close cart</>}
         </button>
       </div>
 
@@ -1495,9 +1501,13 @@ function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], to
         <Alert type="warn" title={`${pendingCount} order${pendingCount > 1 ? 's' : ''} awaiting payment`} message="Customer QR orders not yet collected. Staff settles these in the Pending tab — stock and revenue update only after payment." />
       )}
 
-      {/* Stock alerts */}
+      {/* Stock alerts — compact one-line chip */}
       {lowTypes.length > 0 && (
-        <Alert type="danger" title="Low stock alert" message={`${lowTypes.map(st => st.label).join(' & ')} running low. Order before tomorrow.`} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FFF4E5', border: '1px solid #FFD9A0', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 12.5 }}>
+          <AlertTriangle size={15} color="#B5460B" style={{ flexShrink: 0 }} />
+          <span style={{ fontWeight: 800, color: '#B5460B' }}>Low freezer stock:</span>
+          <span style={{ color: colors.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lowTypes.map(st => st.label).join(', ')}</span>
+        </div>
       )}
 
       {stockTypes.length > 0 && <>
@@ -1610,6 +1620,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const [showTypes, setShowTypes] = useState(false);
   const [adjusting, setAdjusting] = useState(null); // { key, label } | null
   const [moving, setMoving] = useState(null); // { type, label, dir:'load'|'return', qty } | null
+  const [editCons, setEditCons] = useState(null); // { key?, name, unit, stock } | null
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
   const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
   const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
@@ -1688,6 +1699,22 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     setMoving(null);
   };
 
+  // Owner-managed consumables / supplies (oil, cream, French fries packets, …).
+  const saveConsumable = ({ key, name, unit, stock }) => {
+    const cons = { ...(inv.consumables || {}) };
+    const k = key || slugify(name) || ('c' + Date.now());
+    const prev = cons[k] || { perOrder: 0 };
+    cons[k] = { ...prev, name: name.trim(), unit: (unit || '').trim() || 'pcs', stock: parseFloat(stock) || 0 };
+    setCartInv({ ...inv, consumables: cons });
+    setEditCons(null);
+  };
+  const removeConsumable = (key) => {
+    if (!confirm('Remove this consumable/supply item?')) return;
+    const cons = { ...(inv.consumables || {}) };
+    delete cons[key];
+    setCartInv({ ...inv, consumables: cons });
+  };
+
   return (
     <div>
       <SectionHeader title="Inventory Control" subtitle="Stock In · Cart Loading · Consumables" />
@@ -1716,19 +1743,25 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
         {stockTypes.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No stock types yet. Tap "Edit stock types" to add the items this cart freezes.</div>}
       </div>
 
-      {/* Consumables */}
+      {/* Consumables & supplies — owner-managed */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>CONSUMABLES (AUTO-TRACKED)</div>
-        {Object.entries(inv.consumables).map(([key, item]) => (
-          <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: `1px solid ${colors.border}` }}>
-            <div style={{ fontSize: 14, textTransform: 'capitalize' }}>{key}</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ fontWeight: 700 }}>{item.stock.toFixed(item.unit === 'L' ? 2 : 0)} <span style={{ fontSize: 11, color: colors.muted }}>{item.unit}</span></div>
-              <div style={{ fontSize: 10, color: colors.muted }}>~{item.perOrder}{item.unit}/order</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>CONSUMABLES & SUPPLIES</div>
+          <button onClick={() => setEditCons({ name: '', unit: '', stock: '' })} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={14}/> Add</button>
+        </div>
+        {Object.entries(inv.consumables || {}).map(([key, item]) => (
+          <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${colors.border}` }}>
+            <div style={{ fontSize: 14, fontWeight: 600, textTransform: item.name ? 'none' : 'capitalize' }}>{item.name || key}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div style={{ fontWeight: 800 }}>{(item.stock ?? 0).toFixed(item.unit === 'L' ? 2 : 0)} <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>{item.unit}</span></div>
+              <button onClick={() => setEditCons({ key, name: item.name || key, unit: item.unit || '', stock: item.stock ?? 0 })} title="Edit" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={13}/></button>
+              <button onClick={() => removeConsumable(key)} title="Remove" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
             </div>
           </div>
         ))}
+        {Object.keys(inv.consumables || {}).length === 0 && <div style={{ padding: 12, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No consumables yet. Tap Add (oil, cheese, French fries, …).</div>}
       </div>
+      {editCons && <ConsumableModal initial={editCons} onSave={saveConsumable} onClose={() => setEditCons(null)} />}
 
       {/* Recent Logs */}
       <SectionHeader title="Activity Log" />
@@ -1800,6 +1833,35 @@ function MoveStockConfirm({ move, bucket, onConfirm, onClose }) {
         <div style={cell}><div style={cap}>FREEZER</div><div style={{ fontWeight: 800 }}>{bucket.freezer} → {Math.max(0, freezerAfter)}</div></div>
         <div style={cell}><div style={cap}>ON CART</div><div style={{ fontWeight: 800 }}>{bucket.cart} → {Math.max(0, cartAfter)}</div></div>
       </div>
+    </EditModalShell>
+  );
+}
+
+// Add or edit a consumable / supply (oil, cheese, French fries packets, …).
+function ConsumableModal({ initial, onSave, onClose }) {
+  const [name, setName] = useState(initial.name || '');
+  const [unit, setUnit] = useState(initial.unit || '');
+  const [stock, setStock] = useState(initial.stock === '' || initial.stock == null ? '' : String(initial.stock));
+  const [error, setError] = useState('');
+  const submit = () => {
+    if (!name.trim()) { setError('Enter a name.'); return; }
+    onSave({ key: initial.key, name, unit, stock });
+  };
+  return (
+    <EditModalShell title={initial.key ? `Edit ${initial.name}` : 'Add consumable / supply'} onClose={onClose} onSave={submit} error={error}>
+      <div style={editLabel}>NAME</div>
+      <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. French fries" style={editInput} />
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={editLabel}>UNIT</div>
+          <input value={unit} onChange={e => setUnit(e.target.value)} placeholder="e.g. packet / kg / L" style={editInput} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={editLabel}>IN STOCK</div>
+          <input type="number" inputMode="decimal" value={stock} onChange={e => setStock(e.target.value)} placeholder="0" style={editInput} />
+        </div>
+      </div>
+      <div style={{ fontSize: 12, color: colors.muted }}>Tip: French fries come as a 2.5 kg packet — set unit “packet” and stock the number of packets in the freezer.</div>
     </EditModalShell>
   );
 }
@@ -1951,7 +2013,17 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
       revenue: cashRevenue + upiRevenue,
       closedAt: new Date().toISOString()
     };
-    updateState({ dayCloseLogs: [...state.dayCloseLogs, dayClose] });
+    // Return the counted leftover from the cart back into the freezer (real-world:
+    // at 11 PM unsold momos go back in the freezer), then empty the cart.
+    const newInv = { ...inv };
+    stockRows.forEach(r => {
+      const actual = parseInt(r.val) || 0;
+      if (newInv[r.key]) newInv[r.key] = { freezer: (newInv[r.key].freezer || 0) + actual, cart: 0 };
+    });
+    updateState({
+      inventory: { ...state.inventory, [cartId]: newInv },
+      dayCloseLogs: [...state.dayCloseLogs, dayClose],
+    });
     setClosed(true);
   };
 
@@ -2023,9 +2095,12 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
       ))}
 
       {/* Close day button */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', background: '#FFF7E0', border: `1px solid #FFE08A`, borderRadius: 10, padding: '10px 12px', marginTop: 16, fontSize: 12.5, color: '#8A6D00' }}>
+        <span>❄️</span><span>On closing, the leftover pieces you counted go <strong>back into the freezer</strong> and the cart is emptied for tomorrow.</span>
+      </div>
       <button onClick={closeDay}
         disabled={physicalCash === '' || phonePeAmount === '' || !allStockFilled}
-        style={{ width: '100%', background: physicalCash === '' || phonePeAmount === '' ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: 'pointer', marginTop: 16 }}>
+        style={{ width: '100%', background: physicalCash === '' || phonePeAmount === '' ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: 'pointer', marginTop: 10 }}>
         Close Day & Save Report
       </button>
     </div>

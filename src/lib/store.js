@@ -283,6 +283,14 @@ export async function insertCart(cart) {
   return supabase.from('carts').insert({ ...cartToRow(cart), created_at: cart.createdAt });
 }
 
+// Immediately persist the cart's open/closed flag (NOT debounced) so it sticks
+// even if the owner refreshes right after toggling — the debounced sync would
+// otherwise be cancelled by the page unload and the cloud value would win back.
+export async function setCartClosed(cartId, closed) {
+  if (!supabase) return { error: null };
+  return supabase.from('carts').update({ closed_manually: !!closed }).eq('id', cartId);
+}
+
 // ─── CLOUD SYNC (debounced; events are insert-once, inventory is upserted) ───
 let pushTimer = null;
 
