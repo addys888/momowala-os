@@ -1,7 +1,8 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
-  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, loadCartOrders, mergeOrders } from './lib/store';
+  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, loadCartOrders, mergeOrders,
+  applyInventory, setCartConsumables, pushInventoryBlob } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 
 // ============================================
@@ -263,6 +264,31 @@ function restoreInventory(inventory, items, menuItems = MENU_ITEMS) {
     }
   });
   return next;
+}
+
+// Pieces deducted per stock category for an order's items — used to build the
+// atomic inventory delta (so deductions compose across devices, not clobber).
+function orderStockDeltas(items, menuItems = MENU_ITEMS) {
+  const d = {};
+  (items || []).forEach(item => {
+    const m = menuItems.find(x => x.id === item.id);
+    if (m && m.stockKey) {
+      const pcs = (item.type === 'half' ? m.pcsHalf : m.pcsFull) * item.qty;
+      d[m.stockKey] = (d[m.stockKey] || 0) + pcs;
+    }
+  });
+  return d; // { stockKey: pieces }
+}
+
+// Persist an inventory change atomically via the RPC; fall back to a whole-blob
+// upsert only if the RPC isn't deployed yet (pre-migration).
+async function persistInv(cartId, ops, fullInventory) {
+  const r = await applyInventory(cartId, ops);
+  if (r.status === 'rpc_missing') await pushInventoryBlob(fullInventory);
+}
+async function persistConsumables(cartId, cons, fullInventory) {
+  const r = await setCartConsumables(cartId, cons);
+  if (r.status === 'rpc_missing') await pushInventoryBlob(fullInventory);
 }
 
 // ─── STORAGE ───
@@ -829,10 +855,16 @@ function AdminCarts({ state, updateState }) {
       accent: form.accent || brand.teal, ownerName: form.ownerName.trim(), ownerMobile: form.ownerMobile,
       ownerPasswordHash: null, active: true, createdAt: TODAY,
     };
-    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInventory() }, menus: { ...state.menus, [id]: { items: [], lassi: [], addons: [] } } });
+    const freshInv = freshInventory();
+    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInv }, menus: { ...state.menus, [id]: { items: [], lassi: [], addons: [] } } });
     // New carts can't be created via the recurring PATCH sync — insert explicitly.
     const r = await insertCart(cart);
     if (r.error) alert('Cart saved locally, but cloud insert failed: ' + r.error.message);
+    // Seed the new cart's inventory in the cloud (scoped to this cart_id only).
+    const seedOps = {};
+    Object.entries(freshInv).forEach(([k, v]) => { if (v && (v.freezer != null || v.cart != null)) seedOps[k] = { fset: v.freezer || 0, cset: v.cart || 0 }; });
+    if (Object.keys(seedOps).length) await persistInv(id, seedOps, { ...state.inventory, [id]: freshInv });
+    if (freshInv.consumables) await persistConsumables(id, freshInv.consumables, { ...state.inventory, [id]: freshInv });
     setShowAdd(false);
   };
 
@@ -1688,11 +1720,13 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const setStockTypes = (next) => {
     const menu = menuFor(state, cartId);
     const newInv = { ...inv };
-    next.forEach(st => { if (!newInv[st.key]) newInv[st.key] = { freezer: 0, cart: 0 }; });
+    const newOps = {};
+    next.forEach(st => { if (!newInv[st.key]) { newInv[st.key] = { freezer: 0, cart: 0 }; newOps[st.key] = { df: 0, dc: 0 }; } });
     updateState({
       menus: { ...state.menus, [cartId]: { ...menu, stockTypes: next } },
       inventory: { ...state.inventory, [cartId]: newInv },
     });
+    if (Object.keys(newOps).length) persistInv(cartId, newOps, { ...state.inventory, [cartId]: newInv });
   };
 
   const addStock = (type, qty) => {
@@ -1704,6 +1738,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       type: 'STOCK_IN', item: type, qty, note: `Added ${qty} pieces of ${labelFor(type)}`
     };
     setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
+    persistInv(cartId, { [type]: { df: qty } }, { ...state.inventory, [cartId]: newInv });
     setShowAddStock(false);
   };
 
@@ -1722,6 +1757,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       note: `${verb} ${Math.abs(applied)} ${labelFor(type)} in freezer — ${reason}`
     };
     setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
+    persistInv(cartId, { [type]: { df: applied } }, { ...state.inventory, [cartId]: newInv });
     setAdjusting(null);
   };
 
@@ -1735,6 +1771,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       type: 'CART_LOAD', item: type, qty, note: `Moved ${qty} ${labelFor(type)} pieces to cart`
     };
     setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
+    persistInv(cartId, { [type]: { df: -qty, dc: qty } }, { ...state.inventory, [cartId]: newInv });
   };
 
   // Move pieces back from the cart into the freezer (e.g. loaded too many).
@@ -1748,6 +1785,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       type: 'CART_UNLOAD', item: type, qty, note: `Returned ${qty} ${labelFor(type)} pieces to freezer`
     };
     setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
+    persistInv(cartId, { [type]: { df: qty, dc: -qty } }, { ...state.inventory, [cartId]: newInv });
   };
 
   // Confirmed from the move modal (load to cart / return to freezer).
@@ -1765,6 +1803,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const prev = cons[k] || { perOrder: 0 };
     cons[k] = { ...prev, name: name.trim(), unit: (unit || '').trim() || 'pcs', stock: parseFloat(stock) || 0 };
     setCartInv({ ...inv, consumables: cons });
+    persistConsumables(cartId, cons, { ...state.inventory, [cartId]: { ...inv, consumables: cons } });
     setEditCons(null);
   };
   const removeConsumable = (key) => {
@@ -1772,6 +1811,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const cons = { ...(inv.consumables || {}) };
     delete cons[key];
     setCartInv({ ...inv, consumables: cons });
+    persistConsumables(cartId, cons, { ...state.inventory, [cartId]: { ...inv, consumables: cons } });
   };
 
   return (
@@ -2075,14 +2115,16 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
     // Return the counted leftover from the cart back into the freezer (real-world:
     // at 11 PM unsold momos go back in the freezer), then empty the cart.
     const newInv = { ...inv };
+    const ops = {};
     stockRows.forEach(r => {
       const actual = parseInt(r.val) || 0;
-      if (newInv[r.key]) newInv[r.key] = { freezer: (newInv[r.key].freezer || 0) + actual, cart: 0 };
+      if (newInv[r.key]) { newInv[r.key] = { freezer: (newInv[r.key].freezer || 0) + actual, cart: 0 }; ops[r.key] = { df: actual, cset: 0 }; }
     });
     updateState({
       inventory: { ...state.inventory, [cartId]: newInv },
       dayCloseLogs: [...state.dayCloseLogs, dayClose],
     });
+    if (Object.keys(ops).length) persistInv(cartId, ops, { ...state.inventory, [cartId]: newInv });
     setClosed(true);
   };
 
@@ -2635,8 +2677,11 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       staff: staffName,
       source: 'staff-entry'
     };
-    // Staff order is settled on the spot, so deduct stock now.
-    setCartInv(deductInventory(inv, cart, menu.items), { orders: [...state.orders, order] });
+    // Staff order is settled on the spot, so deduct stock now (atomic delta).
+    const newInv = deductInventory(inv, cart, menu.items);
+    setCartInv(newInv, { orders: [...state.orders, order] });
+    const deltas = orderStockDeltas(cart, menu.items);
+    persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
     setCart([]);
     setJustPlaced({ token, total, payment });
   };
@@ -2646,9 +2691,12 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const settleOrder = (orderId, payment) => {
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment !== 'pending') return;
-    setCartInv(deductInventory(inv, order.items, menu.items), {
+    const newInv = deductInventory(inv, order.items, menu.items);
+    setCartInv(newInv, {
       orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
     });
+    const deltas = orderStockDeltas(order.items, menu.items);
+    persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
   };
   // Cancelling keeps the order (marked 'cancelled' with a required reason) so it
   // stays in records and surfaces in the admin's activity feed — never deleted.
@@ -2669,6 +2717,10 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         ? { ...o, payment: 'cancelled', cancelReason: reason, staff: o.staff || staffName, settledAt: new Date().toISOString() }
         : o),
     });
+    if (settled) {
+      const deltas = orderStockDeltas(order.items, menu.items);
+      persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: p }])), { ...state.inventory, [cartId]: newInv });
+    }
     setCancelTarget(null);
   };
 
@@ -2689,6 +2741,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       stockKey, label: st?.label || stockKey, qty, reason, staff: staffName,
     };
     setCartInv(newInv, { wastageLogs: [...state.wastageLogs, log] });
+    persistInv(cartId, { [stockKey]: { dc: -qty } }, { ...state.inventory, [cartId]: newInv });
   };
 
   return (

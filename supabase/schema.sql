@@ -192,6 +192,53 @@ end;
 $$;
 grant execute on function next_order_token(text, date) to anon;
 
+-- ── Atomic inventory updates ──
+-- Inventory is a single JSON blob shared by every device. Writing the whole blob
+-- (last-write-wins) let the owner's "load to cart" and the staff's order
+-- deductions clobber each other (lost loads, negative cart counts). These
+-- SECURITY DEFINER funcs apply *deltas* under a row lock, so concurrent changes
+-- from different devices compose correctly.
+-- p_ops: { "<stockKey>": { "df": int, "dc": int } }  -- deltas to freezer/cart
+--        use "fset"/"cset" for an absolute value (e.g. day-close empties cart).
+create or replace function apply_inventory(p_cart_id text, p_ops jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare blob jsonb; cartinv jsonb; k text; op jsonb; f numeric; c numeric; cur jsonb;
+begin
+  select data into blob from inventory where id = 1 for update;
+  if blob is null then blob := '{}'::jsonb; end if;
+  cartinv := coalesce(blob -> p_cart_id, '{}'::jsonb);
+  for k, op in select key, value from jsonb_each(p_ops) loop
+    cur := coalesce(cartinv -> k, jsonb_build_object('freezer', 0, 'cart', 0));
+    f := coalesce((cur ->> 'freezer')::numeric, 0);
+    c := coalesce((cur ->> 'cart')::numeric, 0);
+    if op ? 'fset' then f := (op ->> 'fset')::numeric; else f := f + coalesce((op ->> 'df')::numeric, 0); end if;
+    if op ? 'cset' then c := (op ->> 'cset')::numeric; else c := c + coalesce((op ->> 'dc')::numeric, 0); end if;
+    if f < 0 then f := 0; end if;            -- physical stock can't go negative
+    if c < 0 then c := 0; end if;
+    cartinv := jsonb_set(cartinv, array[k], jsonb_build_object('freezer', f, 'cart', c), true);
+  end loop;
+  blob := jsonb_set(blob, array[p_cart_id], cartinv, true);
+  update inventory set data = blob, updated_at = now() where id = 1;
+  return cartinv;
+end; $$;
+grant execute on function apply_inventory(text, jsonb) to anon;
+
+-- Owner-only consumables (oil, cheese, French fries…) — low concurrency, so a
+-- whole-sub-object set is fine; still atomic via the row lock.
+create or replace function set_cart_consumables(p_cart_id text, p_cons jsonb)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare blob jsonb; cartinv jsonb;
+begin
+  select data into blob from inventory where id = 1 for update;
+  if blob is null then blob := '{}'::jsonb; end if;
+  cartinv := coalesce(blob -> p_cart_id, '{}'::jsonb);
+  cartinv := jsonb_set(cartinv, array['consumables'], p_cons, true);
+  blob := jsonb_set(blob, array[p_cart_id], cartinv, true);
+  update inventory set data = blob, updated_at = now() where id = 1;
+  return cartinv;
+end; $$;
+grant execute on function set_cart_consumables(text, jsonb) to anon;
+
 -- ── Row Level Security ──
 -- v1 has no user accounts: the app talks to Supabase with the anon key, so
 -- these policies allow anon read/write. That means anyone who has your URL

@@ -231,6 +231,34 @@ export const authSetStaffPassword = (token, staffId, password) => callRpc('app_s
 export const authRegisterStaff = (token, id, name, mobile, password) => callRpc('app_register_staff', { p_token: token, p_id: id, p_name: name, p_mobile: mobile, p_password: password });
 export const authAdminResetOwner = (token, cartId, password) => callRpc('app_admin_reset_owner', { p_token: token, p_cart_id: cartId, p_password: password });
 
+// ─── ATOMIC INVENTORY (delta-based, race-safe) ───
+// Apply per-stock-key deltas (or absolute fset/cset) to the cart's inventory.
+// Returns { status, cartInv } or { status:'rpc_missing' } when not migrated yet.
+export async function applyInventory(cartId, ops) {
+  if (!supabase) return { status: 'offline' };
+  const { data, error } = await supabase.rpc('apply_inventory', { p_cart_id: cartId, p_ops: ops });
+  if (error) {
+    const missing = error.code === 'PGRST202' || /could not find the function|does not exist/i.test(error.message || '');
+    return { status: missing ? 'rpc_missing' : 'error', message: error.message };
+  }
+  return { status: 'ok', cartInv: data };
+}
+export async function setCartConsumables(cartId, cons) {
+  if (!supabase) return { status: 'offline' };
+  const { data, error } = await supabase.rpc('set_cart_consumables', { p_cart_id: cartId, p_cons: cons });
+  if (error) {
+    const missing = error.code === 'PGRST202' || /could not find the function|does not exist/i.test(error.message || '');
+    return { status: missing ? 'rpc_missing' : 'error', message: error.message };
+  }
+  return { status: 'ok', cartInv: data };
+}
+// Fallback (pre-migration): whole-blob upsert. Racy, but keeps inventory working
+// until apply_inventory exists. Once the RPC is live this is no longer used.
+export async function pushInventoryBlob(fullInventory) {
+  if (!supabase) return { error: null };
+  return supabase.from('inventory').upsert({ id: 1, data: fullInventory, updated_at: new Date().toISOString() });
+}
+
 // Lightweight poll of one cart's orders for a day — used by the staff app to
 // pick up new customer QR orders in near-real-time (and fire the order alert).
 export async function loadCartOrders(cartId, date) {
@@ -352,9 +380,8 @@ async function pushState(state) {
         ...updateRows('carts', state.carts.map(cartToRow)),
         // platform + password hashes are never written from the browser — those
         // go through the SECURITY DEFINER auth RPCs (see authLogin/authSetPassword).
-        supabase
-          .from('inventory')
-          .upsert({ id: 1, data: state.inventory, updated_at: new Date().toISOString() }),
+        // inventory is NOT written here — it's mutated atomically via the
+        // apply_inventory / set_cart_consumables RPCs to avoid blob clobbering.
         supabase
           .from('menus')
           .upsert({ id: 1, data: state.menus, updated_at: new Date().toISOString() }),
