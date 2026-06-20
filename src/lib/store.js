@@ -39,12 +39,14 @@ const orderToRow = (o) => ({
   id: o.id, cart_id: o.cartId ?? null, token: o.token, date: o.date, time: o.time, items: o.items,
   total: o.total, payment: o.payment, staff: o.staff, source: o.source,
   settled_at: o.settledAt ?? null, cancel_reason: o.cancelReason ?? null,
+  customer_name: o.customerName ?? null, customer_phone: o.customerPhone ?? null,
   outlet: o.outlet ?? null, outlet_name: o.outletName ?? null,
 });
 const rowToOrder = (r) => ({
   id: r.id, cartId: r.cart_id ?? undefined, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
   settledAt: r.settled_at ?? undefined, cancelReason: r.cancel_reason ?? undefined,
+  customerName: r.customer_name ?? undefined, customerPhone: r.customer_phone ?? undefined,
   outlet: r.outlet ?? undefined, outletName: r.outlet_name ?? undefined,
 });
 
@@ -156,7 +158,7 @@ const unionById = (a = [], b = []) => {
 
 // Orders are mutable (pending → paid). When the same id exists on both sides,
 // prefer the settled copy so a payment recorded anywhere wins over 'pending'.
-const mergeOrders = (a = [], b = []) => {
+export const mergeOrders = (a = [], b = []) => {
   const seen = new Map();
   [...a, ...b].forEach((o) => {
     const prev = seen.get(o.id);
@@ -228,6 +230,15 @@ export const authChangeOwnerPassword = (token, password) => callRpc('app_change_
 export const authSetStaffPassword = (token, staffId, password) => callRpc('app_set_staff_password', { p_token: token, p_staff_id: staffId, p_password: password });
 export const authRegisterStaff = (token, id, name, mobile, password) => callRpc('app_register_staff', { p_token: token, p_id: id, p_name: name, p_mobile: mobile, p_password: password });
 export const authAdminResetOwner = (token, cartId, password) => callRpc('app_admin_reset_owner', { p_token: token, p_cart_id: cartId, p_password: password });
+
+// Lightweight poll of one cart's orders for a day — used by the staff app to
+// pick up new customer QR orders in near-real-time (and fire the order alert).
+export async function loadCartOrders(cartId, date) {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from('orders').select('*').eq('cart_id', cartId).eq('date', date).order('id');
+  if (error) { console.warn('order poll failed', error.message); return null; }
+  return data.map(rowToOrder);
+}
 
 // ─── CLOUD LOAD ───
 export async function loadCloudState() {
@@ -310,6 +321,18 @@ async function pushState(state) {
     // mutable rows: insert-or-update so edits (settlements) sync
     const merge = (table, rows) =>
       rows.length ? supabase.from(table).upsert(rows, { onConflict: 'id' }) : null;
+    // Orders upsert, resilient to the customer_name/phone columns not existing
+    // yet (before the schema migration is run) — retry without them rather than
+    // failing the whole orders sync.
+    const mergeOrdersResilient = async (rows) => {
+      if (!rows.length) return { error: null };
+      let r = await supabase.from('orders').upsert(rows, { onConflict: 'id' });
+      if (r.error && /customer_name|customer_phone|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
+        const stripped = rows.map(({ customer_name, customer_phone, ...rest }) => rest);
+        r = await supabase.from('orders').upsert(stripped, { onConflict: 'id' });
+      }
+      return r;
+    };
     // carts + staff have column-level (not table-level) grants since the security
     // lockdown, so PostgREST upsert is rejected. Sync existing rows with per-row
     // PATCH instead (new carts use insertCart at onboard; new staff via RPC).
@@ -319,7 +342,7 @@ async function pushState(state) {
     });
     const results = await Promise.all(
       [
-        merge('orders', state.orders.map(orderToRow)),
+        mergeOrdersResilient(state.orders.map(orderToRow)),
         append('stock_logs', state.stockLogs.map(logToRow)),
         append('cart_loadings', state.cartLoadings.map(logToRow)),
         append('day_close_logs', state.dayCloseLogs.map(dayCloseToRow)),

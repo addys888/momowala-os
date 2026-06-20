@@ -400,6 +400,10 @@ alter table day_close_logs add column if not exists corn_diff integer;
 -- Allow the new 'pending' payment status and record when an order is settled.
 alter table orders add column if not exists settled_at timestamptz;
 alter table orders add column if not exists cancel_reason text;
+-- Customer contact captured on QR self-orders (light anti-abuse + lets staff
+-- identify/call the customer). Nullable; client tolerates their absence.
+alter table orders add column if not exists customer_name text;
+alter table orders add column if not exists customer_phone text;
 alter table orders drop constraint if exists orders_payment_check;
 alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending', 'cancelled'));
 

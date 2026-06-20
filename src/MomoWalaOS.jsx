@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
-  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed } from './lib/store';
+  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, loadCartOrders, mergeOrders } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
 
 // ============================================
@@ -229,8 +229,7 @@ function cartOpenState(cart) {
   if (cart.closedManually) return { open: false, reason: 'Closed by the owner right now' };
   const { openTime, closeTime } = cart;
   if (!openTime || !closeTime) return { open: true, reason: '' };
-  const now = new Date();
-  const mins = now.getHours() * 60 + now.getMinutes();
+  const mins = istNowMinutes();
   const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + (m || 0); };
   const o = toMin(openTime), c = toMin(closeTime);
   // handle windows that cross midnight (e.g. 16:00–01:00)
@@ -269,15 +268,56 @@ function restoreInventory(inventory, items, menuItems = MENU_ITEMS) {
 // ─── STORAGE ───
 // localStorage (offline-first) + Supabase cloud sync — see src/lib/store.js
 
-// LOCAL calendar date (YYYY-MM-DD). Must be local, not UTC — the cart runs in
-// IST, and an evening/night business day must not roll over at UTC midnight.
-// Using UTC here previously made "Today" leak in yesterday's orders so Today,
-// This week and This month all showed the same totals.
-const localDate = (d = new Date()) => {
-  const z = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
-  return z.toISOString().split('T')[0];
+// ─── TIME — everything is India Standard Time, regardless of device timezone ───
+// The whole business (orders, day boundaries, open/close hours, timestamps) is
+// pinned to Asia/Kolkata so a staff/owner phone set to another zone still sees
+// the correct Indian business day and clock.
+const IST_TZ = 'Asia/Kolkata';
+// IST calendar date as YYYY-MM-DD (en-CA gives that exact format).
+const localDate = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: IST_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
+// IST wall-clock time like "02:09 pm" — used for the `time` field on records.
+const istTime = (d = new Date()) => new Intl.DateTimeFormat('en-IN', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit', hour12: true }).format(d).toLowerCase();
+// Current minutes-since-midnight in IST (for the open/close window check).
+const istNowMinutes = () => {
+  const p = new Intl.DateTimeFormat('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
+  return (+p.find(x => x.type === 'hour').value) * 60 + (+p.find(x => x.type === 'minute').value);
 };
+// Format a date (or YYYY-MM-DD string) for display in IST.
+const istDateLabel = (d, opts) => new Intl.DateTimeFormat('en-IN', { timeZone: IST_TZ, ...opts }).format(typeof d === 'string' ? new Date(d + 'T12:00:00Z') : d);
 const TODAY = localDate();
+
+// ─── ORDER ALERT — beep + spoken cue when a new customer order reaches staff ───
+let _audioCtx = null;
+function unlockAudio() {
+  try {
+    if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (_audioCtx.state === 'suspended') _audioCtx.resume();
+  } catch { /* audio not available */ }
+}
+function playOrderAlert() {
+  try {
+    unlockAudio();
+    const ctx = _audioCtx;
+    if (ctx) {
+      const beep = (freq, start, dur) => {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.connect(g); g.connect(ctx.destination);
+        o.type = 'sine'; o.frequency.value = freq;
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+        g.gain.exponentialRampToValueAtTime(0.35, ctx.currentTime + start + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
+        o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur);
+      };
+      beep(880, 0, 0.2); beep(1175, 0.22, 0.28); // two-tone chime
+    }
+  } catch { /* ignore */ }
+  try {
+    const u = new SpeechSynthesisUtterance('New order received');
+    u.rate = 1; u.volume = 1;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  } catch { /* speech not available */ }
+}
 
 // An order counts as real revenue only once paid (cash/UPI). 'pending' QR
 // orders and staff-'cancelled' orders never touch revenue or pieces sold.
@@ -438,6 +478,25 @@ export default function App() {
       if (cloud) setState(prev => normalize(mergeStates(prev, cloud)));
     });
   }, []);
+
+  // While a staff member is logged in, poll their cart's orders so new customer
+  // QR orders appear without a manual refresh (and the StaffApp can alert).
+  useEffect(() => {
+    if (session?.role !== 'staff' || !session.cartId) return;
+    let alive = true;
+    const tick = async () => {
+      const fresh = await loadCartOrders(session.cartId, TODAY);
+      if (!alive || !fresh) return;
+      setState(prev => {
+        const prevById = new Map(prev.orders.map(o => [o.id, o]));
+        const changed = fresh.some(o => { const p = prevById.get(o.id); return !p || p.payment !== o.payment; });
+        return changed ? { ...prev, orders: mergeOrders(prev.orders, fresh) } : prev;
+      });
+    };
+    const t = setInterval(tick, 12000);
+    tick();
+    return () => { alive = false; clearInterval(t); };
+  }, [session]);
 
   useEffect(() => {
     storage.set('platform', state.platform);
@@ -1481,7 +1540,7 @@ function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], to
         </button>
       </div>
 
-      <SectionHeader title="Today's Snapshot" subtitle={new Date().toLocaleDateString('en-IN', { weekday: 'long', day: 'numeric', month: 'long' })} />
+      <SectionHeader title="Today's Snapshot" subtitle={istDateLabel(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })} />
 
       {/* Hero metric */}
       <div style={{ background: colors.ink, color: colors.primary, padding: 24, borderRadius: 16, marginBottom: 16 }}>
@@ -1641,7 +1700,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     newInv[type] = { ...newInv[type], freezer: newInv[type].freezer + qty };
     const log = {
       id: Date.now(), cartId, date: TODAY,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      time: istTime(),
       type: 'STOCK_IN', item: type, qty, note: `Added ${qty} pieces of ${labelFor(type)}`
     };
     setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
@@ -1658,7 +1717,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const verb = applied >= 0 ? 'Added' : 'Removed';
     const log = {
       id: Date.now(), cartId, date: TODAY,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      time: istTime(),
       type: 'STOCK_ADJUST', item: type, qty: applied,
       note: `${verb} ${Math.abs(applied)} ${labelFor(type)} in freezer — ${reason}`
     };
@@ -1672,7 +1731,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     newInv[type] = { freezer: newInv[type].freezer - qty, cart: newInv[type].cart + qty };
     const log = {
       id: Date.now(), cartId, date: TODAY,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      time: istTime(),
       type: 'CART_LOAD', item: type, qty, note: `Moved ${qty} ${labelFor(type)} pieces to cart`
     };
     setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
@@ -1685,7 +1744,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     newInv[type] = { freezer: newInv[type].freezer + qty, cart: newInv[type].cart - qty };
     const log = {
       id: Date.now(), cartId, date: TODAY,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      time: istTime(),
       type: 'CART_UNLOAD', item: type, qty, note: `Returned ${qty} ${labelFor(type)} pieces to freezer`
     };
     setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
@@ -2309,15 +2368,17 @@ function AddStaffModal({ existing, ownerMobile, onAdd, onClose }) {
 
 // ─── OWNER: REPORTS ───
 const EXPENSE_CATEGORIES = ['Frozen momo stock', 'Vegetables / paneer', 'Oil & consumables', 'Gas / fuel', 'Packaging', 'Rent / pitch', 'Other'];
-// inclusive date-string range for a period, computed from real settled orders.
+// Inclusive start date (YYYY-MM-DD, IST) for a period. Derived from the IST
+// calendar date so week/month boundaries are correct regardless of device zone.
 function periodStart(period) {
-  const d = new Date(); d.setHours(0, 0, 0, 0);
-  if (period === 'today') return d;
-  if (period === 'week') { const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); return d; } // Monday
-  if (period === 'month') { d.setDate(1); return d; }
-  return new Date(0);
+  const today = localDate(); // IST YYYY-MM-DD
+  if (period === 'today') return today;
+  const [y, m, dd] = today.split('-').map(Number);
+  const d = new Date(Date.UTC(y, m - 1, dd)); // anchor on that calendar date
+  if (period === 'week') { const day = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - day); } // Monday
+  else if (period === 'month') { d.setUTCDate(1); }
+  return d.toISOString().split('T')[0];
 }
-const dstr = (d) => localDate(d);
 
 // Aggregate sold pieces from a set of paid orders against the cart's menu.
 // Returns pieces per stock category (veg/paneer/corn) and a per-item breakdown
@@ -2348,7 +2409,7 @@ function Reports({ state, updateState, cartId }) {
   const [showExpense, setShowExpense] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
   const [delExpense, setDelExpense] = useState(null); // expense pending delete-confirm
-  const from = dstr(periodStart(period));
+  const from = periodStart(period);
   const menu = menuFor(state, cartId);
 
   const orders = state.orders.filter(o => o.cartId === cartId && isPaid(o) && o.date >= from);
@@ -2471,7 +2532,7 @@ function Reports({ state, updateState, cartId }) {
         {state.dayCloseLogs.filter(d => d.cartId === cartId).slice(-14).reverse().map(d => (
           <div key={d.id} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div style={{ fontWeight: 700 }}>{new Date(d.date).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+              <div style={{ fontWeight: 700 }}>{istDateLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
               <div style={{ fontWeight: 800 }}>₹{d.revenue}</div>
             </div>
             <div style={{ fontSize: 11, color: colors.muted }}>📦 {d.totalOrders} orders · 🥟 {d.piecesSold} pcs</div>
@@ -2515,6 +2576,26 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [cart, setCart] = useState([]);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
+  const [orderAlert, setOrderAlert] = useState(null); // new incoming customer order
+  const prevPendingRef = React.useRef(null);
+
+  // Unlock the audio context on the first tap so the alert beep can play later.
+  useEffect(() => {
+    const h = () => unlockAudio();
+    window.addEventListener('pointerdown', h);
+    return () => window.removeEventListener('pointerdown', h);
+  }, []);
+
+  // Detect a newly-arrived pending (customer QR) order → beep + voice + banner.
+  useEffect(() => {
+    const pend = state.orders.filter(o => o.cartId === cartId && o.date === TODAY && o.payment === 'pending');
+    const ids = pend.map(o => o.id);
+    if (prevPendingRef.current === null) { prevPendingRef.current = new Set(ids); return; } // skip first load
+    const fresh = pend.find(o => !prevPendingRef.current.has(o.id));
+    prevPendingRef.current = new Set(ids);
+    if (fresh) { playOrderAlert(); setOrderAlert(fresh); }
+  }, [state.orders, cartId]);
+
   const cartInfo = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
@@ -2540,7 +2621,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       cartId,
       token,
       date: TODAY,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      time: istTime(),
       items: cart,
       total,
       payment,
@@ -2597,7 +2678,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     if (newInv[stockKey]) newInv[stockKey] = { ...newInv[stockKey], cart: Math.max(0, newInv[stockKey].cart - qty) };
     const log = {
       id: Date.now(), cartId, date: TODAY,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      time: istTime(),
       stockKey, label: st?.label || stockKey, qty, reason, staff: staffName,
     };
     setCartInv(newInv, { wastageLogs: [...state.wastageLogs, log] });
@@ -2632,6 +2713,18 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       )}
 
       {justPlaced && <OrderPlacedToast info={justPlaced} onClose={() => setJustPlaced(null)} />}
+
+      {orderAlert && (
+        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 70, background: colors.ink, color: '#fff', borderRadius: 14, padding: '14px 16px', boxShadow: '0 12px 40px rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', gap: 12, animation: 'none' }}>
+          <div style={{ width: 40, height: 40, borderRadius: 10, background: colors.primary, color: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 20 }}>🔔</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 14 }}>New order #{orderAlert.token} received!</div>
+            <div style={{ fontSize: 12, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{orderAlert.items.map(i => `${i.qty}× ${i.name}`).join(', ')} · ₹{orderAlert.total}</div>
+          </div>
+          <button onClick={() => { setTab('pending'); setOrderAlert(null); }} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '8px 14px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>View</button>
+          <button onClick={() => setOrderAlert(null)} style={{ background: 'transparent', color: '#fff', border: 'none', cursor: 'pointer', flexShrink: 0, display: 'flex' }}><X size={18} /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -2695,6 +2788,12 @@ function PendingOrders({ orders, onSettle, onCancel }) {
                 <div style={{ fontSize: 22, fontWeight: 900 }}>#{o.token}</div>
                 <div style={{ fontSize: 12, color: colors.muted }}>{o.time} · self-order</div>
               </div>
+              {(o.customerName || o.customerPhone) && (
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <User size={13} color={colors.muted} /> {o.customerName || 'Customer'}
+                  {o.customerPhone && <a href={`tel:${o.customerPhone}`} style={{ color: brand.tealDark, textDecoration: 'none', fontWeight: 700 }}>· {o.customerPhone}</a>}
+                </div>
+              )}
               <div style={{ fontSize: 13, color: colors.muted, marginBottom: 12 }}>
                 {o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}
               </div>
@@ -3089,6 +3188,9 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const [orderToken, setOrderToken] = useState('');
   const [addonNote, setAddonNote] = useState('');
   const [placing, setPlacing] = useState(false);
+  const [custName, setCustName] = useState(() => storage.get('custName', '') || '');
+  const [custPhone, setCustPhone] = useState(() => storage.get('custPhone', '') || '');
+  const [custErr, setCustErr] = useState('');
 
   const menu = menuFor(state, venue.id);
   const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
@@ -3130,6 +3232,19 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const placeOrder = async () => {
     if (!openState.open) { setStep('menu'); return; }
     if (cart.length === 0 || placing) return;
+    setCustErr('');
+    const name = custName.trim();
+    const phone = custPhone.trim();
+    // Light protection: name + valid phone required, no login wall.
+    if (name.length < 2) { setCustErr('Please enter your name.'); return; }
+    if (!/^\d{10}$/.test(phone)) { setCustErr('Enter a valid 10-digit mobile number.'); return; }
+    // Anti-spam: short cooldown between orders from this device.
+    const last = +(storage.get('lastOrderAt', 0) || 0);
+    if (Date.now() - last < 20000) { setCustErr('Please wait a few seconds before placing another order.'); return; }
+    // Anti-spam: block a 2nd unpaid order from the same number at this cart.
+    if (state.orders.some(o => o.cartId === venue.id && o.date === TODAY && o.payment === 'pending' && o.customerPhone === phone)) {
+      setCustErr('You already have an unpaid order here. Please pay for it at the cart first.'); return;
+    }
     setPlacing(true);
     // Token is allocated atomically server-side so two phones can't clash;
     // only when offline do we fall back to a local count.
@@ -3141,18 +3256,21 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
       cartId: venue.id,
       token,
       date: TODAY,
-      time: new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }),
+      time: istTime(),
       items: cart,
       total,
       payment: 'pending',     // not paid until staff confirms at the cart
       staff: null,
       source: 'qr-order',
+      customerName: name,
+      customerPhone: phone,
       outlet: venue.id,
       outletName: venue.name,
     };
     // Stock is NOT deducted here — only when staff marks the order paid,
     // so fake/abandoned QR orders never touch inventory or revenue.
     updateState({ orders: [...state.orders, order] });
+    storage.set('custName', name); storage.set('custPhone', phone); storage.set('lastOrderAt', Date.now());
     setOrderToken(token);
     setStep('success');
     setCart([]);
@@ -3188,6 +3306,16 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, padding: '0 4px' }}>
             <div style={{ fontWeight: 700 }}>Total</div>
             <div style={{ fontSize: 28, fontWeight: 900 }}>₹{total}</div>
+          </div>
+
+          {/* Customer contact — light protection, no login needed */}
+          <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 16, marginBottom: 16 }}>
+            <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>YOUR DETAILS</div>
+            <input value={custName} onChange={e => setCustName(e.target.value)} placeholder="Your name"
+              style={{ width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 15, boxSizing: 'border-box', marginBottom: 10 }} />
+            <input value={custPhone} onChange={e => setCustPhone(e.target.value.replace(/\D/g, '').slice(0, 10))} inputMode="numeric" placeholder="10-digit mobile number"
+              style={{ width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 15, boxSizing: 'border-box', fontWeight: 700, letterSpacing: 1 }} />
+            {custErr && <div style={{ display: 'flex', gap: 6, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginTop: 10 }}><AlertCircle size={15} /> {custErr}</div>}
           </div>
 
           <Alert type="warn" title="Pay at the cart" message="Place your order to get a token number, then pay by cash or UPI at the cart. Your order is confirmed only after payment." />
