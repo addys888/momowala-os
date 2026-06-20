@@ -330,6 +330,14 @@ export async function setCartClosed(cartId, closed) {
   return supabase.from('carts').update({ closed_manually: !!closed }).eq('id', cartId);
 }
 
+// Immediately persist a cart's profile (logo, emoji, name, hours, UPI, …) so an
+// edit survives a refresh that happens before the debounced batch sync fires.
+export async function saveCartProfile(cart) {
+  if (!supabase) return { error: null };
+  const { id, ...rest } = cartToRow(cart); // excludes id, created_at, password hash
+  return supabase.from('carts').update(rest).eq('id', id);
+}
+
 // ─── CLOUD SYNC (debounced; events are insert-once, inventory is upserted) ───
 let pushTimer = null;
 

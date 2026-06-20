@@ -1,7 +1,7 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
-  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, loadCartOrders, mergeOrders,
+  authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders,
   applyInventory, setCartConsumables, pushInventoryBlob } from './lib/store';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 
@@ -1455,7 +1455,9 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
   const saveProfile = (fields) => {
-    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ...fields } : c) });
+    const updated = { ...cart, ...fields };
+    updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c) });
+    saveCartProfile(updated); // persist immediately so it survives a refresh
     setShowProfile(false);
   };
   const toggleOpen = () => {
