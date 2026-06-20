@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
   authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, loadCartOrders, mergeOrders } from './lib/store';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock } from 'lucide-react';
+import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 
 // ============================================
 // MOMO WALA OS — Complete Cart Management App
@@ -2577,7 +2577,14 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
   const [orderAlert, setOrderAlert] = useState(null); // new incoming customer order
+  const [soundOn, setSoundOn] = useState(() => storage.get('alertSound', true) !== false);
   const prevPendingRef = React.useRef(null);
+  const soundOnRef = React.useRef(soundOn); // latest value for the (non-reactive) detect effect
+  const toggleSound = () => {
+    const v = !soundOn;
+    setSoundOn(v); soundOnRef.current = v; storage.set('alertSound', v);
+    if (v) { unlockAudio(); playOrderAlert(); } // give an audible confirmation when turning on
+  };
 
   // Unlock the audio context on the first tap so the alert beep can play later.
   useEffect(() => {
@@ -2593,7 +2600,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     if (prevPendingRef.current === null) { prevPendingRef.current = new Set(ids); return; } // skip first load
     const fresh = pend.find(o => !prevPendingRef.current.has(o.id));
     prevPendingRef.current = new Set(ids);
-    if (fresh) { playOrderAlert(); setOrderAlert(fresh); }
+    if (fresh) { if (soundOnRef.current) playOrderAlert(); setOrderAlert(fresh); }
   }, [state.orders, cartId]);
 
   const cartInfo = state.carts.find(c => c.id === cartId);
@@ -2689,6 +2696,12 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       <TopBar title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+          <button onClick={toggleSound} title={soundOn ? 'Order sound on — tap to mute' : 'Order sound off — tap to unmute'}
+            style={{ display: 'flex', alignItems: 'center', gap: 6, background: soundOn ? colors.ink : '#fff', color: soundOn ? colors.primary : colors.muted, border: `1px solid ${soundOn ? colors.ink : colors.border}`, padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+            {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} Order sound {soundOn ? 'On' : 'Off'}
+          </button>
+        </div>
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onCancel={(id) => setCancelTarget(id)} />}
