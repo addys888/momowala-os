@@ -2499,6 +2499,20 @@ function Reports({ state, updateState, cartId }) {
   const wasted = wastage.reduce((s, w) => s + w.qty, 0);
   const net = revenue - spend;
 
+  // Complete daily history: reconciled days show counted money; days that had
+  // sales but were never reconciled fall back to system totals (so a forgotten
+  // day-close is never lost from history/reporting).
+  const menuItemsForHist = menu.items || [];
+  const sysByDate = {};
+  state.orders.filter(o => o.cartId === cartId && isPaid(o)).forEach(o => {
+    const e = sysByDate[o.date] || { date: o.date, revenue: 0, orders: 0, pieces: 0 };
+    e.revenue += o.total; e.orders += 1;
+    (o.items || []).forEach(it => { const m = menuItemsForHist.find(x => x.id === it.id); if (m && m.stockKey) e.pieces += (it.type === 'half' ? m.pcsHalf : m.pcsFull) * it.qty; });
+    sysByDate[o.date] = e;
+  });
+  const closeByDate = Object.fromEntries(closes.map(d => [d.date, d]));
+  const historyDates = [...new Set([...Object.keys(sysByDate), ...Object.keys(closeByDate)])].sort().reverse().slice(0, 14);
+
   // Sold pieces by category + top-selling items for the chosen period.
   const { byCat, items: soldItems } = soldBreakdown(orders, menu.items || []);
   const catRows = (menu.stockTypes || []).map(st => ({ key: st.key, label: st.label, pcs: byCat[st.key] || 0 }));
@@ -2620,13 +2634,28 @@ function Reports({ state, updateState, cartId }) {
       {/* Day-close history */}
       <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>DAY-CLOSE HISTORY</div>
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {closes.slice(-14).reverse().map(d => {
+        {historyDates.map(date => {
+          const d = closeByDate[date];
+          const sys = sysByDate[date] || { revenue: 0, orders: 0, pieces: 0 };
+          if (!d) {
+            // Day had sales but was never reconciled → system totals are final.
+            return (
+              <div key={date} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                  <div style={{ fontWeight: 700 }}>{istDateLabel(date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                  <div style={{ fontWeight: 800 }}>₹{sys.revenue.toLocaleString('en-IN')}</div>
+                </div>
+                <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>📦 {sys.orders} orders · 🥟 {sys.pieces} pcs · system</div>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#FFF4E5', color: '#B5460B' }}>Not reconciled</span>
+              </div>
+            );
+          }
           const sd = dayCloseStockDiff(d);
           const stockRows = dayCloseStockRows(d).filter(x => (x.diff || 0) !== 0);
           const collected = (d.physicalCash || 0) + (d.phonePeAmount || 0); // money actually counted
           const system = (d.systemCash || 0) + (d.systemUpi || 0);
           return (
-            <div key={d.id} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
+            <div key={date} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <div style={{ fontWeight: 700 }}>{istDateLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
                 <div style={{ textAlign: 'right' }}>
@@ -2646,7 +2675,7 @@ function Reports({ state, updateState, cartId }) {
             </div>
           );
         })}
-        {closes.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>Close a day to start the history.</div>}
+        {historyDates.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No sales history yet.</div>}
       </div>
 
       {delExpense && (
