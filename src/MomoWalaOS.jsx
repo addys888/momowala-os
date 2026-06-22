@@ -2448,6 +2448,21 @@ function soldBreakdown(orders, menuItems) {
   return { byCat, items };
 }
 
+// Net stock discrepancy (pieces) for a day-close — prefers the generic stock
+// array; falls back to the legacy veg/paneer/corn diffs for old records.
+function dayCloseStockRows(d) {
+  if (Array.isArray(d.stock)) return d.stock;
+  return [
+    d.vegDiff != null ? { label: 'Veg', diff: d.vegDiff } : null,
+    d.paneerDiff != null ? { label: 'Paneer', diff: d.paneerDiff } : null,
+    d.cornDiff != null ? { label: 'Corn', diff: d.cornDiff } : null,
+  ].filter(Boolean);
+}
+const dayCloseStockDiff = (d) => dayCloseStockRows(d).reduce((s, x) => s + (x.diff || 0), 0);
+// "+50" / "−50" / "✓" with a colour; negative = short/missing.
+const fmtDiff = (n) => n === 0 ? '✓ matched' : `${n > 0 ? '+' : '−'}${Math.abs(n)}`;
+const diffColor = (n) => n === 0 ? '#0F7B0F' : (n < 0 ? '#C81E1E' : '#B5460B');
+
 function Reports({ state, updateState, cartId }) {
   const [period, setPeriod] = useState('today');
   const [showExpense, setShowExpense] = useState(false);
@@ -2466,6 +2481,13 @@ function Reports({ state, updateState, cartId }) {
   const spend = expenses.reduce((s, e) => s + e.amount, 0);
   const wasted = wastage.reduce((s, w) => s + w.qty, 0);
   const net = revenue - spend;
+
+  // Reconciliation roll-up for the period (from the nightly day-close records).
+  const closes = state.dayCloseLogs.filter(d => d.cartId === cartId);
+  const periodCloses = closes.filter(d => d.date >= from);
+  const cashGap = periodCloses.reduce((s, d) => s + (d.cashDiff || 0), 0);
+  const upiGap = periodCloses.reduce((s, d) => s + (d.upiDiff || 0), 0);
+  const stockGap = periodCloses.reduce((s, d) => s + dayCloseStockDiff(d), 0);
 
   // Sold pieces by category + top-selling items for the chosen period.
   const { byCat, items: soldItems } = soldBreakdown(orders, menu.items || []);
@@ -2570,19 +2592,45 @@ function Reports({ state, updateState, cartId }) {
         {expenses.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No expenses logged {label.toLowerCase()}. Tap Add to record stock/raw-material spend.</div>}
       </div>
 
+      {/* Reconciliation roll-up for the period (cash short/over, UPI, stock) */}
+      {periodCloses.length > 0 && (<>
+        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>RECONCILIATION GAPS — {label.toUpperCase()}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+          {[['💵 Cash', cashGap, '₹'], ['📱 UPI', upiGap, '₹'], ['🥟 Stock', stockGap, ' pcs']].map(([lab, val, unit]) => (
+            <div key={lab} style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 8px', textAlign: 'center' }}>
+              <div style={{ fontSize: 17, fontWeight: 900, color: diffColor(val) }}>{val === 0 ? '✓' : `${val > 0 ? '+' : '−'}${unit === '₹' ? '₹' : ''}${Math.abs(val)}${unit === '₹' ? '' : unit}`}</div>
+              <div style={{ fontSize: 10.5, color: colors.muted, fontWeight: 600, marginTop: 2 }}>{lab}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: colors.muted, marginBottom: 16, marginTop: -6 }}>− = short / missing vs system · + = extra · ✓ = matched, across {periodCloses.length} day-close{periodCloses.length > 1 ? 's' : ''}.</div>
+      </>)}
+
       {/* Day-close history */}
       <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>DAY-CLOSE HISTORY</div>
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {state.dayCloseLogs.filter(d => d.cartId === cartId).slice(-14).reverse().map(d => (
-          <div key={d.id} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div style={{ fontWeight: 700 }}>{istDateLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-              <div style={{ fontWeight: 800 }}>₹{d.revenue}</div>
+        {closes.slice(-14).reverse().map(d => {
+          const sd = dayCloseStockDiff(d);
+          const stockRows = dayCloseStockRows(d).filter(x => (x.diff || 0) !== 0);
+          return (
+            <div key={d.id} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div style={{ fontWeight: 700 }}>{istDateLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                <div style={{ fontWeight: 800 }}>₹{d.revenue}</div>
+              </div>
+              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>📦 {d.totalOrders} orders · 🥟 {d.piecesSold} pcs</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.cashDiff || 0) }}>💵 {fmtDiff(d.cashDiff || 0)}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.upiDiff || 0) }}>📱 {fmtDiff(d.upiDiff || 0)}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(sd) }}>🥟 {sd === 0 ? '✓' : `${fmtDiff(sd)} pcs`}</span>
+              </div>
+              {stockRows.length > 0 && (
+                <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>{stockRows.map(x => `${x.label}: ${x.diff > 0 ? '+' : '−'}${Math.abs(x.diff)}`).join(' · ')}</div>
+              )}
             </div>
-            <div style={{ fontSize: 11, color: colors.muted }}>📦 {d.totalOrders} orders · 🥟 {d.piecesSold} pcs</div>
-          </div>
-        ))}
-        {state.dayCloseLogs.filter(d => d.cartId === cartId).length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>Close a day to start the history.</div>}
+          );
+        })}
+        {closes.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>Close a day to start the history.</div>}
       </div>
 
       {delExpense && (

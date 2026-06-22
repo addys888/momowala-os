@@ -117,6 +117,7 @@ const dayCloseToRow = (d) => ({
   expected_corn: d.expectedCorn,
   actual_corn: d.actualCorn,
   corn_diff: d.cornDiff,
+  stock: d.stock ?? null,
   pieces_sold: d.piecesSold,
   revenue: d.revenue,
   closed_at: d.closedAt,
@@ -142,6 +143,7 @@ const rowToDayClose = (r) => ({
   expectedCorn: r.expected_corn,
   actualCorn: r.actual_corn,
   cornDiff: r.corn_diff,
+  stock: r.stock ?? undefined,
   piecesSold: r.pieces_sold,
   revenue: r.revenue,
   closedAt: r.closed_at,
@@ -376,12 +378,22 @@ async function pushState(state) {
       const { id, ...rest } = r;
       return supabase.from(table).update(rest).eq('id', id);
     });
+    // Day-close append, resilient to the `stock` column not existing yet.
+    const appendDayClose = async (rows) => {
+      if (!rows.length) return { error: null };
+      let r = await supabase.from('day_close_logs').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
+      if (r.error && /stock|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
+        const stripped = rows.map(({ stock, ...rest }) => rest);
+        r = await supabase.from('day_close_logs').upsert(stripped, { onConflict: 'id', ignoreDuplicates: true });
+      }
+      return r;
+    };
     const results = await Promise.all(
       [
         mergeOrdersResilient(state.orders.map(orderToRow)),
         append('stock_logs', state.stockLogs.map(logToRow)),
         append('cart_loadings', state.cartLoadings.map(logToRow)),
-        append('day_close_logs', state.dayCloseLogs.map(dayCloseToRow)),
+        appendDayClose(state.dayCloseLogs.map(dayCloseToRow)),
         append('wastage_logs', (state.wastageLogs || []).map(wastageToRow)),
         merge('expenses', (state.expenses || []).map(expenseToRow)),
         ...updateRows('staff', state.staff.map(staffToRow)),

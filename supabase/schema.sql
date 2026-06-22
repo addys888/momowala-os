@@ -69,6 +69,7 @@ create table if not exists day_close_logs (
   expected_corn integer,
   actual_corn integer,
   corn_diff integer,
+  stock jsonb,            -- generic per-stock-type reconciliation [{key,label,expected,actual,diff}]
   pieces_sold integer,
   revenue integer,
   closed_at timestamptz,
@@ -442,6 +443,8 @@ grant execute on function app_admin_reset_owner(uuid, text, text) to anon;
 alter table day_close_logs add column if not exists expected_corn integer;
 alter table day_close_logs add column if not exists actual_corn integer;
 alter table day_close_logs add column if not exists corn_diff integer;
+-- Generic per-stock-type reconciliation (replaces the hardcoded veg/paneer/corn cols).
+alter table day_close_logs add column if not exists stock jsonb;
 
 -- ── Migration: pending payment + staff accounts ──
 -- Allow the new 'pending' payment status and record when an order is settled.
