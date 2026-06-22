@@ -2475,19 +2475,29 @@ function Reports({ state, updateState, cartId }) {
   const expenses = (state.expenses || []).filter(e => e.cartId === cartId && e.date >= from);
   const wastage = (state.wastageLogs || []).filter(w => w.cartId === cartId && w.date >= from);
 
-  const revenue = orders.reduce((s, o) => s + o.total, 0);
-  const cash = orders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
-  const upi = orders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
-  const spend = expenses.reduce((s, e) => s + e.amount, 0);
-  const wasted = wastage.reduce((s, w) => s + w.qty, 0);
-  const net = revenue - spend;
-
-  // Reconciliation roll-up for the period (from the nightly day-close records).
+  // Reconciliation roll-up + revenue basis. Money "of record" is what the owner
+  // counted at day-close (cash box + PhonePe); days not yet closed fall back to
+  // live system order totals. So a closed day reflects actual money collected.
   const closes = state.dayCloseLogs.filter(d => d.cartId === cartId);
   const periodCloses = closes.filter(d => d.date >= from);
+  const closedDates = new Set(periodCloses.map(d => d.date));
   const cashGap = periodCloses.reduce((s, d) => s + (d.cashDiff || 0), 0);
   const upiGap = periodCloses.reduce((s, d) => s + (d.upiDiff || 0), 0);
   const stockGap = periodCloses.reduce((s, d) => s + dayCloseStockDiff(d), 0);
+
+  // Closed days → counted money; open days (incl. today) → live system orders.
+  const openOrders = orders.filter(o => !closedDates.has(o.date));
+  const openCash = openOrders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
+  const openUpi = openOrders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
+  const closedCash = periodCloses.reduce((s, d) => s + (d.physicalCash || 0), 0);
+  const closedUpi = periodCloses.reduce((s, d) => s + (d.phonePeAmount || 0), 0);
+  const cash = openCash + closedCash;
+  const upi = openUpi + closedUpi;
+  const revenue = cash + upi;
+  const ordersCount = openOrders.length + periodCloses.reduce((s, d) => s + (d.totalOrders || 0), 0);
+  const spend = expenses.reduce((s, e) => s + e.amount, 0);
+  const wasted = wastage.reduce((s, w) => s + w.qty, 0);
+  const net = revenue - spend;
 
   // Sold pieces by category + top-selling items for the chosen period.
   const { byCat, items: soldItems } = soldBreakdown(orders, menu.items || []);
@@ -2519,7 +2529,8 @@ function Reports({ state, updateState, cartId }) {
       <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 14, marginBottom: 12 }}>
         <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5 }}>{label.toUpperCase()} · SALES</div>
         <div style={{ fontSize: 34, fontWeight: 900 }}>₹{revenue.toLocaleString('en-IN')}</div>
-        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{orders.length} orders · 💵 ₹{cash} · 📱 ₹{upi}</div>
+        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{ordersCount} orders · 💵 ₹{cash} · 📱 ₹{upi}</div>
+        {periodCloses.length > 0 && <div style={{ fontSize: 10.5, opacity: 0.6, marginTop: 4 }}>Closed days use money counted at day-close; today is live.</div>}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         <MetricCard label="Expenses" value={`₹${spend.toLocaleString('en-IN')}`} icon={<IndianRupee size={16}/>} color={colors.red} />
@@ -2612,13 +2623,18 @@ function Reports({ state, updateState, cartId }) {
         {closes.slice(-14).reverse().map(d => {
           const sd = dayCloseStockDiff(d);
           const stockRows = dayCloseStockRows(d).filter(x => (x.diff || 0) !== 0);
+          const collected = (d.physicalCash || 0) + (d.phonePeAmount || 0); // money actually counted
+          const system = (d.systemCash || 0) + (d.systemUpi || 0);
           return (
             <div key={d.id} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <div style={{ fontWeight: 700 }}>{istDateLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-                <div style={{ fontWeight: 800 }}>₹{d.revenue}</div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontWeight: 800 }}>₹{collected.toLocaleString('en-IN')}</div>
+                  {system !== collected && <div style={{ fontSize: 10.5, color: colors.muted }}>system ₹{system.toLocaleString('en-IN')}</div>}
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>📦 {d.totalOrders} orders · 🥟 {d.piecesSold} pcs</div>
+              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>📦 {d.totalOrders} orders · 🥟 {d.piecesSold} pcs · counted money</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.cashDiff || 0) }}>💵 {fmtDiff(d.cashDiff || 0)}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.upiDiff || 0) }}>📱 {fmtDiff(d.upiDiff || 0)}</span>
