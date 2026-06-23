@@ -1552,26 +1552,31 @@ function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], to
 
   return (
     <div>
-      {/* Cart profile bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12, marginBottom: 12 }}>
-        <CartIcon cart={cart} size={42} radius={10} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 15 }}>{cart?.name}</div>
-          <div style={{ fontSize: 11.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 {cart?.location || '—'} · 🕒 {cart?.timing || '—'}</div>
+      {/* Profile (≈3/4) + open-close (≈1/4) in one responsive row */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+        {/* Cart profile */}
+        <div style={{ flex: '3 1 300px', display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12 }}>
+          <CartIcon cart={cart} size={44} radius={11} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 800, fontSize: 15 }}>{cart?.name}</div>
+            <div style={{ fontSize: 11.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 {cart?.location || '—'} · 🕒 {cart?.timing || '—'}</div>
+          </div>
+          <button onClick={onEditProfile} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Edit3 size={13}/> Edit</button>
         </div>
-        <button onClick={onEditProfile} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Edit3 size={13}/> Edit</button>
-      </div>
 
-      {/* Open / closed control — compact pill with a switch-style toggle */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '9px 9px 9px 14px', marginBottom: 16 }}>
-        <span style={{ width: 9, height: 9, borderRadius: '50%', background: openState.open ? colors.green : colors.red, flexShrink: 0 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 13.5, color: openState.open ? '#0F7B0F' : colors.red }}>{openState.open ? 'Open' : 'Closed'}</div>
-          <div style={{ fontSize: 11, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cart?.closedManually ? 'You closed the cart' : openState.open ? 'Taking orders' : openState.reason}</div>
+        {/* Open / closed control */}
+        <div style={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, background: '#fff', border: `1px solid ${openState.open ? '#BFE3BF' : '#F3C2C2'}`, borderRadius: 12, padding: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 9, height: 9, borderRadius: '50%', background: openState.open ? colors.green : colors.red, flexShrink: 0 }} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 13.5, color: openState.open ? '#0F7B0F' : colors.red, lineHeight: 1.1 }}>{openState.open ? 'Open' : 'Closed'}</div>
+              <div style={{ fontSize: 10.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cart?.closedManually ? 'You closed it' : openState.open ? 'Taking orders' : openState.reason}</div>
+            </div>
+          </div>
+          <button onClick={onToggleOpen} style={{ width: '100%', background: cart?.closedManually ? colors.green : colors.red, color: '#fff', border: 'none', padding: '9px 12px', borderRadius: 10, fontWeight: 800, fontSize: 12.5, cursor: 'pointer' }}>
+            {cart?.closedManually ? '🟢 Open cart' : '🔴 Close cart'}
+          </button>
         </div>
-        <button onClick={onToggleOpen} style={{ background: cart?.closedManually ? colors.green : colors.red, color: '#fff', border: 'none', padding: '9px 16px', borderRadius: 20, fontWeight: 800, fontSize: 12.5, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-          {cart?.closedManually ? <>🟢 Open cart</> : <>🔴 Close cart</>}
-        </button>
       </div>
 
       <SectionHeader title="Today's Snapshot" subtitle={istDateLabel(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })} />
