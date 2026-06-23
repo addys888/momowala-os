@@ -1486,7 +1486,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       {showProfile && <CartProfileModal cart={cart} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
@@ -1545,10 +1545,26 @@ function BottomNav({ tab, setTab, tabs }) {
 }
 
 // ─── OWNER: DASHBOARD ───
-function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
+function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
   const lowTypes = stockTypes.filter(st => (inv[st.key]?.freezer ?? 0) < 100);
   const openState = cartOpenState(cart);
+
+  // Per-day revenue (reconciled if the day was closed, else system) for trends.
+  const closeByDate = Object.fromEntries((state?.dayCloseLogs || []).filter(d => d.cartId === cartId).map(d => [d.date, d]));
+  const paidByDate = {};
+  (state?.orders || []).filter(o => o.cartId === cartId && isPaid(o)).forEach(o => { paidByDate[o.date] = (paidByDate[o.date] || 0) + o.total; });
+  const dayRev = (date) => { const dc = closeByDate[date]; return dc ? (dc.physicalCash || 0) + (dc.phonePeAmount || 0) : (paidByDate[date] || 0); };
+  // last 7 IST calendar dates ending today (UTC-anchored to avoid drift)
+  const [ty, tm, tdd] = TODAY.split('-').map(Number);
+  const baseMs = Date.UTC(ty, tm - 1, tdd);
+  const last7 = [...Array(7)].map((_, i) => new Date(baseMs - (6 - i) * 86400000).toISOString().split('T')[0]);
+  const series = last7.map(dayRev);
+  const maxRev = Math.max(...series, 1);
+  const yesterdayRev = series[5];
+  const deltaPct = yesterdayRev > 0 ? Math.round(((todayRevenue - yesterdayRev) / yesterdayRev) * 100) : null;
+  const todayExpenses = (state?.expenses || []).filter(e => e.cartId === cartId && e.date === TODAY).reduce((s, e) => s + e.amount, 0);
+  const todayNet = todayRevenue - todayExpenses;
 
   return (
     <div>
@@ -1583,9 +1599,37 @@ function Dashboard({ inv, cart, onEditProfile, onToggleOpen, stockTypes = [], to
 
       {/* Hero metric */}
       <div style={{ background: colors.ink, color: colors.primary, padding: 24, borderRadius: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 12, opacity: 0.7, letterSpacing: 1, marginBottom: 4 }}>TOTAL REVENUE TODAY</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ fontSize: 12, opacity: 0.7, letterSpacing: 1, marginBottom: 4 }}>TOTAL REVENUE TODAY</div>
+          {deltaPct !== null && (
+            <span style={{ fontSize: 12, fontWeight: 800, color: deltaPct >= 0 ? '#7CE38B' : '#FF8A8A', background: 'rgba(255,255,255,0.1)', borderRadius: 20, padding: '3px 10px' }}>
+              {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct)}% vs yest
+            </span>
+          )}
+        </div>
         <div style={{ fontSize: 42, fontWeight: 900, lineHeight: 1 }}>₹{todayRevenue.toLocaleString('en-IN')}</div>
         <div style={{ fontSize: 13, marginTop: 8, opacity: 0.8 }}>{todayOrders.length} orders · {piecesSold} pieces sold</div>
+        <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,214,10,0.2)', fontSize: 13 }}>
+          <div><span style={{ opacity: 0.7 }}>Expenses </span><strong>₹{todayExpenses.toLocaleString('en-IN')}</strong></div>
+          <div><span style={{ opacity: 0.7 }}>Net profit </span><strong style={{ color: todayNet >= 0 ? '#7CE38B' : '#FF8A8A' }}>₹{todayNet.toLocaleString('en-IN')}</strong></div>
+        </div>
+      </div>
+
+      {/* 7-day revenue trend */}
+      <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>LAST 7 DAYS</div>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 6, height: 80 }}>
+          {series.map((v, i) => {
+            const isToday = i === 6;
+            return (
+              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                <div style={{ fontSize: 9, color: colors.muted, fontWeight: 700 }}>{v > 0 ? `${Math.round(v / 1000 * 10) / 10}k` : ''}</div>
+                <div style={{ width: '100%', maxWidth: 26, height: Math.max(4, (v / maxRev) * 56), background: isToday ? colors.ink : '#E8E5DC', borderRadius: 5 }} />
+                <div style={{ fontSize: 9.5, color: isToday ? colors.ink : colors.muted, fontWeight: isToday ? 800 : 600 }}>{istDateLabel(last7[i], { weekday: 'short' }).slice(0, 2)}</div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* Split metrics */}
@@ -3371,11 +3415,33 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const [custName, setCustName] = useState(() => storage.get('custName', '') || '');
   const [custPhone, setCustPhone] = useState(() => storage.get('custPhone', '') || '');
   const [custErr, setCustErr] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all'); // all | veg | paneer | corn …
+  const [lastTotal, setLastTotal] = useState(0);
 
   const menu = menuFor(state, venue.id);
   const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
   const isAddon = (id) => addons.some(a => a.id === id);
   const openState = cartOpenState(venue);
+
+  // Momo type filter (Veg / Paneer / Corn) for quick browsing.
+  const momoTypes = [...new Set(items.map(i => i.type).filter(Boolean))];
+  const filteredItems = typeFilter === 'all' ? items : items.filter(i => i.type === typeFilter);
+
+  // "Order again" — rebuild the last order from the current menu (fresh prices,
+  // skips items no longer on the menu).
+  const lastOrder = storage.get('lastOrder', null);
+  const reorder = () => {
+    const last = storage.get('lastOrder', null);
+    if (!last) return;
+    const rebuilt = [];
+    last.forEach(it => {
+      const m = items.find(x => x.id === it.id);
+      if (m) { const price = it.type === 'half' ? m.half : m.full; if (price) rebuilt.push({ key: `${it.id}-${it.type || 'std'}`, id: it.id, name: m.name, price, type: it.type, qty: it.qty }); return; }
+      const l = lassi.find(x => x.id === it.id); if (l) { rebuilt.push({ key: `${it.id}-std`, id: it.id, name: l.name, price: l.price, type: null, qty: it.qty }); return; }
+      const a = addons.find(x => x.id === it.id); if (a) rebuilt.push({ key: `${it.id}-std`, id: it.id, name: a.name, price: a.price, type: null, qty: 1 });
+    });
+    if (rebuilt.length) setCart(rebuilt);
+  };
 
   // Functional updates so rapid taps always see the latest cart (no stale state).
   const addToCart = (id, name, price, type = null) => {
@@ -3451,6 +3517,8 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     // so fake/abandoned QR orders never touch inventory or revenue.
     updateState({ orders: [...state.orders, order] });
     storage.set('custName', name); storage.set('custPhone', phone); storage.set('lastOrderAt', Date.now());
+    storage.set('lastOrder', cart.map(c => ({ id: c.id, type: c.type, qty: c.qty }))); // for "Order again"
+    setLastTotal(total);
     setOrderToken(token);
     setStep('success');
     setCart([]);
@@ -3516,12 +3584,19 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <CheckCircle2 size={60} style={{ margin: '0 auto 16px' }} color={colors.primary}/>
           <div style={{ fontSize: 16, opacity: 0.7, letterSpacing: 1 }}>YOUR ORDER TOKEN</div>
           <div style={{ fontSize: 80, fontWeight: 900, lineHeight: 1, margin: '8px 0' }}>#{orderToken}</div>
-          <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 24 }}>Show this number at the cart<br/>Ready in ~{venue.defaultPrepMins || 8} minutes</div>
+          <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 6 }}>Show this number at the cart<br/>Ready in ~{venue.defaultPrepMins || 8} minutes</div>
+          {lastTotal > 0 && <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 18 }}>Pay ₹{lastTotal}</div>}
           <div style={{ borderTop: '1px solid rgba(255,214,10,0.3)', paddingTop: 20 }}>
-            <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 8 }}>💵 Pay at the cart — cash or UPI</div>
-            {venue.upiQr && <img src={venue.upiQr} alt="UPI QR" style={{ width: 150, height: 150, objectFit: 'contain', borderRadius: 10, background: '#fff', padding: 6, margin: '0 auto 10px', display: 'block' }} />}
+            {venue.upiId && lastTotal > 0 && (
+              <a href={`upi://pay?pa=${encodeURIComponent(venue.upiId)}&pn=${encodeURIComponent(venue.name)}&am=${lastTotal}&cu=INR&tn=${encodeURIComponent('Order #' + orderToken)}`}
+                style={{ display: 'block', background: colors.primary, color: colors.ink, padding: '14px', borderRadius: 12, fontWeight: 800, fontSize: 16, textDecoration: 'none', marginBottom: 14 }}>
+                📱 Pay ₹{lastTotal} via UPI
+              </a>
+            )}
+            <div style={{ fontSize: 12, opacity: 0.7, marginBottom: 10 }}>or pay cash / scan at the cart</div>
+            {venue.upiQr && <img src={venue.upiQr} alt="UPI QR" style={{ width: 140, height: 140, objectFit: 'contain', borderRadius: 10, background: '#fff', padding: 6, margin: '0 auto 10px', display: 'block' }} />}
             {venue.upiId && <><div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>UPI ID:</div>
-            <div style={{ fontSize: 18, fontWeight: 700 }}>{venue.upiId}</div></>}
+            <div style={{ fontSize: 16, fontWeight: 700 }}>{venue.upiId}</div></>}
           </div>
           <button onClick={() => { setStep('menu'); onDone(); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
         </div>
@@ -3572,10 +3647,31 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           </div>
         )}
 
+        {/* Order again — one tap to reload the customer's last order */}
+        {lastOrder && lastOrder.length > 0 && openState.open && cart.length === 0 && (
+          <button onClick={reorder} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 14px', marginBottom: 16, cursor: 'pointer', textAlign: 'left' }}>
+            <span style={{ fontSize: 20 }}>🔁</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 14 }}>Order again</div>
+              <div style={{ fontSize: 11.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lastOrder.length} item{lastOrder.length > 1 ? 's' : ''} from last time</div>
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 800, color: brand.navy }}>Add →</span>
+          </button>
+        )}
+
         {items.length > 0 && <>
           <SectionHeader title="🥟 Momos" />
+          {momoTypes.length > 1 && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
+              {['all', ...momoTypes].map(t => (
+                <button key={t} onClick={() => setTypeFilter(t)} style={{ padding: '6px 14px', borderRadius: 20, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', border: `1px solid ${typeFilter === t ? colors.ink : colors.border}`, background: typeFilter === t ? colors.ink : '#fff', color: typeFilter === t ? colors.primary : colors.ink }}>
+                  {t === 'all' ? 'All' : (TYPE_CHIP[t]?.label || t)}
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ marginBottom: 24 }}>
-            {groupByCat(items).map(g => (
+            {groupByCat(filteredItems).map(g => (
               <div key={g.cat} style={{ marginBottom: 14 }}>
                 <CategoryBand cat={g.cat} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -3583,6 +3679,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
                 </div>
               </div>
             ))}
+            {filteredItems.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No {TYPE_CHIP[typeFilter]?.label || ''} momos.</div>}
           </div>
         </>}
 
