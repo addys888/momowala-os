@@ -2470,21 +2470,25 @@ const diffColor = (n) => n === 0 ? '#0F7B0F' : (n < 0 ? '#C81E1E' : '#B5460B');
 
 function Reports({ state, updateState, cartId }) {
   const [period, setPeriod] = useState('today');
+  const [pickedDate, setPickedDate] = useState(TODAY); // for the single-day view
   const [showExpense, setShowExpense] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
   const [delExpense, setDelExpense] = useState(null); // expense pending delete-confirm
-  const from = periodStart(period);
   const menu = menuFor(state, cartId);
+  // Inclusive date range for the chosen view. 'day' is a single picked date.
+  const from = period === 'day' ? pickedDate : periodStart(period);
+  const to = period === 'day' ? pickedDate : TODAY;
+  const inRange = (d) => d >= from && d <= to;
 
-  const orders = state.orders.filter(o => o.cartId === cartId && isPaid(o) && o.date >= from);
-  const expenses = (state.expenses || []).filter(e => e.cartId === cartId && e.date >= from);
-  const wastage = (state.wastageLogs || []).filter(w => w.cartId === cartId && w.date >= from);
+  const orders = state.orders.filter(o => o.cartId === cartId && isPaid(o) && inRange(o.date));
+  const expenses = (state.expenses || []).filter(e => e.cartId === cartId && inRange(e.date));
+  const wastage = (state.wastageLogs || []).filter(w => w.cartId === cartId && inRange(w.date));
 
   // Reconciliation roll-up + revenue basis. Money "of record" is what the owner
   // counted at day-close (cash box + PhonePe); days not yet closed fall back to
   // live system order totals. So a closed day reflects actual money collected.
   const closes = state.dayCloseLogs.filter(d => d.cartId === cartId);
-  const periodCloses = closes.filter(d => d.date >= from);
+  const periodCloses = closes.filter(d => inRange(d.date));
   const closedDates = new Set(periodCloses.map(d => d.date));
   const cashGap = periodCloses.reduce((s, d) => s + (d.cashDiff || 0), 0);
   const upiGap = periodCloses.reduce((s, d) => s + (d.upiDiff || 0), 0);
@@ -2531,18 +2535,28 @@ function Reports({ state, updateState, cartId }) {
   };
   const removeExpense = (id) => { updateState({ expenses: state.expenses.filter(e => e.id !== id) }); setDelExpense(null); };
 
-  const label = { today: 'Today', week: 'This week', month: 'This month' }[period];
+  const label = period === 'day'
+    ? (pickedDate === TODAY ? 'Today' : istDateLabel(pickedDate, { weekday: 'short', day: 'numeric', month: 'short' }))
+    : { today: 'Today', week: 'This week', month: 'This month' }[period];
 
   return (
     <div>
       <SectionHeader title="Records" subtitle="Sales · expenses · wastage" />
 
       {/* Period toggle */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
-        {[['today', 'Today'], ['week', 'This week'], ['month', 'This month']].map(([k, lab]) => (
-          <button key={k} onClick={() => setPeriod(k)} style={{ flex: 1, padding: '9px 0', background: period === k ? colors.ink : '#fff', color: period === k ? colors.primary : colors.ink, border: `1px solid ${period === k ? colors.ink : colors.border}`, borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{lab}</button>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+        {[['today', 'Today'], ['week', 'Week'], ['month', 'Month'], ['day', '📅 Pick day']].map(([k, lab]) => (
+          <button key={k} onClick={() => setPeriod(k)} style={{ flex: 1, padding: '9px 0', background: period === k ? colors.ink : '#fff', color: period === k ? colors.primary : colors.ink, border: `1px solid ${period === k ? colors.ink : colors.border}`, borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>{lab}</button>
         ))}
       </div>
+      {period === 'day' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+          <span style={{ fontSize: 12, color: colors.muted, fontWeight: 600 }}>Date:</span>
+          <input type="date" value={pickedDate} max={TODAY} onChange={e => setPickedDate(e.target.value || TODAY)}
+            style={{ flex: 1, padding: '9px 12px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 14, fontWeight: 700, boxSizing: 'border-box' }} />
+        </div>
+      )}
+      {period !== 'day' && <div style={{ marginBottom: 6 }} />}
 
       {/* Sales + net */}
       <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 14, marginBottom: 12 }}>
