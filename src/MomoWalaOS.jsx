@@ -1566,6 +1566,35 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
   const todayExpenses = (state?.expenses || []).filter(e => e.cartId === cartId && e.date === TODAY).reduce((s, e) => s + e.amount, 0);
   const todayNet = todayRevenue - todayExpenses;
 
+  // Stock run-out estimate: today's selling pace vs remaining (freezer + cart).
+  const menuItems = (menuFor(state, cartId).items) || [];
+  const soldToday = todayOrders.filter(isPaid).reduce((acc, o) => {
+    const d = orderStockDeltas(o.items, menuItems);
+    Object.keys(d).forEach(k => { acc[k] = (acc[k] || 0) + d[k]; });
+    return acc;
+  }, {});
+  const openMin = cart?.openTime ? (() => { const [h, m] = cart.openTime.split(':').map(Number); return h * 60 + (m || 0); })() : null;
+  const nowMin = istNowMinutes();
+  const hoursOpen = openMin != null && nowMin > openMin ? (nowMin - openMin) / 60 : (Object.keys(soldToday).length ? 3 : null);
+  const runOut = stockTypes.map(st => {
+    const remaining = (inv[st.key]?.freezer || 0) + (inv[st.key]?.cart || 0);
+    const sold = soldToday[st.key] || 0;
+    const rate = hoursOpen && hoursOpen > 0 ? sold / hoursOpen : 0; // pcs/hr
+    const hrsLeft = remaining === 0 ? 0 : (rate > 0 ? remaining / rate : null);
+    return { key: st.key, label: st.label, remaining, hrsLeft };
+  });
+  const showRunOut = openState.open && runOut.some(r => r.hrsLeft !== null);
+
+  const shareToday = async () => {
+    const text =
+      `🥟 ${cart?.name || 'Cart'} — ${istDateLabel(new Date(), { weekday: 'short', day: 'numeric', month: 'short' })}\n` +
+      `Revenue: ₹${todayRevenue.toLocaleString('en-IN')}  (💵 ₹${cashRevenue} · 📱 ₹${upiRevenue})\n` +
+      `Orders: ${todayOrders.length} · Pieces sold: ${piecesSold}\n` +
+      `Expenses: ₹${todayExpenses.toLocaleString('en-IN')} · Net: ₹${todayNet.toLocaleString('en-IN')}`;
+    try { if (navigator.share) { await navigator.share({ title: `${cart?.name} — today`, text }); return; } } catch { /* cancelled */ }
+    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+  };
+
   return (
     <div>
       {/* Profile (≈3/4) + open-close (≈1/4) in one responsive row */}
@@ -1633,10 +1662,35 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
       </div>
 
       {/* Split metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
         <MetricCard label="Cash" value={`₹${cashRevenue}`} icon={<IndianRupee size={16}/>} color={colors.green} />
         <MetricCard label="UPI / Online" value={`₹${upiRevenue}`} icon={<Smartphone size={16}/>} color={colors.ink} />
       </div>
+
+      {/* Share today's summary */}
+      <button onClick={shareToday} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#fff', border: `1px solid ${colors.border}`, color: brand.navy, padding: 12, borderRadius: 12, fontWeight: 700, fontSize: 13.5, cursor: 'pointer', marginBottom: 16 }}>
+        📤 Share today's summary
+      </button>
+
+      {/* Stock run-out estimate (today's selling pace) */}
+      {showRunOut && (
+        <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>WILL LAST (AT TODAY'S PACE)</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {runOut.map(r => {
+              const out = r.remaining === 0;
+              const txt = out ? 'Out of stock' : r.hrsLeft === null ? 'No sales yet' : r.hrsLeft >= 6 ? 'Plenty (6h+)' : `~${r.hrsLeft.toFixed(1)} hrs left`;
+              const col = out || (r.hrsLeft !== null && r.hrsLeft < 1) ? colors.red : (r.hrsLeft !== null && r.hrsLeft < 2) ? '#B5460B' : colors.muted;
+              return (
+                <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
+                  <span style={{ fontWeight: 600 }}>{r.label} <span style={{ color: colors.muted, fontSize: 12 }}>· {r.remaining} pcs</span></span>
+                  <span style={{ fontWeight: 800, color: col }}>{txt}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Pending QR orders awaiting payment */}
       {pendingCount > 0 && (
