@@ -2856,6 +2856,10 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     const deltas = orderStockDeltas(order.items, menu.items);
     persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
   };
+  // Staff advances the kitchen status (preparing → ready) the customer sees live.
+  const setPrepStatus = (orderId, status) => {
+    updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, prepStatus: status } : o) });
+  };
   // Cancelling keeps the order (marked 'cancelled' with a required reason) so it
   // stays in records and surfaces in the admin's activity feed — never deleted.
   // Works for pending QR orders AND already-settled staff orders (e.g. a counter
@@ -2914,7 +2918,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
           </button>
         </div>
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
-        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} />}
+        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onCancel={(id) => setCancelTarget(id)} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
@@ -2994,7 +2998,7 @@ function CancelReasonModal({ order, onCancel, onConfirm }) {
 }
 
 // ─── STAFF: PENDING CUSTOMER ORDERS ───
-function PendingOrders({ orders, onSettle, onCancel }) {
+function PendingOrders({ orders, onSettle, onCancel, onPrep }) {
   return (
     <div>
       <SectionHeader title="Pending Payment" subtitle="QR orders waiting to be collected" />
@@ -3022,6 +3026,15 @@ function PendingOrders({ orders, onSettle, onCancel }) {
                 {o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}
               </div>
               <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 12 }}>₹{o.total}</div>
+
+              {/* Kitchen status the customer sees live */}
+              <div style={{ fontSize: 10, color: colors.muted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>KITCHEN STATUS</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+                {[['preparing', '👨‍🍳 Preparing'], ['ready', '✅ Ready']].map(([s, lab]) => (
+                  <button key={s} onClick={() => onPrep(o.id, s)} style={{ flex: 1, padding: 10, borderRadius: 10, fontWeight: 700, fontSize: 13, cursor: 'pointer', border: `1px solid ${o.prepStatus === s ? colors.ink : colors.border}`, background: o.prepStatus === s ? colors.ink : '#fff', color: o.prepStatus === s ? colors.primary : colors.ink }}>{lab}</button>
+                ))}
+              </div>
+
               <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>⚠️ Only after you’ve received the money — this serves the order & deducts stock</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => onSettle(o.id, 'cash')} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>💵 Cash</button>
@@ -3417,6 +3430,8 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const [custErr, setCustErr] = useState('');
   const [typeFilter, setTypeFilter] = useState('all'); // all | veg | paneer | corn …
   const [lastTotal, setLastTotal] = useState(0);
+  const [placedId, setPlacedId] = useState(null);   // id of the just-placed order
+  const [liveOrder, setLiveOrder] = useState(null);  // polled status of that order
 
   const menu = menuFor(state, venue.id);
   const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
@@ -3442,6 +3457,20 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     });
     if (rebuilt.length) setCart(rebuilt);
   };
+
+  // While the customer is on the token screen, poll their order so the live
+  // status (Placed → Preparing → Ready / Collected) updates as staff advance it.
+  useEffect(() => {
+    if (step !== 'success' || !placedId) return;
+    let alive = true;
+    const tick = async () => {
+      const fresh = await loadCartOrders(venue.id, TODAY);
+      if (alive && fresh) { const o = fresh.find(x => x.id === placedId); if (o) setLiveOrder(o); }
+    };
+    const t = setInterval(tick, 8000);
+    tick();
+    return () => { alive = false; clearInterval(t); };
+  }, [step, placedId, venue.id]);
 
   // Functional updates so rapid taps always see the latest cart (no stale state).
   const addToCart = (id, name, price, type = null) => {
@@ -3519,6 +3548,8 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     storage.set('custName', name); storage.set('custPhone', phone); storage.set('lastOrderAt', Date.now());
     storage.set('lastOrder', cart.map(c => ({ id: c.id, type: c.type, qty: c.qty }))); // for "Order again"
     setLastTotal(total);
+    setPlacedId(order.id);
+    setLiveOrder(order);
     setOrderToken(token);
     setStep('success');
     setCart([]);
@@ -3578,13 +3609,40 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   }
 
   if (step === 'success') {
+    const lo = liveOrder || {};
+    const cancelled = lo.payment === 'cancelled';
+    const collected = lo.payment === 'cash' || lo.payment === 'upi';
+    const stepIdx = cancelled ? -1 : collected ? 3 : (lo.prepStatus === 'ready' ? 2 : lo.prepStatus === 'preparing' ? 1 : 0);
+    const trackSteps = ['Order placed', 'Preparing', 'Ready — collect'];
     return (
       <div style={{ minHeight: '100vh', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, fontFamily: 'system-ui, sans-serif' }}>
         <div style={{ textAlign: 'center', background: colors.ink, color: colors.primary, padding: 40, borderRadius: 20, maxWidth: 360 }}>
           <CheckCircle2 size={60} style={{ margin: '0 auto 16px' }} color={colors.primary}/>
           <div style={{ fontSize: 16, opacity: 0.7, letterSpacing: 1 }}>YOUR ORDER TOKEN</div>
           <div style={{ fontSize: 80, fontWeight: 900, lineHeight: 1, margin: '8px 0' }}>#{orderToken}</div>
-          <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 6 }}>Show this number at the cart<br/>Ready in ~{venue.defaultPrepMins || 8} minutes</div>
+          <div style={{ fontSize: 14, opacity: 0.8, marginBottom: 16 }}>Show this number at the cart<br/>Ready in ~{venue.defaultPrepMins || 8} minutes</div>
+
+          {/* Live status tracker — updates as staff advance the order */}
+          {cancelled ? (
+            <div style={{ background: 'rgba(200,30,30,0.18)', color: '#FF8A8A', borderRadius: 12, padding: 12, fontWeight: 800, fontSize: 14, marginBottom: 16 }}>This order was cancelled. Please ask the staff.</div>
+          ) : collected ? (
+            <div style={{ background: 'rgba(124,227,139,0.18)', color: '#7CE38B', borderRadius: 12, padding: 12, fontWeight: 800, fontSize: 14, marginBottom: 16 }}>✅ Collected & paid — enjoy! 🥟</div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 18 }}>
+              {trackSteps.map((s, i) => (
+                <React.Fragment key={s}>
+                  <div style={{ flex: 1, textAlign: 'center' }}>
+                    <div style={{ width: 28, height: 28, margin: '0 auto 4px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 800, background: i <= stepIdx ? colors.primary : 'rgba(255,255,255,0.12)', color: i <= stepIdx ? colors.ink : 'rgba(255,255,255,0.5)' }}>{i < stepIdx ? '✓' : i + 1}</div>
+                    <div style={{ fontSize: 9.5, fontWeight: 700, opacity: i <= stepIdx ? 1 : 0.5, lineHeight: 1.1 }}>{s}</div>
+                  </div>
+                  {i < trackSteps.length - 1 && <div style={{ flex: 0.5, height: 2, background: i < stepIdx ? colors.primary : 'rgba(255,255,255,0.12)', marginBottom: 16 }} />}
+                </React.Fragment>
+              ))}
+            </div>
+          )}
+          {!cancelled && !collected && stepIdx === 2 && <div style={{ fontSize: 13, fontWeight: 800, color: '#7CE38B', marginBottom: 14 }}>🛎️ Your order is ready — collect it!</div>}
+
+          {!collected && !cancelled && <>
           {lastTotal > 0 && <div style={{ fontSize: 22, fontWeight: 900, marginBottom: 18 }}>Pay ₹{lastTotal}</div>}
           <div style={{ borderTop: '1px solid rgba(255,214,10,0.3)', paddingTop: 20 }}>
             {venue.upiId && lastTotal > 0 && (
@@ -3598,6 +3656,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
             {venue.upiId && <><div style={{ fontSize: 12, opacity: 0.7, marginBottom: 4 }}>UPI ID:</div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>{venue.upiId}</div></>}
           </div>
+          </>}
           <button onClick={() => { setStep('menu'); onDone(); }} style={{ marginTop: 24, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Done</button>
         </div>
       </div>

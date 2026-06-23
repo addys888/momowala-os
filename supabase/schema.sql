@@ -15,9 +15,12 @@ create table if not exists orders (
   total integer not null,
   payment text not null check (payment in ('cash', 'upi', 'pending', 'cancelled')),
   cancel_reason text,
+  prep_status text,
   staff text,
   source text,
   settled_at timestamptz,
+  customer_name text,
+  customer_phone text,
   outlet text,
   outlet_name text,
   inserted_at timestamptz not null default now()
@@ -454,6 +457,8 @@ alter table orders add column if not exists cancel_reason text;
 -- identify/call the customer). Nullable; client tolerates their absence.
 alter table orders add column if not exists customer_name text;
 alter table orders add column if not exists customer_phone text;
+-- Live prep status for the customer tracker: null=placed, 'preparing', 'ready'.
+alter table orders add column if not exists prep_status text;
 alter table orders drop constraint if exists orders_payment_check;
 alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending', 'cancelled'));
 

@@ -39,6 +39,7 @@ const orderToRow = (o) => ({
   id: o.id, cart_id: o.cartId ?? null, token: o.token, date: o.date, time: o.time, items: o.items,
   total: o.total, payment: o.payment, staff: o.staff, source: o.source,
   settled_at: o.settledAt ?? null, cancel_reason: o.cancelReason ?? null,
+  prep_status: o.prepStatus ?? null,
   customer_name: o.customerName ?? null, customer_phone: o.customerPhone ?? null,
   outlet: o.outlet ?? null, outlet_name: o.outletName ?? null,
 });
@@ -46,6 +47,7 @@ const rowToOrder = (r) => ({
   id: r.id, cartId: r.cart_id ?? undefined, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
   settledAt: r.settled_at ?? undefined, cancelReason: r.cancel_reason ?? undefined,
+  prepStatus: r.prep_status ?? undefined,
   customerName: r.customer_name ?? undefined, customerPhone: r.customer_phone ?? undefined,
   outlet: r.outlet ?? undefined, outletName: r.outlet_name ?? undefined,
 });
@@ -365,8 +367,8 @@ async function pushState(state) {
     const mergeOrdersResilient = async (rows) => {
       if (!rows.length) return { error: null };
       let r = await supabase.from('orders').upsert(rows, { onConflict: 'id' });
-      if (r.error && /customer_name|customer_phone|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
-        const stripped = rows.map(({ customer_name, customer_phone, ...rest }) => rest);
+      if (r.error && /customer_name|customer_phone|prep_status|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
+        const stripped = rows.map(({ customer_name, customer_phone, prep_status, ...rest }) => rest);
         r = await supabase.from('orders').upsert(stripped, { onConflict: 'id' });
       }
       return r;
