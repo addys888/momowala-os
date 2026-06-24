@@ -143,6 +143,7 @@ const SEED_CARTS = [
     location: 'Saketpuri Yojna, Ayodhya',
     timing: 'Daily 4 PM – 11 PM',
     emoji: '🥟',
+    logo: '/momowala-logo.png',
     accent: '#FFD60A',
     phone: '+91 63075 16898',
     instagram: '@momowalaindia',
@@ -904,7 +905,7 @@ function AdminCarts({ state, updateState }) {
         {state.carts.map(c => (
           <div key={c.id} style={{ background: '#fff', borderRadius: 14, border: `1px solid ${colors.border}`, padding: 16, opacity: c.active ? 1 : 0.55 }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
-              <div style={{ flexShrink: 0, width: 46, height: 46, borderRadius: 12, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, border: `2px solid ${c.accent}` }}>{c.emoji}</div>
+              <CartIcon cart={c} size={46} radius={12} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 800, fontSize: 16 }}>{c.name} {!c.active && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>· disabled</span>}</div>
                 <div style={{ fontSize: 12, color: colors.muted }}>{c.location}</div>
@@ -1052,7 +1053,7 @@ function AdminReports({ state }) {
         {rows.map(r => (
           <div key={r.cart.id} style={{ background: '#fff', borderRadius: 14, border: `1px solid ${colors.border}`, padding: 16 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, border: `2px solid ${r.cart.accent}` }}>{r.cart.emoji}</div>
+              <CartIcon cart={r.cart} size={36} radius={10} />
               <div style={{ fontWeight: 800, fontSize: 16 }}>{r.cart.name}</div>
               {r.pending > 0 && <span style={{ marginLeft: 'auto', fontSize: 11, fontWeight: 700, color: colors.accent }}>{r.pending} pending</span>}
             </div>
@@ -3745,6 +3746,9 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <button onClick={() => { setCart([]); onBack(); }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 13, cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}>← All carts</button>
         </div>
         <div style={{ maxWidth: 700, margin: '0 auto', textAlign: 'center' }}>
+          {venue.logo && (
+            <img src={venue.logo} alt={venue.name} style={{ width: 88, height: 88, borderRadius: '50%', objectFit: 'cover', display: 'block', margin: '0 auto 14px', border: `2px solid ${venue.accent}`, background: '#000', boxShadow: '0 6px 20px rgba(0,0,0,0.35)' }} />
+          )}
           <div style={{ color: venue.accent, fontWeight: 900, fontSize: 32, letterSpacing: 3, lineHeight: 1, textTransform: 'uppercase' }}>{venue.name}</div>
           {venue.tagline && <div style={{ color: '#fff', fontSize: 16, marginTop: 6, fontWeight: 600 }}>{venue.tagline}</div>}
           {venue.id === 'momowala' && (
