@@ -550,7 +550,10 @@ export default function App() {
     return () => clearTimeout(t);
   }, [session]);
 
-  const updateState = (updates) => setState(prev => ({ ...prev, ...updates }));
+  // Accepts a plain object of fields to merge, OR a function (prev) => fields
+  // when the merge must be computed from the freshest state (avoids stale-closure
+  // clobbers under rapid/concurrent updates).
+  const updateState = (updates) => setState(prev => ({ ...prev, ...(typeof updates === 'function' ? updates(prev) : updates) }));
   // sess may carry a server-issued token + expiresAt (from app_login). Fall back
   // to a local 8h window for the legacy path that doesn't return one.
   const login = (sess) => setSession({ ...sess, expiresAt: sess.expiresAt || Date.now() + SESSION_MS });
@@ -2830,6 +2833,8 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [cart, setCart] = useState([]);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
+  const [placing, setPlacing] = useState(false); // in-flight guard for the pay buttons
+  const placingRef = React.useRef(false); // synchronous guard — blocks rapid double-taps before re-render
   const [orderAlert, setOrderAlert] = useState(null); // new incoming customer order
   const [soundOn, setSoundOn] = useState(() => storage.get('alertSound', true) !== false);
   const prevPendingRef = React.useRef(null);
@@ -2871,31 +2876,46 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
 
   const placeOrder = async (payment) => {
-    if (cart.length === 0) return;
-    const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
-    // Shared per-cart/day counter (same RPC the customer QR flow uses) so staff
-    // and customer tokens never collide; local count is the offline fallback.
-    const serverNum = await nextOrderToken(cartId, TODAY);
-    const token = String(serverNum ?? localNextToken(state.orders, cartId)).padStart(3, '0');
-    const order = {
-      id: Date.now(),
-      cartId,
-      token,
-      date: TODAY,
-      time: istTime(),
-      items: cart,
-      total,
-      payment,
-      staff: staffName,
-      source: 'staff-entry'
-    };
-    // Staff order is settled on the spot, so deduct stock now (atomic delta).
-    const newInv = deductInventory(inv, cart, menu.items);
-    setCartInv(newInv, { orders: [...state.orders, order] });
-    const deltas = orderStockDeltas(cart, menu.items);
-    persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
-    setCart([]);
-    setJustPlaced({ token, total, payment });
+    // Re-entrancy guard: the counter person can tap Cash/UPI again while the
+    // token RPC is still in flight (laggy network). Without this, every tap
+    // burned a server token AND fired a stock-deduction delta, while only the
+    // last order save survived — producing the gaps (#047→#072) and silent
+    // over-deduction. The ref blocks the second tap synchronously, before any
+    // re-render can disable the button.
+    if (cart.length === 0 || placingRef.current) return;
+    placingRef.current = true;
+    setPlacing(true);
+    try {
+      const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
+      // Shared per-cart/day counter (same RPC the customer QR flow uses) so staff
+      // and customer tokens never collide; local count is the offline fallback.
+      const serverNum = await nextOrderToken(cartId, TODAY);
+      const token = String(serverNum ?? localNextToken(state.orders, cartId)).padStart(3, '0');
+      const order = {
+        id: Date.now(),
+        cartId,
+        token,
+        date: TODAY,
+        time: istTime(),
+        items: cart,
+        total,
+        payment,
+        staff: staffName,
+        source: 'staff-entry'
+      };
+      // Staff order is settled on the spot, so deduct stock now (atomic delta).
+      const newInv = deductInventory(inv, cart, menu.items);
+      // Functional update so the new order appends to the freshest orders list,
+      // never a stale closure snapshot.
+      updateState(s => ({ inventory: { ...s.inventory, [cartId]: newInv }, orders: [...s.orders, order] }));
+      const deltas = orderStockDeltas(cart, menu.items);
+      persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+      setCart([]);
+      setJustPlaced({ token, total, payment });
+    } finally {
+      placingRef.current = false;
+      setPlacing(false);
+    }
   };
 
   // Customer QR orders arrive as 'pending'; staff confirms payment here,
@@ -2971,7 +2991,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
             {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} Order sound {soundOn ? 'On' : 'Off'}
           </button>
         </div>
-        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
+        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onCancel={(id) => setCancelTarget(id)} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
@@ -3103,7 +3123,7 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep }) {
   );
 }
 
-function NewOrderScreen({ cart, setCart, onPlaceOrder, menu, prepMins, onSetPrep }) {
+function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, prepMins, onSetPrep }) {
   const [category, setCategory] = useState('momos');
   const items = menu?.items || [], lassi = menu?.lassi || [], addons = menu?.addons || [];
 
@@ -3201,8 +3221,8 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, menu, prepMins, onSetPrep
                 <div style={{ fontSize: 11, opacity: 0.7 }}>TOTAL</div>
                 <div style={{ fontSize: 28, fontWeight: 900 }}>₹{total}</div>
               </div>
-              <button onClick={() => onPlaceOrder('cash')} style={{ background: colors.green, color: '#fff', border: 'none', padding: '12px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>💵 Cash</button>
-              <button onClick={() => onPlaceOrder('upi')} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '12px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>📱 UPI</button>
+              <button onClick={() => onPlaceOrder('cash')} disabled={placing} style={{ background: colors.green, color: '#fff', border: 'none', padding: '12px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '💵 Cash'}</button>
+              <button onClick={() => onPlaceOrder('upi')} disabled={placing} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '12px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '📱 UPI'}</button>
             </div>
           </div>
         </div>
