@@ -1529,17 +1529,17 @@ function TopBar({ title, onExit }) {
 function BottomNav({ tab, setTab, tabs }) {
   return (
     <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: '#fff', borderTop: `1px solid ${colors.border}`, padding: '8px 0' }}>
-      <div style={{ maxWidth: 700, margin: '0 auto', display: 'flex', justifyContent: 'space-around' }}>
+      <div style={{ maxWidth: 700, margin: '0 auto', display: 'flex' }}>
         {tabs.map(t => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            style={{ background: 'transparent', border: 'none', padding: '8px 12px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', color: tab === t.id ? colors.ink : colors.muted, fontWeight: tab === t.id ? 700 : 500, position: 'relative' }}>
+            style={{ flex: 1, minWidth: 0, background: 'transparent', border: 'none', padding: '8px 2px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, cursor: 'pointer', color: tab === t.id ? colors.ink : colors.muted, fontWeight: tab === t.id ? 700 : 500, position: 'relative' }}>
             <div style={{ position: 'relative' }}>
               {t.icon}
               {t.badge > 0 && (
                 <span style={{ position: 'absolute', top: -6, right: -10, background: colors.accent, color: '#fff', fontSize: 10, fontWeight: 800, minWidth: 16, height: 16, borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{t.badge}</span>
               )}
             </div>
-            <span style={{ fontSize: 11 }}>{t.label}</span>
+            <span style={{ fontSize: 10.5, whiteSpace: 'nowrap', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.label}</span>
           </button>
         ))}
       </div>
@@ -1603,7 +1603,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
       {/* Profile (≈3/4) + open-close (≈1/4) in one responsive row */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
         {/* Cart profile */}
-        <div style={{ flex: '3 1 300px', display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12 }}>
+        <div style={{ flex: '3 1 300px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12 }}>
           <CartIcon cart={cart} size={44} radius={11} />
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 800, fontSize: 15 }}>{cart?.name}</div>
@@ -1613,7 +1613,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
         </div>
 
         {/* Open / closed control */}
-        <div style={{ flex: '1 1 200px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, background: '#fff', border: `1px solid ${openState.open ? '#BFE3BF' : '#F3C2C2'}`, borderRadius: 12, padding: 12 }}>
+        <div style={{ flex: '1 1 200px', minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 8, background: '#fff', border: `1px solid ${openState.open ? '#BFE3BF' : '#F3C2C2'}`, borderRadius: 12, padding: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ width: 9, height: 9, borderRadius: '50%', background: openState.open ? colors.green : colors.red, flexShrink: 0 }} />
             <div style={{ minWidth: 0 }}>
