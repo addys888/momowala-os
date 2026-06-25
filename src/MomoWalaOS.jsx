@@ -1,4 +1,5 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
+import momowalaLogoUrl from './assets/momowala-logo.png';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken,
   authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders,
@@ -143,7 +144,7 @@ const SEED_CARTS = [
     location: 'Saketpuri Yojna, Ayodhya',
     timing: 'Daily 4 PM – 11 PM',
     emoji: '🥟',
-    logo: '/momowala-logo.png',
+    logo: momowalaLogoUrl,
     accent: '#FFD60A',
     phone: '+91 63075 16898',
     instagram: '@momowalaindia',
@@ -1444,7 +1445,7 @@ function CartProfileModal({ cart, onSave, onClose }) {
 function CartIcon({ cart, size = 44, radius = 12 }) {
   return (
     <div style={{ width: size, height: size, borderRadius: radius, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.5, border: `2px solid ${cart?.accent || brand.teal}`, overflow: 'hidden', flexShrink: 0 }}>
-      {cart?.logo ? <img src={cart.logo} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (cart?.emoji || '🛒')}
+      {(cart?.logo || cart?.id === 'momowala') ? <img src={cart.logo || momowalaLogoUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (cart?.emoji || '🛒')}
     </div>
   );
 }
@@ -3762,8 +3763,8 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <button onClick={() => { setCart([]); onBack(); }} style={{ background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.7)', fontSize: 13, cursor: 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 4 }}>← All carts</button>
         </div>
         <div style={{ maxWidth: 700, margin: '0 auto', textAlign: 'center' }}>
-          {venue.logo && (
-            <img src={venue.logo} alt={venue.name} style={{ width: 88, height: 88, borderRadius: '50%', objectFit: 'cover', display: 'block', margin: '0 auto 14px', border: `2px solid ${venue.accent}`, background: '#000', boxShadow: '0 6px 20px rgba(0,0,0,0.35)' }} />
+          {(venue.logo || venue.id === 'momowala') && (
+            <img src={venue.logo || momowalaLogoUrl} alt={venue.name} style={{ width: 88, height: 88, borderRadius: '50%', objectFit: 'cover', display: 'block', margin: '0 auto 14px', border: `2px solid ${venue.accent}`, background: '#000', boxShadow: '0 6px 20px rgba(0,0,0,0.35)' }} />
           )}
           <div style={{ color: venue.accent, fontWeight: 900, fontSize: 32, letterSpacing: 3, lineHeight: 1, textTransform: 'uppercase' }}>{venue.name}</div>
           {venue.tagline && <div style={{ color: '#fff', fontSize: 16, marginTop: 6, fontWeight: 600 }}>{venue.tagline}</div>}
