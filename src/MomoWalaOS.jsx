@@ -1003,7 +1003,7 @@ function EditOwnerModal({ cart, onSave, onClose }) {
   const [ownerMobile, setOwnerMobile] = useState(cart.ownerMobile || '');
   const [error, setError] = useState('');
   const submit = () => {
-    if (!ownerName.trim()) { setError('Enter the owner’s name.'); return; }
+    if (!ownerName.trim()) { setError("Enter the owner's name."); return; }
     if (!/^\d{10}$/.test(ownerMobile)) { setError('Enter a 10-digit mobile number.'); return; }
     onSave({ ownerName: ownerName.trim(), ownerMobile });
   };
@@ -1520,7 +1520,7 @@ function TopBar({ title, onExit }) {
           <div style={{ fontWeight: 700, fontSize: 15 }}>{title}</div>
         </div>
       </div>
-      <button onClick={() => { if (confirm('Log out and exit? You’ll need to sign in again to continue.')) onExit(); }} style={{ background: 'transparent', border: `1px solid rgba(255,255,255,0.5)`, color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <button onClick={() => { if (confirm("Log out and exit? You'll need to sign in again to continue.")) onExit(); }} style={{ background: 'transparent', border: `1px solid rgba(255,255,255,0.5)`, color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
         <LogOut size={12}/> Exit
       </button>
     </div>
@@ -1928,9 +1928,10 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       <SectionHeader title="Inventory Control" subtitle="Stock In · Cart Loading · Consumables" />
 
       {/* Stock In Action */}
-      <button onClick={() => setShowAddStock(true)}
-        style={{ width: '100%', background: colors.ink, color: colors.primary, padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-        <Plus size={18}/> Record New Supplier Delivery
+      <button onClick={() => stockTypes.length > 0 && setShowAddStock(true)}
+        disabled={stockTypes.length === 0}
+        style={{ width: '100%', background: stockTypes.length === 0 ? colors.muted : colors.ink, color: colors.primary, padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: stockTypes.length === 0 ? 'not-allowed' : 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <Plus size={18}/> Record New Supplier Delivery{stockTypes.length === 0 ? ' — add stock types first' : ''}
       </button>
 
       {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
@@ -2069,7 +2070,7 @@ function ConsumableModal({ initial, onSave, onClose }) {
           <input type="number" inputMode="decimal" value={stock} onChange={e => setStock(e.target.value)} placeholder="0" style={editInput} />
         </div>
       </div>
-      <div style={{ fontSize: 12, color: colors.muted }}>Tip: French fries come as a 2.5 kg packet — set unit “packet” and stock the number of packets in the freezer.</div>
+      <div style={{ fontSize: 12, color: colors.muted }}>Tip: French fries come as a 2.5 kg packet — set unit "packet" and stock the number of packets in the freezer.</div>
     </EditModalShell>
   );
 }
@@ -2188,6 +2189,7 @@ function StockInModal({ stockTypes = [], onAdd, onClose }) {
 
 // ─── OWNER: RECONCILIATION ───
 function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold }) {
+  const alreadyClosed = state.dayCloseLogs.some(d => d.cartId === cartId && d.date === TODAY);
   const [physicalCash, setPhysicalCash] = useState('');
   const [phonePeAmount, setPhonePeAmount] = useState('');
   const [remaining, setRemaining] = useState({}); // { [stockKey]: '' }
@@ -2209,7 +2211,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
       id: Date.now(),
       cartId,
       date: TODAY,
-      totalOrders: todayOrders.length,
+      totalOrders: todayOrders.filter(isPaid).length,
       systemCash: cashRevenue,
       physicalCash: parseInt(physicalCash) || 0,
       cashDiff: cashDiff || 0,
@@ -2237,13 +2239,13 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
     setClosed(true);
   };
 
-  if (closed) {
+  if (closed || alreadyClosed) {
     return (
       <div>
         <div style={{ background: colors.green, color: '#fff', padding: 32, borderRadius: 16, textAlign: 'center' }}>
           <CheckCircle2 size={48} style={{ marginBottom: 12 }}/>
           <div style={{ fontSize: 22, fontWeight: 800 }}>Day Closed Successfully</div>
-          <div style={{ fontSize: 14, opacity: 0.9, marginTop: 4 }}>All logs saved. Good work today!</div>
+          <div style={{ fontSize: 14, opacity: 0.9, marginTop: 4 }}>{alreadyClosed && !closed ? 'Already closed today — logs saved.' : 'All logs saved. Good work today!'}</div>
         </div>
       </div>
     );
@@ -2310,7 +2312,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
       </div>
       <button onClick={closeDay}
         disabled={physicalCash === '' || phonePeAmount === '' || !allStockFilled}
-        style={{ width: '100%', background: physicalCash === '' || phonePeAmount === '' ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: 'pointer', marginTop: 10 }}>
+        style={{ width: '100%', background: (physicalCash === '' || phonePeAmount === '' || !allStockFilled) ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: (physicalCash === '' || phonePeAmount === '' || !allStockFilled) ? 'not-allowed' : 'pointer', marginTop: 10 }}>
         Close Day & Save Report
       </button>
     </div>
@@ -2622,7 +2624,9 @@ function Reports({ state, updateState, cartId }) {
     sysByDate[o.date] = e;
   });
   const closeByDate = Object.fromEntries(closes.map(d => [d.date, d]));
-  const historyDates = [...new Set([...Object.keys(sysByDate), ...Object.keys(closeByDate)])].sort().reverse().slice(0, 14);
+  const historyDates = [...new Set([...Object.keys(sysByDate), ...Object.keys(closeByDate)])]
+    .filter(d => period === 'today' || period === 'day' ? inRange(d) : d >= from)
+    .sort().reverse().slice(0, 31);
 
   // Sold pieces by category + top-selling items for the chosen period.
   const { byCat, items: soldItems } = soldBreakdown(orders, menu.items || []);
@@ -2630,8 +2634,8 @@ function Reports({ state, updateState, cartId }) {
   const maxQty = soldItems[0]?.qty || 1;
   const shownItems = showAllItems ? soldItems : soldItems.slice(0, 5);
 
-  const addExpense = (category, amount, note) => {
-    const e = { id: Date.now(), cartId, date: TODAY, category, amount, note };
+  const addExpense = (category, amount, note, date = TODAY) => {
+    const e = { id: Date.now(), cartId, date: date || TODAY, category, amount, note };
     updateState({ expenses: [...(state.expenses || []), e] });
     setShowExpense(false);
   };
@@ -2812,10 +2816,13 @@ function ExpenseModal({ onAdd, onClose }) {
   const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [date, setDate] = useState(TODAY);
   const [error, setError] = useState('');
-  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onAdd(category, a, note.trim()); };
+  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onAdd(category, a, note.trim(), date); };
   return (
     <EditModalShell title="Add expense" onClose={onClose} onSave={submit} error={error}>
+      <div style={editLabel}>DATE</div>
+      <input type="date" value={date} max={TODAY} onChange={e => setDate(e.target.value || TODAY)} style={editInput} />
       <div style={editLabel}>CATEGORY</div>
       <select value={category} onChange={e => setCategory(e.target.value)} style={editInput}>{EXPENSE_CATEGORIES.map(c => <option key={c}>{c}</option>)}</select>
       <div style={editLabel}>AMOUNT ₹</div>
@@ -2836,6 +2843,8 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
   const [placing, setPlacing] = useState(false); // in-flight guard for the pay buttons
   const placingRef = React.useRef(false); // synchronous guard — blocks rapid double-taps before re-render
+  const settlingRef = React.useRef(new Set()); // per-order guard against double-settle on pending orders
+  const [settling, setSettling] = useState(() => new Set());
   const [orderAlert, setOrderAlert] = useState(null); // new incoming customer order
   const [soundOn, setSoundOn] = useState(() => storage.get('alertSound', true) !== false);
   const prevPendingRef = React.useRef(null);
@@ -2922,14 +2931,22 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   // Customer QR orders arrive as 'pending'; staff confirms payment here,
   // and only then is stock deducted.
   const settleOrder = (orderId, payment) => {
+    if (settlingRef.current.has(orderId)) return;
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment !== 'pending') return;
-    const newInv = deductInventory(inv, order.items, menu.items);
-    setCartInv(newInv, {
-      orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
-    });
-    const deltas = orderStockDeltas(order.items, menu.items);
-    persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+    settlingRef.current.add(orderId);
+    setSettling(s => new Set([...s, orderId]));
+    try {
+      const newInv = deductInventory(inv, order.items, menu.items);
+      setCartInv(newInv, {
+        orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
+      });
+      const deltas = orderStockDeltas(order.items, menu.items);
+      persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+    } finally {
+      settlingRef.current.delete(orderId);
+      setSettling(s => { const n = new Set(s); n.delete(orderId); return n; });
+    }
   };
   // Staff advances the kitchen status (preparing → ready) the customer sees live.
   const setPrepStatus = (orderId, status) => {
@@ -2993,7 +3010,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
           </button>
         </div>
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
-        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} />}
+        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onCancel={(id) => setCancelTarget(id)} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
@@ -3073,7 +3090,7 @@ function CancelReasonModal({ order, onCancel, onConfirm }) {
 }
 
 // ─── STAFF: PENDING CUSTOMER ORDERS ───
-function PendingOrders({ orders, onSettle, onCancel, onPrep }) {
+function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set() }) {
   return (
     <div>
       <SectionHeader title="Pending Payment" subtitle="QR orders waiting to be collected" />
@@ -3084,7 +3101,7 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep }) {
         </div>
       )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {orders.map(o => (
+        {orders.map(o => { const busy = settling.has(o.id); return (
           <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.accent}`, overflow: 'hidden' }}>
             <div style={{ padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -3110,15 +3127,15 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep }) {
                 ))}
               </div>
 
-              <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>⚠️ Only after you’ve received the money — this serves the order & deducts stock</div>
+              <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>Only after receiving money — this serves the order &amp; deducts stock</div>
               <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => onSettle(o.id, 'cash')} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>💵 Cash</button>
-                <button onClick={() => onSettle(o.id, 'upi')} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>📱 UPI</button>
+                <button onClick={() => onSettle(o.id, 'cash')} disabled={busy} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>💵 Cash</button>
+                <button onClick={() => onSettle(o.id, 'upi')} disabled={busy} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>📱 UPI</button>
                 <button onClick={() => onCancel(o.id)} style={{ background: '#fff', color: colors.red, border: `1px solid ${colors.border}`, padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>✕</button>
               </div>
             </div>
           </div>
-        ))}
+        ); })}
       </div>
     </div>
   );
@@ -3345,7 +3362,7 @@ function ShiftStatus({ inv, stockTypes = [], myOrders, staffName }) {
         <Clock size={32} style={{ margin: '0 auto 8px' }}/>
         <div style={{ fontSize: 13, opacity: 0.7 }}>SHIFT TOTAL</div>
         <div style={{ fontSize: 36, fontWeight: 900 }}>₹{cashTotal + upiTotal}</div>
-        <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>{myOrders.length} orders</div>
+        <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>{myOrders.filter(o => o.payment !== 'cancelled').length} orders</div>
       </div>
 
       <div style={{ background: '#fff', padding: 16, borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
@@ -3380,7 +3397,6 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
     if (!stockKey || n <= 0) { setErr('Enter how many pieces.'); return; }
     // Can't waste more than is physically on the cart.
     if (n > onCart) { setErr(`Only ${onCart} ${stockTypes.find(s => s.key === stockKey)?.label || ''} pcs on the cart — can't log ${n}.`); return; }
-    if (!confirm(`Log ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage? This removes them from cart stock.`)) return;
     onLog(stockKey, n, reason);
     setDone(`Logged ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage.`);
     setQty(''); setTimeout(() => setDone(''), 2500);
