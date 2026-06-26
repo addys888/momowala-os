@@ -857,6 +857,7 @@ function AdminCarts({ state, updateState }) {
     const cart = {
       id, name: form.name.trim(), tagline: form.tagline.trim(), cuisine: form.cuisine.trim(),
       location: form.location.trim(), timing: form.timing.trim(), emoji: form.emoji || '🛒',
+      logo: form.logo || null,
       accent: form.accent || brand.teal, ownerName: form.ownerName.trim(), ownerMobile: form.ownerMobile,
       ownerPasswordHash: null, active: true, createdAt: TODAY,
     };
@@ -931,9 +932,16 @@ function AdminCarts({ state, updateState }) {
 const adminBtn = { background: '#fff', border: `1px solid ${colors.border}`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', color: brand.text };
 
 function AddCartModal({ onAdd, onClose }) {
-  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', accent: brand.teal, ownerName: '', ownerMobile: '', ownerPassword: '' });
+  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', logo: '', accent: brand.teal, ownerName: '', ownerMobile: '', ownerPassword: '' });
   const [error, setError] = useState('');
+  const logoRef = React.useRef();
   const set = (k) => (e) => setF(prev => ({ ...prev, [k]: e.target.value }));
+  const setFile = (k, max) => async (e) => {
+    const file = e.target.files?.[0]; e.target.value = '';
+    if (!file) return;
+    try { const b64 = await fileToBase64(file, max, 0.8); setF(p => ({ ...p, [k]: `data:image/jpeg;base64,${b64}` })); }
+    catch { setError('Could not read that image.'); }
+  };
 
   const submit = () => {
     setError('');
@@ -954,18 +962,29 @@ function AddCartModal({ onAdd, onClose }) {
         <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, color: brand.navy }}>Onboard New Cart</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Create a QSR cart and assign its owner. The owner logs in with their mobile + this password.</div>
 
+        <div style={label}>CART LOGO</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <div style={{ width: 56, height: 56, borderRadius: 12, background: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26, border: `2px solid ${f.accent}`, overflow: 'hidden', flexShrink: 0 }}>
+            {f.logo ? <img src={f.logo} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : f.emoji}
+          </div>
+          <input ref={logoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={setFile('logo', 400)} />
+          <button onClick={() => logoRef.current?.click()} style={{ ...adminBtn, color: brand.navy }}>{f.logo ? 'Change' : 'Upload'} image</button>
+          {f.logo && <button onClick={() => setF(p => ({ ...p, logo: '' }))} style={{ ...adminBtn, color: colors.red }}>Remove</button>}
+        </div>
+
         <div style={label}>CART NAME</div>
         <input value={f.name} onChange={set('name')} placeholder="e.g. Chaat Junction" style={inputStyle} />
         <div style={{ display: 'flex', gap: 10 }}>
-          <div style={{ flex: 1 }}>
-            <div style={label}>EMOJI / LOGO</div>
-            <input value={f.emoji} onChange={set('emoji')} placeholder="🛒" style={inputStyle} />
+          <div style={{ width: 86 }}>
+            <div style={label}>EMOJI</div>
+            <input value={f.emoji} onChange={set('emoji')} placeholder="🛒" style={{ ...inputStyle, textAlign: 'center', fontSize: 22 }} />
           </div>
-          <div style={{ flex: 2 }}>
+          <div style={{ flex: 1 }}>
             <div style={label}>TAGLINE (optional)</div>
             <input value={f.tagline} onChange={set('tagline')} placeholder="चाट जंक्शन" style={inputStyle} />
           </div>
         </div>
+        <div style={{ fontSize: 11, color: colors.muted, marginTop: -6, marginBottom: 12 }}>Uploaded logo is shown when present; otherwise the emoji is used.</div>
         <div style={label}>FOOD DESCRIPTION</div>
         <input value={f.cuisine} onChange={set('cuisine')} placeholder="Pani puri, tikki, dahi chaat…" style={inputStyle} />
         <div style={label}>LOCATION</div>
