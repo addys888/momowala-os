@@ -177,7 +177,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
             {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} Order sound {soundOn ? 'On' : 'Off'}
           </button>
         </div>
-        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
+        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} inv={inv} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onCancel={(id) => setCancelTarget(id)} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
@@ -313,9 +313,19 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
 }
 
 
-function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, prepMins, onSetPrep }) {
+function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepMins, onSetPrep }) {
   const [category, setCategory] = useState('momos');
   const items = menu?.items || [], lassi = menu?.lassi || [], addons = menu?.addons || [];
+
+  // Live "momos left on cart" per stock category — owner loads these from the
+  // freezer at open; each placed order deducts. We also subtract the pieces in
+  // the order being punched right now, so staff see what will remain AFTER it.
+  // Sorted by remaining count, highest first.
+  const stockTypes = menu?.stockTypes || [];
+  const pending = orderStockDeltas(cart, items);
+  const stockLeft = stockTypes
+    .map(st => ({ key: st.key, label: st.label, left: (inv?.[st.key]?.cart ?? 0) - (pending[st.key] || 0) }))
+    .sort((a, b) => b.left - a.left);
 
   const addToCart = (id, name, price, type = null, qty = 1) => {
     const itemKey = `${id}-${type || 'std'}`;
@@ -341,6 +351,28 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, prepMins, 
   return (
     <div>
       <SectionHeader title="New Order" subtitle="Tap items to add" />
+
+      {/* Live momos left on cart — updates as items are added and after each order */}
+      {stockLeft.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 10, color: colors.muted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>🥟 MOMOS LEFT ON CART {cart.length > 0 && <span style={{ color: colors.accent }}>· after this order</span>}</div>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+            {stockLeft.map(s => {
+              const state = s.left <= 0 ? 'out' : s.left <= 10 ? 'low' : 'ok';
+              const bg = state === 'out' ? '#FFE7E7' : state === 'low' ? '#FFF1E7' : colors.ink;
+              const fg = state === 'out' ? colors.red : state === 'low' ? colors.accent : colors.primary;
+              return (
+                <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 8, background: bg, color: fg, borderRadius: 12, padding: '8px 14px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{s.label}</span>
+                  <span style={{ fontSize: 18, fontWeight: 900 }}>{s.left}</span>
+                  {state === 'out' && <span style={{ fontSize: 10, fontWeight: 800 }}>OUT</span>}
+                  {state === 'low' && <span style={{ fontSize: 10, fontWeight: 800 }}>LOW</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Live prep/wait time shown to customers on their token screen */}
       {onSetPrep && (
