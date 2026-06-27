@@ -422,8 +422,18 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, prepMins, 
 }
 
 
+// A per-order price stays visible only briefly after it's punched/collected,
+// then masks to ₹••• so staff can't add up recent orders to reconcile the cash
+// box. Reference time = when it was collected (settledAt for QR orders, else the
+// punch time). Full money figures stay on the owner side.
+const PRICE_MASK_MS = 5 * 60 * 1000;
+const priceVisible = (o) => {
+  const t = o.settledAt ? new Date(o.settledAt).getTime() : o.id;
+  return Date.now() - t <= PRICE_MASK_MS;
+};
+
 function MyOrdersScreen({ orders, onCancel }) {
-  // Re-render every 20s so the 5-minute cancel window closes on its own.
+  // Re-render every 20s so the cancel window AND the price-mask close on their own.
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick(n => n + 1), 20000); return () => clearInterval(t); }, []);
   const liveCount = orders.filter(o => o.payment !== 'cancelled').length;
@@ -443,11 +453,12 @@ function MyOrdersScreen({ orders, onCancel }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {orders.slice().reverse().map(o => {
           const cancelled = o.payment === 'cancelled';
+          const showPrice = priceVisible(o);
           return (
             <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 14, opacity: cancelled ? 0.7 : 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
                 <div style={{ fontWeight: 800, fontSize: 16 }}>#{o.token} <span style={{ fontWeight: 500, fontSize: 12, color: colors.muted }}>· {o.time}</span></div>
-                <div style={{ fontWeight: 800, fontSize: 16, textDecoration: cancelled ? 'line-through' : 'none', color: cancelled ? colors.muted : colors.ink }}>₹{o.total}</div>
+                <div style={{ fontWeight: 800, fontSize: 16, textDecoration: (cancelled && showPrice) ? 'line-through' : 'none', color: showPrice ? (cancelled ? colors.muted : colors.ink) : colors.muted }}>{showPrice ? `₹${o.total}` : '₹•••'}</div>
               </div>
               <OrderItemLines items={o.items} muted={cancelled} />
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
