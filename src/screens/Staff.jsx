@@ -426,17 +426,18 @@ function MyOrdersScreen({ orders, onCancel }) {
   // Re-render every 20s so the 5-minute cancel window closes on its own.
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick(n => n + 1), 20000); return () => clearInterval(t); }, []);
-  const totalCash = orders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
-  const totalUpi = orders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
   const liveCount = orders.filter(o => o.payment !== 'cancelled').length;
+  const cashCount = orders.filter(o => o.payment === 'cash').length;
+  const upiCount = orders.filter(o => o.payment === 'upi').length;
 
   return (
     <div>
       <SectionHeader title="My Shift Orders" subtitle={`${liveCount} order${liveCount !== 1 ? 's' : ''} so far`} />
 
+      {/* Counts only — money totals live on the owner side so staff focus on punching, not reconciling the cash box. */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
-        <MetricCard label="Cash" value={`₹${totalCash}`} icon={<IndianRupee size={16}/>} color={colors.green} />
-        <MetricCard label="UPI" value={`₹${totalUpi}`} icon={<Smartphone size={16}/>} color={colors.ink} />
+        <MetricCard label="Cash orders" value={`${cashCount}`} icon={<IndianRupee size={16}/>} color={colors.green} />
+        <MetricCard label="UPI orders" value={`${upiCount}`} icon={<Smartphone size={16}/>} color={colors.ink} />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -468,18 +469,18 @@ function MyOrdersScreen({ orders, onCancel }) {
 
 
 function ShiftStatus({ inv, stockTypes = [], myOrders, staffName }) {
-  const cashTotal = myOrders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
-  const upiTotal = myOrders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
+  const orderCount = myOrders.filter(o => o.payment !== 'cancelled').length;
 
   return (
     <div>
       <SectionHeader title="Shift Summary" subtitle={`${staffName} on duty`} />
 
+      {/* Order count only — money totals live on the owner side. */}
       <div style={{ background: colors.ink, color: colors.primary, padding: 24, borderRadius: 16, marginBottom: 16, textAlign: 'center' }}>
         <Clock size={32} style={{ margin: '0 auto 8px' }}/>
-        <div style={{ fontSize: 13, opacity: 0.7 }}>SHIFT TOTAL</div>
-        <div style={{ fontSize: 36, fontWeight: 900 }}>₹{cashTotal + upiTotal}</div>
-        <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>{myOrders.filter(o => o.payment !== 'cancelled').length} orders</div>
+        <div style={{ fontSize: 13, opacity: 0.7 }}>ORDERS THIS SHIFT</div>
+        <div style={{ fontSize: 36, fontWeight: 900 }}>{orderCount}</div>
+        <div style={{ fontSize: 13, opacity: 0.7, marginTop: 4 }}>punched so far</div>
       </div>
 
       <div style={{ background: '#fff', padding: 16, borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
