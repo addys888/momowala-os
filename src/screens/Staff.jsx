@@ -422,11 +422,11 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, prepMins, 
 }
 
 
-// A per-order price stays visible only briefly after it's punched/collected,
+// A per-order price stays visible for 10 minutes after it's punched/collected,
 // then masks to ₹••• so staff can't add up recent orders to reconcile the cash
 // box. Reference time = when it was collected (settledAt for QR orders, else the
 // punch time). Full money figures stay on the owner side.
-const PRICE_MASK_MS = 5 * 60 * 1000;
+const PRICE_MASK_MS = 10 * 60 * 1000;
 const priceVisible = (o) => {
   const t = o.settledAt ? new Date(o.settledAt).getTime() : o.id;
   return Date.now() - t <= PRICE_MASK_MS;
