@@ -257,7 +257,10 @@ function deductInventory(inventory, items, menuItems = MENU_ITEMS) {
     if (menu && !next[menu.stockKey]) return; // item not tied to a tracked stock type
     if (menu) {
       const pcs = (item.type === 'half' ? menu.pcsHalf : menu.pcsFull) * item.qty;
-      next[menu.stockKey] = { ...next[menu.stockKey], cart: next[menu.stockKey].cart - pcs };
+      // Clamp at 0 to match the cloud apply_inventory RPC and the wastage path —
+      // physical cart stock can't go negative (orders aren't hard-blocked on low
+      // stock, so an oversell just floors at 0 instead of showing a negative).
+      next[menu.stockKey] = { ...next[menu.stockKey], cart: Math.max(0, next[menu.stockKey].cart - pcs) };
     }
   });
   return next;
