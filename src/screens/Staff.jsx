@@ -32,7 +32,9 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 
   // Detect a newly-arrived pending (customer QR) order → beep + voice + banner.
   useEffect(() => {
-    const pend = state.orders.filter(o => o.cartId === cartId && o.date === TODAY && o.payment === 'pending');
+    // Only CUSTOMER QR orders should trigger the incoming-order alert — not the
+    // staff's own 'unpaid' counter orders (also stored as pending).
+    const pend = state.orders.filter(o => o.cartId === cartId && o.date === TODAY && o.payment === 'pending' && o.source !== 'staff-entry');
     const ids = pend.map(o => o.id);
     if (prevPendingRef.current === null) { prevPendingRef.current = new Set(ids); return; } // skip first load
     const fresh = pend.find(o => !prevPendingRef.current.has(o.id));
@@ -77,11 +79,15 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         time: istTime(),
         items: cart,
         total,
-        payment,
+        // 'unpaid' parks the order (payment collected later in the Pending tab);
+        // cash/upi settle on the spot. Either way the food is made now.
+        payment: payment === 'unpaid' ? 'pending' : payment,
         staff: staffName,
-        source: 'staff-entry'
+        source: 'staff-entry',
+        stockDeducted: true, // counter food leaves the cart at punch, paid or not
       };
-      // Staff order is settled on the spot, so deduct stock now (atomic delta).
+      // Counter food is made immediately, so deduct stock now (atomic delta) —
+      // even for an unpaid order. Settling it later won't deduct again.
       const newInv = deductInventory(inv, cart, menu.items);
       // Functional update so the new order appends to the freshest orders list,
       // never a stale closure snapshot.
@@ -105,12 +111,18 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     settlingRef.current.add(orderId);
     setSettling(s => new Set([...s, orderId]));
     try {
-      const newInv = deductInventory(inv, order.items, menu.items);
+      // Unpaid counter orders already deducted stock at punch; QR orders deduct now.
+      // Keyed on `source` (persisted) so it stays correct after a cloud reload,
+      // where the transient stockDeducted flag would be lost.
+      const alreadyDeducted = order.source === 'staff-entry' || !!order.stockDeducted;
+      const newInv = alreadyDeducted ? inv : deductInventory(inv, order.items, menu.items);
       setCartInv(newInv, {
-        orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString() } : o),
+        orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString(), stockDeducted: true } : o),
       });
-      const deltas = orderStockDeltas(order.items, menu.items);
-      persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+      if (!alreadyDeducted) {
+        const deltas = orderStockDeltas(order.items, menu.items);
+        persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+      }
     } finally {
       settlingRef.current.delete(orderId);
       setSettling(s => { const n = new Set(s); n.delete(orderId); return n; });
@@ -127,19 +139,22 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const confirmCancel = (orderId, reason) => {
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment === 'cancelled') { setCancelTarget(null); return; }
-    const settled = isPaid(order);
-    // A settled order can only be cancelled if it's a counter order still inside
-    // the 5-minute window. (Unpaid QR orders in the Pending tab aren't limited.)
-    if (settled && !staffCancellable(order)) { setCancelTarget(null); return; }
-    // Settled orders already deducted stock, so put the pieces back on cancel.
-    const newInv = settled ? restoreInventory(inv, order.items, menu.items) : inv;
+    // A settled (paid) COUNTER order can only be cancelled inside the 5-minute
+    // window. Unpaid parked orders (pending) can be cancelled anytime — a no-show.
+    if (isPaid(order) && !staffCancellable(order)) { setCancelTarget(null); return; }
+    // Restore stock if this order had deducted it — paid counter orders AND unpaid
+    // parked orders (both deducted at punch). Never-deducted QR pending: nothing back.
+    // Reload-safe: paid orders and staff-entry (counter) orders both deducted at
+    // punch/settle; never-deducted QR pending orders (source !== staff-entry) don't.
+    const wasDeducted = isPaid(order) || order.source === 'staff-entry' || !!order.stockDeducted;
+    const newInv = wasDeducted ? restoreInventory(inv, order.items, menu.items) : inv;
     updateState({
       inventory: { ...state.inventory, [cartId]: newInv },
       orders: state.orders.map(o => o.id === orderId
-        ? { ...o, payment: 'cancelled', cancelReason: reason, staff: o.staff || staffName, settledAt: new Date().toISOString() }
+        ? { ...o, payment: 'cancelled', cancelReason: reason, staff: o.staff || staffName, settledAt: new Date().toISOString(), stockDeducted: false }
         : o),
     });
-    if (settled) {
+    if (wasDeducted) {
       const deltas = orderStockDeltas(order.items, menu.items);
       persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: p }])), { ...state.inventory, [cartId]: newInv });
     }
@@ -227,7 +242,7 @@ function OrderPlacedToast({ info, onClose }) {
         <CheckCircle2 size={56} color={colors.primary} style={{ margin: '0 auto 12px' }} />
         <div style={{ fontSize: 18, fontWeight: 800 }}>Order registered!</div>
         <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div>
-        <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received</div>
+        <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
         <button onClick={onClose} style={{ marginTop: 18, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>Next order</button>
       </div>
     </div>
@@ -277,7 +292,7 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
             <div style={{ padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div style={{ fontSize: 22, fontWeight: 900 }}>#{o.token}</div>
-                <div style={{ fontSize: 12, color: colors.muted }}>{o.time} · self-order</div>
+                <div style={{ fontSize: 12, color: colors.muted }}>{o.time} · {o.source === 'staff-entry' ? '⏳ counter · unpaid' : 'self-order'}</div>
               </div>
               {(o.customerName || o.customerPhone) && (
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -298,7 +313,7 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
                 ))}
               </div>
 
-              <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>Only after receiving money — this serves the order &amp; deducts stock</div>
+              <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>{o.stockDeducted ? 'Mark how the customer paid — Cash or UPI.' : 'Only after receiving money — this serves the order & deducts stock'}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => onSettle(o.id, 'cash')} disabled={busy} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>💵 Cash</button>
                 <button onClick={() => onSettle(o.id, 'upi')} disabled={busy} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>📱 UPI</button>
@@ -438,13 +453,14 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepM
                 </div>
               ))}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, opacity: 0.7 }}>TOTAL</div>
-                <div style={{ fontSize: 28, fontWeight: 900 }}>₹{total}</div>
-              </div>
-              <button onClick={() => onPlaceOrder('cash')} disabled={placing} style={{ background: colors.green, color: '#fff', border: 'none', padding: '12px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '💵 Cash'}</button>
-              <button onClick={() => onPlaceOrder('upi')} disabled={placing} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '12px 16px', borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '📱 UPI'}</button>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>TOTAL</div>
+              <div style={{ fontSize: 28, fontWeight: 900 }}>₹{total}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => onPlaceOrder('cash')} disabled={placing} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '💵 Cash'}</button>
+              <button onClick={() => onPlaceOrder('upi')} disabled={placing} style={{ flex: 1, background: colors.primary, color: colors.ink, border: 'none', padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '📱 UPI'}</button>
+              <button onClick={() => onPlaceOrder('unpaid')} disabled={placing} style={{ flex: 1, background: 'transparent', color: colors.primary, border: `1.5px solid ${colors.primary}`, padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '⏳ Unpaid'}</button>
             </div>
           </div>
         </div>
