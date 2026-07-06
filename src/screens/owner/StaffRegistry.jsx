@@ -8,6 +8,7 @@ import { useStore } from '../../store';
 function StaffRegistry({ state, updateState, cartId, cart }) {
   const { session } = useStore();
   const [showAdd, setShowAdd] = useState(false);
+  const [editStaff, setEditStaff] = useState(null); // staff being edited
   const [viewStaff, setViewStaff] = useState(null); // drill into one staff's day
   const staff = state.staff.filter(s => s.cartId === cartId);
   const needsSql = 'Apply the security update (run schema.sql in Supabase) to manage passwords.';
@@ -38,6 +39,12 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
   };
 
   const toggleActive = (id) => updateState({ staff: state.staff.map(s => s.id === id ? { ...s, active: !s.active } : s) });
+  // Edit name/mobile — synced via the recurring staff PATCH (name/mobile columns).
+  // The password hash is untouched, so they keep logging in (with the new mobile).
+  const saveStaffEdit = (id, name, mobile) => {
+    updateState({ staff: state.staff.map(s => s.id === id ? { ...s, name: name.trim(), mobile } : s) });
+    setEditStaff(null);
+  };
   const removeStaff = (id) => { if (confirm('Remove this staff member? They will no longer be able to log in.')) updateState({ staff: state.staff.filter(s => s.id !== id) }); };
   const resetPassword = async (id) => {
     const np = prompt('Enter a new password for this staff member (min 4 characters):');
@@ -101,6 +108,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
       </button>
 
       {showAdd && <AddStaffModal existing={state.staff} ownerMobile={cart?.ownerMobile} onAdd={addStaff} onClose={() => setShowAdd(false)} />}
+      {editStaff && <EditStaffModal staff={editStaff} existing={state.staff} ownerMobile={cart?.ownerMobile} onSave={saveStaffEdit} onClose={() => setEditStaff(null)} />}
 
       {/* Owner card */}
       <div style={{ background: brand.navy, color: '#fff', borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -124,6 +132,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
               <div style={{ fontSize: 12, color: colors.muted, marginTop: 3, fontWeight: 600 }}>Today: {st.paid} order{st.paid !== 1 ? 's' : ''} · ₹{st.revenue}{st.cancelled ? ` · ${st.cancelled} cancelled` : ''}</div>
             </div>
             <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => setEditStaff(s)} title="Edit name / mobile" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={14}/></button>
               <button onClick={() => resetPassword(s.id)} title="Reset password" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Lock size={14}/></button>
               <button onClick={() => toggleActive(s.id)} title={s.active ? 'Disable login' : 'Enable login'} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}>{s.active ? <EyeOff size={14}/> : <Eye size={14}/>}</button>
               <button onClick={() => removeStaff(s.id)} title="Remove" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 8, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
@@ -185,6 +194,48 @@ function AddStaffModal({ existing, ownerMobile, onAdd, onClose }) {
   );
 }
 
+function EditStaffModal({ staff, existing, ownerMobile, onSave, onClose }) {
+  const [name, setName] = useState(staff.name || '');
+  const [mobile, setMobile] = useState(staff.mobile || '');
+  const [error, setError] = useState('');
+
+  const submit = () => {
+    setError('');
+    if (!name.trim()) { setError('Enter a name.'); return; }
+    if (!/^\d{10}$/.test(mobile)) { setError('Enter a 10-digit mobile number.'); return; }
+    if (mobile === ownerMobile || existing.some(s => s.id !== staff.id && s.mobile === mobile)) { setError('That number is already registered.'); return; }
+    onSave(staff.id, name, mobile);
+  };
+
+  const inputStyle = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, boxSizing: 'border-box', marginBottom: 12 };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Edit Staff</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Update the name or login mobile. The password stays the same — they log in with the new number and their existing password. Use the 🔒 button to reset the password.</div>
+
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>NAME</div>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Ramesh" style={inputStyle} />
+
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>MOBILE NUMBER</div>
+        <input type="tel" inputMode="numeric" value={mobile} onChange={e => setMobile(e.target.value.replace(/\D/g, '').slice(0, 10))} placeholder="10-digit number" style={{ ...inputStyle, fontWeight: 700, letterSpacing: 1 }} />
+
+        {error && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
+            <AlertCircle size={15} /> {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={submit} style={{ flex: 2, padding: 14, background: colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save Changes</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── OWNER: REPORTS ───
 
-export { StaffRegistry, AddStaffModal };
+export { StaffRegistry, AddStaffModal, EditStaffModal };

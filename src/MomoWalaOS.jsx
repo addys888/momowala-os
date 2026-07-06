@@ -10,7 +10,7 @@ import { OwnerApp } from './screens/owner/OwnerApp';
 import { StaffApp } from './screens/Staff';
 import { StoreContext, useStore } from './store';
 
-const SESSION_MS = 8 * 60 * 60 * 1000; // stay logged in for an 8-hour shift
+const SESSION_MS = 24 * 60 * 60 * 1000; // stay logged in for a 24-hour cycle
 
 const liveSession = (s) => (s && (!s.expiresAt || s.expiresAt > Date.now())) ? s : null;
 
@@ -76,9 +76,11 @@ export default function App() {
   // when the merge must be computed from the freshest state (avoids stale-closure
   // clobbers under rapid/concurrent updates).
   const updateState = (updates) => setState(prev => ({ ...prev, ...(typeof updates === 'function' ? updates(prev) : updates) }));
-  // sess may carry a server-issued token + expiresAt (from app_login). Fall back
-  // to a local 8h window for the legacy path that doesn't return one.
-  const login = (sess) => setSession({ ...sess, expiresAt: sess.expiresAt || Date.now() + SESSION_MS });
+  // sess may carry a server-issued token (used for privileged RPCs). The session
+  // LIFETIME is client-authoritative — a fixed 24h window from login — so owner/
+  // staff aren't bounced mid-day by the shorter server token TTL. (The token may
+  // expire server-side sooner; that only affects password-change RPCs, not daily use.)
+  const login = (sess) => setSession({ ...sess, expiresAt: Date.now() + SESSION_MS });
   const logout = () => setSession(null);
 
   return (

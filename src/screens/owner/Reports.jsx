@@ -65,8 +65,10 @@ const diffColor = (n) => n === 0 ? '#0F7B0F' : (n < 0 ? '#C81E1E' : '#B5460B');
 
 
 function Reports({ state, updateState, cartId }) {
+  const [view, setView] = useState('revenue'); // 'revenue' | 'expense' sub-tab
   const [period, setPeriod] = useState('today');
   const [pickedDate, setPickedDate] = useState(TODAY); // for the single-day view
+  const [expMonth, setExpMonth] = useState(TODAY.slice(0, 7)); // YYYY-MM for the expense tab
   const [showExpense, setShowExpense] = useState(false);
   const [showAllItems, setShowAllItems] = useState(false);
   const [delExpense, setDelExpense] = useState(null); // expense pending delete-confirm
@@ -133,6 +135,15 @@ function Reports({ state, updateState, cartId }) {
   };
   const removeExpense = (id) => { updateState({ expenses: state.expenses.filter(e => e.id !== id) }); setDelExpense(null); };
 
+  // Expense sub-tab: every expense in the picked month, grouped by its logged
+  // date (newest first). Older entries carry under whatever date they were saved.
+  const monthExpenses = (state.expenses || []).filter(e => e.cartId === cartId && (e.date || '').startsWith(expMonth));
+  const monthTotal = monthExpenses.reduce((s, e) => s + e.amount, 0);
+  const expByDate = {};
+  monthExpenses.forEach(e => { (expByDate[e.date] = expByDate[e.date] || []).push(e); });
+  const expDates = Object.keys(expByDate).sort().reverse();
+  const monthLabel = istDateLabel(expMonth + '-01', { month: 'long', year: 'numeric' });
+
   const label = period === 'day'
     ? (pickedDate === TODAY ? 'Today' : istDateLabel(pickedDate, { weekday: 'short', day: 'numeric', month: 'short' }))
     : { today: 'Today', week: 'This week', month: 'This month' }[period];
@@ -141,6 +152,14 @@ function Reports({ state, updateState, cartId }) {
     <div>
       <SectionHeader title="Records" subtitle="Sales · expenses · wastage" />
 
+      {/* Earnings | Expenses sub-tabs */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        {[['revenue', '📈 Earnings'], ['expense', '💸 Expenses']].map(([k, lab]) => (
+          <button key={k} onClick={() => setView(k)} style={{ flex: 1, padding: '11px 0', background: view === k ? colors.ink : '#fff', color: view === k ? colors.primary : colors.ink, border: `1px solid ${view === k ? colors.ink : colors.border}`, borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>{lab}</button>
+        ))}
+      </div>
+
+      {view === 'revenue' && (<>
       {/* Period toggle */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
         {[['today', 'Today'], ['week', 'Week'], ['month', 'Month'], ['day', '📅 Pick day']].map(([k, lab]) => (
@@ -217,23 +236,6 @@ function Reports({ state, updateState, cartId }) {
         {wastage.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No wastage logged {label.toLowerCase()}. 👍</div>}
       </div>
 
-      {/* Expenses */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, marginTop: 4 }}>
-        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>EXPENSES — {label.toUpperCase()}</div>
-        <button onClick={() => setShowExpense(true)} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={14}/> Add</button>
-      </div>
-      {showExpense && <ExpenseModal onAdd={addExpense} onClose={() => setShowExpense(false)} />}
-      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden', marginBottom: 16 }}>
-        {expenses.slice().reverse().map(e => (
-          <div key={e.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{e.category}</div><div style={{ fontSize: 12, color: colors.muted }}>{e.date}{e.note ? ` · ${e.note}` : ''}</div></div>
-            <div style={{ fontWeight: 800 }}>₹{e.amount}</div>
-            <button onClick={() => setDelExpense(e)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
-          </div>
-        ))}
-        {expenses.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No expenses logged {label.toLowerCase()}. Tap Add to record stock/raw-material spend.</div>}
-      </div>
-
       {/* Reconciliation roll-up for the period (cash short/over, UPI, stock) */}
       {periodCloses.length > 0 && (<>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>RECONCILIATION GAPS — {label.toUpperCase()}</div>
@@ -294,6 +296,51 @@ function Reports({ state, updateState, cartId }) {
         })}
         {historyDates.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No sales history yet.</div>}
       </div>
+      </>)}
+
+      {view === 'expense' && (<>
+        {/* Month picker */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 12, color: colors.muted, fontWeight: 600 }}>Month:</span>
+          <input type="month" value={expMonth} max={TODAY.slice(0, 7)} onChange={e => setExpMonth(e.target.value || TODAY.slice(0, 7))}
+            style={{ flex: 1, padding: '9px 12px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 14, fontWeight: 700, boxSizing: 'border-box' }} />
+        </div>
+
+        {/* Month total + add */}
+        <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 14, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5 }}>{monthLabel.toUpperCase()} · TOTAL SPEND</div>
+            <div style={{ fontSize: 34, fontWeight: 900 }}>₹{monthTotal.toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{monthExpenses.length} entr{monthExpenses.length === 1 ? 'y' : 'ies'} · {expDates.length} day{expDates.length !== 1 ? 's' : ''}</div>
+          </div>
+          <button onClick={() => setShowExpense(true)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '10px 14px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}><Plus size={15}/> Add</button>
+        </div>
+        {showExpense && <ExpenseModal onAdd={addExpense} onClose={() => setShowExpense(false)} />}
+
+        {/* Date-wise groups, newest first */}
+        {expDates.map(date => {
+          const dayItems = expByDate[date];
+          const dayTotal = dayItems.reduce((s, e) => s + e.amount, 0);
+          return (
+            <div key={date} style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: brand.navy }}>{istDateLabel(date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                <div style={{ fontSize: 12, fontWeight: 800, color: colors.red }}>₹{dayTotal.toLocaleString('en-IN')}</div>
+              </div>
+              <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
+                {dayItems.map(e => (
+                  <div key={e.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{e.category}</div>{e.note && <div style={{ fontSize: 12, color: colors.muted }}>{e.note}</div>}</div>
+                    <div style={{ fontWeight: 800 }}>₹{e.amount}</div>
+                    <button onClick={() => setDelExpense(e)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        {monthExpenses.length === 0 && <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 32, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No expenses logged in {monthLabel}. Tap Add to record stock / raw-material spend.</div>}
+      </>)}
 
       {delExpense && (
         <EditModalShell title="Delete expense?" onClose={() => setDelExpense(null)} onSave={() => removeExpense(delExpense.id)} saveLabel="Delete" closeLabel="Keep" danger>

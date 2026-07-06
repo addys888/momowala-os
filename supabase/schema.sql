@@ -331,7 +331,7 @@ $$;
 -- (the cart-team login) checks owner then staff.
 create or replace function app_login(p_mobile text, p_password text, p_context text default 'team')
 returns json language plpgsql security definer set search_path = public, extensions as $$
-declare adm record; r record; tok uuid; exp timestamptz := now() + interval '8 hours';
+declare adm record; r record; tok uuid; exp timestamptz := now() + interval '24 hours';
 begin
   if p_context = 'admin' then
     select admin_mobile, admin_password_hash into adm from platform where id = 1;
@@ -365,7 +365,7 @@ grant execute on function app_login(text, text, text) to anon;
 -- FIRST-TIME password set (owner/admin), only allowed while the hash is null.
 create or replace function app_set_password(p_role text, p_mobile text, p_cart_id text, p_password text)
 returns json language plpgsql security definer set search_path = public, extensions as $$
-declare tok uuid; exp timestamptz := now() + interval '8 hours';
+declare tok uuid; exp timestamptz := now() + interval '24 hours';
 begin
   if length(p_password) < 4 then return json_build_object('status','error','message','Password must be at least 4 characters'); end if;
   if p_role = 'admin' then
