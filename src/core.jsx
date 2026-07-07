@@ -422,7 +422,7 @@ const freshInventory = () => JSON.parse(JSON.stringify(DEFAULT_INVENTORY));
 // Wala production launch so stale test rows aren't re-pushed. Accounts, carts
 // and menus are preserved.
 
-const DATA_EPOCH = '2026-06-18-momowala-launch';
+const DATA_EPOCH = '2026-07-07-testdata-cleanup';
 
 
 const getInitialState = () => {
