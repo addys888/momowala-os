@@ -194,7 +194,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         </div>
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} inv={inv} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} />}
-        {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onCancel={(id) => setCancelTarget(id)} />}
+        {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} settling={settling} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
       </div>
@@ -480,7 +480,7 @@ const priceVisible = (o) => {
   return Date.now() - t <= PRICE_MASK_MS;
 };
 
-function MyOrdersScreen({ orders, onCancel }) {
+function MyOrdersScreen({ orders, onSettle, onCancel, settling = new Set() }) {
   // Re-render every 20s so the cancel window AND the price-mask close on their own.
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick(n => n + 1), 20000); return () => clearInterval(t); }, []);
@@ -501,22 +501,38 @@ function MyOrdersScreen({ orders, onCancel }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {orders.slice().reverse().map(o => {
           const cancelled = o.payment === 'cancelled';
+          const pending = o.payment === 'pending';
+          const busy = settling.has(o.id);
           const showPrice = priceVisible(o);
           return (
-            <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 14, opacity: cancelled ? 0.7 : 1 }}>
+            <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${pending ? colors.accent : colors.border}`, padding: 14, opacity: cancelled ? 0.7 : 1 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
                 <div style={{ fontWeight: 800, fontSize: 16 }}>#{o.token} <span style={{ fontWeight: 500, fontSize: 12, color: colors.muted }}>· {o.time}</span></div>
                 <div style={{ fontWeight: 800, fontSize: 16, textDecoration: (cancelled && showPrice) ? 'line-through' : 'none', color: showPrice ? (cancelled ? colors.muted : colors.ink) : colors.muted }}>{showPrice ? `₹${o.total}` : '₹•••'}</div>
               </div>
               <OrderItemLines items={o.items} muted={cancelled} />
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
-                <span style={{ fontSize: 10, padding: '3px 9px', background: PAY_BADGE[o.payment].bg, color: PAY_BADGE[o.payment].fg, borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>{cancelled ? 'CANCELLED' : o.payment.toUpperCase()}</span>
-                {cancelled
-                  ? (o.cancelReason && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>{o.cancelReason}</span>)
-                  : staffCancellable(o)
-                    ? <button onClick={() => onCancel(o.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, color: colors.red, padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}><X size={13} /> Cancel</button>
-                    : (o.source === 'staff-entry' && <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>Cancel window closed</span>)}
-              </div>
+              {pending ? (
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                    <span style={{ fontSize: 10, padding: '3px 9px', background: PAY_BADGE.pending.bg, color: PAY_BADGE.pending.fg, borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>UNPAID</span>
+                    <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>Mark how they paid ↓</span>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => onSettle(o.id, 'cash')} disabled={busy} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>💵 Cash</button>
+                    <button onClick={() => onSettle(o.id, 'upi')} disabled={busy} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>📱 UPI</button>
+                    <button onClick={() => onCancel(o.id)} title="Cancel (no-show)" style={{ background: '#fff', color: colors.red, border: `1px solid ${colors.border}`, padding: 11, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>✕</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
+                  <span style={{ fontSize: 10, padding: '3px 9px', background: PAY_BADGE[o.payment].bg, color: PAY_BADGE[o.payment].fg, borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>{cancelled ? 'CANCELLED' : o.payment.toUpperCase()}</span>
+                  {cancelled
+                    ? (o.cancelReason && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>{o.cancelReason}</span>)
+                    : staffCancellable(o)
+                      ? <button onClick={() => onCancel(o.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, color: colors.red, padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5 }}><X size={13} /> Cancel</button>
+                      : (o.source === 'staff-entry' && <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>Cancel window closed</span>)}
+                </div>
+              )}
             </div>
           );
         })}
