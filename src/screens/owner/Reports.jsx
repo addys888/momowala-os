@@ -70,6 +70,7 @@ function Reports({ state, updateState, cartId }) {
   const [pickedDate, setPickedDate] = useState(TODAY); // for the single-day view
   const [expMonth, setExpMonth] = useState(TODAY.slice(0, 7)); // YYYY-MM for the expense tab
   const [showExpense, setShowExpense] = useState(false);
+  const [editExpenseItem, setEditExpenseItem] = useState(null); // expense being edited
   const [showAllItems, setShowAllItems] = useState(false);
   const [delExpense, setDelExpense] = useState(null); // expense pending delete-confirm
   const menu = menuFor(state, cartId);
@@ -134,6 +135,10 @@ function Reports({ state, updateState, cartId }) {
     setShowExpense(false);
   };
   const removeExpense = (id) => { updateState({ expenses: state.expenses.filter(e => e.id !== id) }); setDelExpense(null); };
+  const updateExpense = (id, category, amount, note, date = TODAY) => {
+    updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY } : e) });
+    setEditExpenseItem(null);
+  };
 
   // Expense sub-tab: every expense in the picked month, grouped by its logged
   // date (newest first). Older entries carry under whatever date they were saved.
@@ -315,7 +320,7 @@ function Reports({ state, updateState, cartId }) {
           </div>
           <button onClick={() => setShowExpense(true)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '10px 14px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}><Plus size={15}/> Add</button>
         </div>
-        {showExpense && <ExpenseModal onAdd={addExpense} onClose={() => setShowExpense(false)} />}
+        {showExpense && <ExpenseModal onSubmit={addExpense} onClose={() => setShowExpense(false)} />}
 
         {/* Date-wise groups, newest first */}
         {expDates.map(date => {
@@ -332,7 +337,8 @@ function Reports({ state, updateState, cartId }) {
                   <div key={e.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{e.category}</div>{e.note && <div style={{ fontSize: 12, color: colors.muted }}>{e.note}</div>}</div>
                     <div style={{ fontWeight: 800 }}>₹{e.amount}</div>
-                    <button onClick={() => setDelExpense(e)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
+                    <button onClick={() => setEditExpenseItem(e)} title="Edit" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={13} color={brand.navy}/></button>
+                    <button onClick={() => setDelExpense(e)} title="Delete" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
                   </div>
                 ))}
               </div>
@@ -341,6 +347,8 @@ function Reports({ state, updateState, cartId }) {
         })}
         {monthExpenses.length === 0 && <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 32, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No expenses logged in {monthLabel}. Tap Add to record stock / raw-material spend.</div>}
       </>)}
+
+      {editExpenseItem && <ExpenseModal initial={editExpenseItem} onSubmit={(c, a, n, d) => updateExpense(editExpenseItem.id, c, a, n, d)} onClose={() => setEditExpenseItem(null)} />}
 
       {delExpense && (
         <EditModalShell title="Delete expense?" onClose={() => setDelExpense(null)} onSave={() => removeExpense(delExpense.id)} saveLabel="Delete" closeLabel="Keep" danger>
@@ -352,15 +360,15 @@ function Reports({ state, updateState, cartId }) {
 }
 
 
-function ExpenseModal({ onAdd, onClose }) {
-  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
-  const [date, setDate] = useState(TODAY);
+function ExpenseModal({ initial, onSubmit, onClose }) {
+  const [category, setCategory] = useState(initial?.category || EXPENSE_CATEGORIES[0]);
+  const [amount, setAmount] = useState(initial ? String(initial.amount) : '');
+  const [note, setNote] = useState(initial?.note || '');
+  const [date, setDate] = useState(initial?.date || TODAY);
   const [error, setError] = useState('');
-  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onAdd(category, a, note.trim(), date); };
+  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onSubmit(category, a, note.trim(), date); };
   return (
-    <EditModalShell title="Add expense" onClose={onClose} onSave={submit} error={error}>
+    <EditModalShell title={initial ? 'Edit expense' : 'Add expense'} onClose={onClose} onSave={submit} error={error}>
       <div style={editLabel}>DATE</div>
       <input type="date" value={date} max={TODAY} onChange={e => setDate(e.target.value || TODAY)} style={editInput} />
       <div style={editLabel}>CATEGORY</div>

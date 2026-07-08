@@ -27,16 +27,22 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     if (Object.keys(newOps).length) persistInv(cartId, newOps, { ...state.inventory, [cartId]: newInv });
   };
 
-  const addStock = (type, qty) => {
+  // Accepts a batch: [{ type, qty }] so a delivery of all momo types is recorded
+  // in one go. Each type adds to its freezer, logs a STOCK_IN row, and sends one
+  // atomic freezer delta.
+  const addStock = (entries) => {
     const newInv = { ...inv };
-    newInv[type] = { ...newInv[type], freezer: newInv[type].freezer + qty };
-    const log = {
-      id: Date.now(), cartId, date: TODAY,
-      time: istTime(),
-      type: 'STOCK_IN', item: type, qty, note: `Added ${qty} pieces of ${labelFor(type)}`
-    };
-    setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
-    persistInv(cartId, { [type]: { df: qty } }, { ...state.inventory, [cartId]: newInv });
+    const logs = [];
+    const deltas = {};
+    entries.forEach(({ type, qty }, i) => {
+      if (!newInv[type] || !(qty > 0)) return;
+      newInv[type] = { ...newInv[type], freezer: newInv[type].freezer + qty };
+      logs.push({ id: Date.now() + i, cartId, date: TODAY, time: istTime(), type: 'STOCK_IN', item: type, qty, note: `Added ${qty} pieces of ${labelFor(type)}` });
+      deltas[type] = { df: qty };
+    });
+    if (!Object.keys(deltas).length) { setShowAddStock(false); return; }
+    setCartInv(newInv, { stockLogs: [...state.stockLogs, ...logs] });
+    persistInv(cartId, deltas, { ...state.inventory, [cartId]: newInv });
     setShowAddStock(false);
   };
 
@@ -351,32 +357,41 @@ function StockTypesModal({ stockTypes, onSave, onClose }) {
 
 
 function StockInModal({ stockTypes = [], onAdd, onClose }) {
-  const [type, setType] = useState(stockTypes[0]?.key || '');
-  const [qty, setQty] = useState(500);
+  // One quantity field per momo type — record a whole delivery in a single go.
+  const [qtys, setQtys] = useState(() => Object.fromEntries(stockTypes.map(st => [st.key, ''])));
+  const setQty = (k, v) => setQtys(p => ({ ...p, [k]: v.replace(/\D/g, '').slice(0, 6) }));
+  const entries = stockTypes.map(st => ({ type: st.key, label: st.label, qty: parseInt(qtys[st.key]) || 0 }));
+  const totalPcs = entries.reduce((s, e) => s + e.qty, 0);
+  const submit = () => { const nz = entries.filter(e => e.qty > 0).map(({ type, qty }) => ({ type, qty })); if (nz.length) onAdd(nz); };
+
+  const numInput = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, fontWeight: 700, boxSizing: 'border-box', textAlign: 'right' };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 16 }}>New Stock Delivery</div>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>New Stock Delivery</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Enter the pieces received for each momo type. Leave a type blank if none came in.</div>
 
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>ITEM TYPE</div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {stockTypes.map(st => (
-              <button key={st.key} onClick={() => setType(st.key)} style={{ flex: '1 1 30%', padding: 12, border: `2px solid ${type === st.key ? colors.ink : colors.border}`, background: type === st.key ? colors.ink : '#fff', color: type === st.key ? colors.primary : colors.ink, borderRadius: 10, fontWeight: 700, cursor: 'pointer', fontSize: 13 }}>{st.label}</button>
-            ))}
+        {stockTypes.map(st => (
+          <div key={st.key} style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ flex: 1, fontSize: 14, fontWeight: 700 }}>{st.label}</div>
+              <input type="number" inputMode="numeric" value={qtys[st.key]} onChange={e => setQty(st.key, e.target.value)} placeholder="0" style={{ ...numInput, width: 130 }} />
+            </div>
+            {(parseInt(qtys[st.key]) || 0) > 0 && (
+              <div style={{ fontSize: 11, color: colors.muted, marginTop: 3, textAlign: 'right' }}>{Math.floor((parseInt(qtys[st.key]) || 0) / 50)} packets ({(parseInt(qtys[st.key]) || 0) / 50 % 1 ? `+${(parseInt(qtys[st.key]) || 0) % 50} pcs` : 'exact'})</div>
+            )}
           </div>
-        </div>
+        ))}
 
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>QUANTITY (PIECES)</div>
-          <input type="number" value={qty} onChange={e => setQty(parseInt(e.target.value) || 0)} style={{ width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, fontWeight: 700, boxSizing: 'border-box' }} />
-          <div style={{ fontSize: 11, color: colors.muted, marginTop: 4 }}>1 packet = 50 pieces · So {Math.floor(qty/50)} packets</div>
+        <div style={{ background: colors.paper, borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <span style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>TOTAL ADDED</span>
+          <span style={{ fontSize: 16, fontWeight: 900 }}>{totalPcs} pcs · {Math.floor(totalPcs / 50)} packets</span>
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={() => onAdd(type, qty)} style={{ flex: 2, padding: 14, background: colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Confirm Delivery</button>
+          <button onClick={submit} disabled={totalPcs === 0} style={{ flex: 2, padding: 14, background: totalPcs === 0 ? colors.border : colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: totalPcs === 0 ? 'not-allowed' : 'pointer' }}>Confirm Delivery</button>
         </div>
       </div>
     </div>
