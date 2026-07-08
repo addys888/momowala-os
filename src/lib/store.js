@@ -69,8 +69,8 @@ const rowToLog = ({ inserted_at, cart_id, ...rest }) => ({ ...rest, cartId: cart
 
 const wastageToRow = (w) => ({ id: w.id, cart_id: w.cartId ?? null, date: w.date, time: w.time, stock_key: w.stockKey, label: w.label, qty: w.qty, reason: w.reason, staff: w.staff });
 const rowToWastage = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, date: r.date, time: r.time, stockKey: r.stock_key, label: r.label, qty: r.qty, reason: r.reason, staff: r.staff });
-const expenseToRow = (e) => ({ id: e.id, cart_id: e.cartId ?? null, date: e.date, category: e.category, amount: e.amount, note: e.note ?? null });
-const rowToExpense = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, date: r.date, category: r.category, amount: r.amount, note: r.note ?? undefined });
+const expenseToRow = (e) => ({ id: e.id, cart_id: e.cartId ?? null, date: e.date, category: e.category, amount: e.amount, note: e.note ?? null, fund: e.fund ?? null });
+const rowToExpense = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, date: r.date, category: r.category, amount: r.amount, note: r.note ?? undefined, fund: r.fund ?? undefined });
 
 const cartToRow = (c) => ({
   id: c.id, name: c.name, tagline: c.tagline, cuisine: c.cuisine, location: c.location,
@@ -380,6 +380,17 @@ async function pushState(state) {
       const { id, ...rest } = r;
       return supabase.from(table).update(rest).eq('id', id);
     });
+    // Expenses upsert, resilient to the `fund` column not existing yet (before
+    // the migration is run) — retry without it rather than failing the sync.
+    const mergeExpensesResilient = async (rows) => {
+      if (!rows.length) return { error: null };
+      let r = await supabase.from('expenses').upsert(rows, { onConflict: 'id' });
+      if (r.error && /fund|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
+        const stripped = rows.map(({ fund, ...rest }) => rest);
+        r = await supabase.from('expenses').upsert(stripped, { onConflict: 'id' });
+      }
+      return r;
+    };
     // Day-close append, resilient to the `stock` column not existing yet.
     const appendDayClose = async (rows) => {
       if (!rows.length) return { error: null };
@@ -397,7 +408,7 @@ async function pushState(state) {
         append('cart_loadings', state.cartLoadings.map(logToRow)),
         appendDayClose(state.dayCloseLogs.map(dayCloseToRow)),
         append('wastage_logs', (state.wastageLogs || []).map(wastageToRow)),
-        merge('expenses', (state.expenses || []).map(expenseToRow)),
+        mergeExpensesResilient((state.expenses || []).map(expenseToRow)),
         ...updateRows('staff', state.staff.map(staffToRow)),
         ...updateRows('carts', state.carts.map(cartToRow)),
         // platform + password hashes are never written from the browser — those

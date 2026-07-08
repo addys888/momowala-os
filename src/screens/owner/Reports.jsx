@@ -129,14 +129,14 @@ function Reports({ state, updateState, cartId }) {
   const maxQty = soldItems[0]?.qty || 1;
   const shownItems = showAllItems ? soldItems : soldItems.slice(0, 5);
 
-  const addExpense = (category, amount, note, date = TODAY) => {
-    const e = { id: Date.now(), cartId, date: date || TODAY, category, amount, note };
+  const addExpense = (category, amount, note, date = TODAY, fund = 'cart') => {
+    const e = { id: Date.now(), cartId, date: date || TODAY, category, amount, note, fund };
     updateState({ expenses: [...(state.expenses || []), e] });
     setShowExpense(false);
   };
   const removeExpense = (id) => { updateState({ expenses: state.expenses.filter(e => e.id !== id) }); setDelExpense(null); };
-  const updateExpense = (id, category, amount, note, date = TODAY) => {
-    updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY } : e) });
+  const updateExpense = (id, category, amount, note, date = TODAY, fund = 'cart') => {
+    updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY, fund } : e) });
     setEditExpenseItem(null);
   };
 
@@ -148,6 +148,11 @@ function Reports({ state, updateState, cartId }) {
   monthExpenses.forEach(e => { (expByDate[e.date] = expByDate[e.date] || []).push(e); });
   const expDates = Object.keys(expByDate).sort().reverse();
   const monthLabel = istDateLabel(expMonth + '-01', { month: 'long', year: 'numeric' });
+  // Funding-source split: 'personal' = borrowed from the owner's Axis account,
+  // 'cart' (or unset legacy) = paid from cart earnings (Kotak/UPI).
+  const axisMonth = monthExpenses.filter(e => e.fund === 'personal').reduce((s, e) => s + e.amount, 0);
+  const cartMonth = monthTotal - axisMonth;
+  const axisAllTime = (state.expenses || []).filter(e => e.cartId === cartId && e.fund === 'personal').reduce((s, e) => s + e.amount, 0);
 
   const label = period === 'day'
     ? (pickedDate === TODAY ? 'Today' : istDateLabel(pickedDate, { weekday: 'short', day: 'numeric', month: 'short' }))
@@ -322,6 +327,21 @@ function Reports({ state, updateState, cartId }) {
         </div>
         {showExpense && <ExpenseModal onSubmit={addExpense} onClose={() => setShowExpense(false)} />}
 
+        {/* Funding-source split: cart earnings vs personal (Axis) credit */}
+        {monthTotal > 0 && (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 14px' }}>
+              <div style={{ fontSize: 11, color: colors.muted, fontWeight: 700 }}>💳 Cart (Kotak/UPI)</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: colors.green }}>₹{cartMonth.toLocaleString('en-IN')}</div>
+            </div>
+            <div style={{ background: axisMonth > 0 ? '#FFF4E5' : '#fff', border: `1px solid ${axisMonth > 0 ? '#F0C27B' : colors.border}`, borderRadius: 12, padding: '12px 14px' }}>
+              <div style={{ fontSize: 11, color: colors.muted, fontWeight: 700 }}>🏦 Axis credit (borrowed)</div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: axisMonth > 0 ? '#B5460B' : colors.muted }}>₹{axisMonth.toLocaleString('en-IN')}</div>
+              {axisAllTime > 0 && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 2 }}>all-time: ₹{axisAllTime.toLocaleString('en-IN')}</div>}
+            </div>
+          </div>
+        )}
+
         {/* Date-wise groups, newest first */}
         {expDates.map(date => {
           const dayItems = expByDate[date];
@@ -335,7 +355,10 @@ function Reports({ state, updateState, cartId }) {
               <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
                 {dayItems.map(e => (
                   <div key={e.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <div style={{ flex: 1 }}><div style={{ fontWeight: 700, fontSize: 14 }}>{e.category}</div>{e.note && <div style={{ fontSize: 12, color: colors.muted }}>{e.note}</div>}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>{e.category}{e.fund === 'personal' && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, padding: '2px 6px', borderRadius: 6, background: '#FFF4E5', color: '#B5460B' }}>🏦 AXIS</span>}</div>
+                      {e.note && <div style={{ fontSize: 12, color: colors.muted }}>{e.note}</div>}
+                    </div>
                     <div style={{ fontWeight: 800 }}>₹{e.amount}</div>
                     <button onClick={() => setEditExpenseItem(e)} title="Edit" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={13} color={brand.navy}/></button>
                     <button onClick={() => setDelExpense(e)} title="Delete" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
@@ -365,10 +388,17 @@ function ExpenseModal({ initial, onSubmit, onClose }) {
   const [amount, setAmount] = useState(initial ? String(initial.amount) : '');
   const [note, setNote] = useState(initial?.note || '');
   const [date, setDate] = useState(initial?.date || TODAY);
+  const [fund, setFund] = useState(initial?.fund || 'cart'); // 'cart' (Kotak/UPI) | 'personal' (Axis credit)
   const [error, setError] = useState('');
-  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onSubmit(category, a, note.trim(), date); };
+  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onSubmit(category, a, note.trim(), date, fund); };
   return (
     <EditModalShell title={initial ? 'Edit expense' : 'Add expense'} onClose={onClose} onSave={submit} error={error}>
+      <div style={editLabel}>PAID FROM</div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        {[['cart', '💳 Cart (Kotak/UPI)'], ['personal', '🏦 Personal (Axis credit)']].map(([k, lab]) => (
+          <button key={k} onClick={() => setFund(k)} style={{ flex: 1, padding: '10px 6px', borderRadius: 10, border: `2px solid ${fund === k ? colors.ink : colors.border}`, background: fund === k ? colors.ink : '#fff', color: fund === k ? colors.primary : colors.ink, fontWeight: 700, fontSize: 12, cursor: 'pointer', lineHeight: 1.3 }}>{lab}</button>
+        ))}
+      </div>
       <div style={editLabel}>DATE</div>
       <input type="date" value={date} max={TODAY} onChange={e => setDate(e.target.value || TODAY)} style={editInput} />
       <div style={editLabel}>CATEGORY</div>

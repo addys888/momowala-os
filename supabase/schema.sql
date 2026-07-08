@@ -162,8 +162,11 @@ create table if not exists expenses (
   category text,
   amount integer,
   note text,
+  fund text,          -- 'cart' (Kotak/UPI earnings) | 'personal' (Axis credit)
   inserted_at timestamptz not null default now()
 );
+-- back-fill the funding-source column on existing installs
+alter table expenses add column if not exists fund text;
 
 -- Per-cart, per-day order token counter. Tokens are allocated atomically by
 -- the next_order_token() RPC so two devices ordering at once can never get the
