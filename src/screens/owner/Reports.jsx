@@ -371,7 +371,7 @@ function Reports({ state, updateState, cartId }) {
         {monthExpenses.length === 0 && <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 32, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No expenses logged in {monthLabel}. Tap Add to record stock / raw-material spend.</div>}
       </>)}
 
-      {editExpenseItem && <ExpenseModal initial={editExpenseItem} onSubmit={(c, a, n, d) => updateExpense(editExpenseItem.id, c, a, n, d)} onClose={() => setEditExpenseItem(null)} />}
+      {editExpenseItem && <ExpenseModal initial={editExpenseItem} onSubmit={(c, a, n, d, f) => updateExpense(editExpenseItem.id, c, a, n, d, f)} onClose={() => setEditExpenseItem(null)} />}
 
       {delExpense && (
         <EditModalShell title="Delete expense?" onClose={() => setDelExpense(null)} onSave={() => removeExpense(delExpense.id)} saveLabel="Delete" closeLabel="Keep" danger>
