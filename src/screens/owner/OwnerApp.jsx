@@ -70,6 +70,10 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
 
 function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
+  // Uncollected (unpaid) orders across ALL days — money not yet collected and not
+  // counted in revenue. Surfaced so nothing rolls past its day unseen.
+  const uncollected = (state?.orders || []).filter(o => o.cartId === cartId && o.payment === 'pending').sort((a, b) => a.id - b.id);
+  const uncollectedTotal = uncollected.reduce((s, o) => s + o.total, 0);
   const lowTypes = stockTypes.filter(st => (inv[st.key]?.freezer ?? 0) < 100);
   const openState = cartOpenState(cart);
 
@@ -215,9 +219,26 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
         </div>
       )}
 
-      {/* Pending QR orders awaiting payment */}
-      {pendingCount > 0 && (
-        <Alert type="warn" title={`${pendingCount} order${pendingCount > 1 ? 's' : ''} awaiting payment`} message="Customer QR orders not yet collected. Staff settles these in the Pending tab — stock and revenue update only after payment." />
+      {/* Uncollected orders — all days, not just today. Unpaid orders aren't in
+          revenue until settled; this makes sure none stay hidden if they roll
+          past their day. Staff collect them in the Pending tab. */}
+      {uncollected.length > 0 && (
+        <div style={{ background: '#fff', border: `1px solid ${colors.accent}`, borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: '#FFF4E5' }}>
+            <div style={{ fontWeight: 800, fontSize: 14, color: '#B5460B' }}>⏳ {uncollected.length} uncollected order{uncollected.length > 1 ? 's' : ''}</div>
+            <div style={{ fontWeight: 900, fontSize: 15, color: '#B5460B' }}>₹{uncollectedTotal.toLocaleString('en-IN')}</div>
+          </div>
+          {uncollected.map(o => (
+            <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: `1px solid ${colors.border}` }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>#{o.token} · ₹{o.total}</div>
+                <div style={{ fontSize: 11.5, color: colors.muted }}>{o.date !== TODAY ? `${o.date} · ` : ''}{o.time}{o.staff ? ` · ${o.staff}` : ''}{o.source === 'staff-entry' ? ' · counter' : ' · QR'}</div>
+              </div>
+              <span style={{ fontSize: 10, padding: '3px 9px', background: '#FFF1E7', color: '#FF4D00', borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>UNPAID</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: colors.muted, padding: '8px 14px', borderTop: `1px solid ${colors.border}` }}>Staff collect these in the Pending tab. Revenue updates only after payment.</div>
+        </div>
       )}
 
       {/* Stock alerts — compact one-line chip */}

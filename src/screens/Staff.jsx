@@ -52,7 +52,10 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   // Staff only ever sees orders for their own cart.
   const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);
   const myOrders = todayOrders.filter(o => o.staff === staffName);
-  const pendingOrders = todayOrders.filter(o => o.payment === 'pending');
+  // Uncollected orders across ALL days — an unpaid order that rolled past its
+  // day must still be collectable, or it's lost (invisible to owner revenue too).
+  // Oldest first so stuck ones surface at the top.
+  const pendingOrders = state.orders.filter(o => o.cartId === cartId && o.payment === 'pending').sort((a, b) => a.id - b.id);
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
 
   const placeOrder = async (payment) => {
@@ -292,7 +295,7 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
             <div style={{ padding: 16 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                 <div style={{ fontSize: 22, fontWeight: 900 }}>#{o.token}</div>
-                <div style={{ fontSize: 12, color: colors.muted }}>{o.time} · {o.source === 'staff-entry' ? '⏳ counter · unpaid' : 'self-order'}</div>
+                <div style={{ fontSize: 12, color: colors.muted }}>{o.date !== TODAY && <span style={{ color: colors.red, fontWeight: 700 }}>{o.date} · </span>}{o.time} · {o.source === 'staff-entry' ? '⏳ counter · unpaid' : 'self-order'}</div>
               </div>
               {(o.customerName || o.customerPhone) && (
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -313,7 +316,7 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
                 ))}
               </div>
 
-              <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>{o.stockDeducted ? 'Mark how the customer paid — Cash or UPI.' : 'Only after receiving money — this serves the order & deducts stock'}</div>
+              <div style={{ fontSize: 11, color: colors.accent, marginBottom: 8, fontWeight: 700 }}>{(o.stockDeducted || o.source === 'staff-entry') ? 'Mark how the customer paid — Cash or UPI.' : 'Only after receiving money — this serves the order & deducts stock'}</div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => onSettle(o.id, 'cash')} disabled={busy} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>💵 Cash</button>
                 <button onClick={() => onSettle(o.id, 'upi')} disabled={busy} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>📱 UPI</button>

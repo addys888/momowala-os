@@ -3,7 +3,7 @@ import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock,
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from './lib/store';
 import { AdminApp } from './screens/Admin';
-import { TODAY, getInitialState, normalize } from './core';
+import { TODAY, localDate, getInitialState, normalize } from './core';
 import { CartListing, CartMenu } from './screens/Customer';
 import { AdminLogin, TeamLogin } from './screens/Login';
 import { OwnerApp } from './screens/owner/OwnerApp';
@@ -25,6 +25,19 @@ export default function App() {
     loadCloudState().then(cloud => {
       if (cloud) setState(prev => normalize(mergeStates(prev, cloud)));
     });
+  }, []);
+
+  // Roll over the business day. TODAY is fixed at page load, so a device left
+  // open across midnight keeps showing the previous day as "today" (staff sees
+  // yesterday's orders, owner doesn't). Reload when the IST date changes — at
+  // midnight the cart is closed, so this is safe; also re-check on focus so a
+  // phone woken the next day refreshes before use.
+  useEffect(() => {
+    const check = () => { if (localDate() !== TODAY) window.location.reload(); };
+    const t = setInterval(check, 60000);
+    document.addEventListener('visibilitychange', check);
+    window.addEventListener('focus', check);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); };
   }, []);
 
   // While a staff member is logged in, poll their cart's orders so new customer
