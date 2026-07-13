@@ -283,18 +283,33 @@ export async function loadCloudState() {
       if (r.error) r = await supabase.from(table).select(cols).order(order);
       return r;
     };
+    // PostgREST caps a single response at 1000 rows. Page through so growing
+    // tables (orders especially) return in FULL — otherwise once a table passes
+    // 1000 rows the newest orders silently drop and the owner goes revenue-blind.
+    const fetchAll = async (table, order = 'id') => {
+      const pageSize = 1000;
+      let all = [], from = 0;
+      for (;;) {
+        const r = await supabase.from(table).select('*').order(order).range(from, from + pageSize - 1);
+        if (r.error) return { data: all, error: r.error };
+        all = all.concat(r.data || []);
+        if (!r.data || r.data.length < pageSize) break;
+        from += pageSize;
+      }
+      return { data: all, error: null };
+    };
     const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses] = await Promise.all([
-      supabase.from('orders').select('*').order('id'),
-      supabase.from('stock_logs').select('*').order('id'),
-      supabase.from('cart_loadings').select('*').order('id'),
-      supabase.from('day_close_logs').select('*').order('id'),
+      fetchAll('orders'),
+      fetchAll('stock_logs'),
+      fetchAll('cart_loadings'),
+      fetchAll('day_close_logs'),
       supabase.from('inventory').select('*').eq('id', 1).maybeSingle(),
       resilient('staff', STAFF_COLS, 'id'),
       resilient('carts', CART_COLS, 'created_at'),
       supabase.from('platform').select('*').eq('id', 1).maybeSingle(),
       supabase.from('menus').select('*').eq('id', 1).maybeSingle(),
-      supabase.from('wastage_logs').select('*').order('id'),
-      supabase.from('expenses').select('*').order('id'),
+      fetchAll('wastage_logs'),
+      fetchAll('expenses'),
     ]);
     // platform is intentionally locked from anon once the lockdown is applied,
     // so it's excluded from the hard-fail check (login goes through app_login).
