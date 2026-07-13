@@ -40,10 +40,11 @@ export default function App() {
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); };
   }, []);
 
-  // While a staff member is logged in, poll their cart's orders so new customer
-  // QR orders appear without a manual refresh (and the StaffApp can alert).
+  // While staff OR owner is logged in, poll the cart's today orders so new
+  // orders appear without a manual refresh — keeps the staff screen (and alert)
+  // AND the owner dashboard/reports live, so two devices don't drift apart.
   useEffect(() => {
-    if (session?.role !== 'staff' || !session.cartId) return;
+    if (!session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) return;
     let alive = true;
     const tick = async () => {
       const fresh = await loadCartOrders(session.cartId, TODAY);
