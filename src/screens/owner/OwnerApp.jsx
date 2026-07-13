@@ -116,7 +116,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
     const text =
       `🥟 ${cart?.name || 'Cart'} — ${istDateLabel(new Date(), { weekday: 'short', day: 'numeric', month: 'short' })}\n` +
       `Revenue: ₹${todayRevenue.toLocaleString('en-IN')}  (💵 ₹${cashRevenue} · 📱 ₹${upiRevenue})\n` +
-      `Orders: ${todayOrders.length} · Pieces sold: ${piecesSold}\n` +
+      `Orders: ${todayOrders.filter(isPaid).length} · Pieces sold: ${piecesSold}\n` +
       `Expenses: ₹${todayExpenses.toLocaleString('en-IN')} · Net: ₹${todayNet.toLocaleString('en-IN')}`;
     try { if (navigator.share) { await navigator.share({ title: `${cart?.name} — today`, text }); return; } } catch { /* cancelled */ }
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
@@ -164,7 +164,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
           )}
         </div>
         <div style={{ fontSize: 42, fontWeight: 900, lineHeight: 1 }}>₹{todayRevenue.toLocaleString('en-IN')}</div>
-        <div style={{ fontSize: 13, marginTop: 8, opacity: 0.8 }}>{todayOrders.length} orders · {piecesSold} pieces sold</div>
+        <div style={{ fontSize: 13, marginTop: 8, opacity: 0.8 }}>{todayOrders.filter(isPaid).length} orders · {piecesSold} pieces sold</div>
         <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,214,10,0.2)', fontSize: 13 }}>
           <div><span style={{ opacity: 0.7 }}>Expenses </span><strong>₹{todayExpenses.toLocaleString('en-IN')}</strong></div>
           <div><span style={{ opacity: 0.7 }}>Net profit </span><strong style={{ color: todayNet >= 0 ? '#7CE38B' : '#FF8A8A' }}>₹{todayNet.toLocaleString('en-IN')}</strong></div>
