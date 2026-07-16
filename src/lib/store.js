@@ -160,14 +160,29 @@ const unionById = (a = [], b = []) => {
   return [...seen.values()].sort((x, y) => x.id - y.id);
 };
 
-// Orders are mutable (pending → paid). When the same id exists on both sides,
-// prefer the settled copy so a payment recorded anywhere wins over 'pending'.
+// Orders move one-way through states: pending → paid (cash/upi) → cancelled.
+// When the same id exists on both sides, keep the copy that is FURTHEST along
+// that chain so a later transition (settle, cancel-after-settle) always wins.
+// The old rule ("keep local if non-pending") froze the first settled copy a
+// device ever saw: with the Unpaid flow's multi-step transitions, a later
+// cancel/settle never propagated, localStorage kept the stale copy, and
+// devices drifted apart by a stuck order that no reload could fix.
+// Equal-rank conflicts (e.g. cash vs upi) resolve by the later settledAt.
+const PAY_RANK = { pending: 0, cash: 1, upi: 1, cancelled: 2 };
 export const mergeOrders = (a = [], b = []) => {
   const seen = new Map();
   [...a, ...b].forEach((o) => {
     const prev = seen.get(o.id);
     if (!prev) { seen.set(o.id, o); return; }
-    const better = prev.payment !== 'pending' ? prev : o;
+    const rPrev = PAY_RANK[prev.payment] ?? 0;
+    const rNew = PAY_RANK[o.payment] ?? 0;
+    let better = prev;
+    if (rNew > rPrev) better = o;
+    else if (rNew === rPrev) {
+      const tPrev = prev.settledAt ? Date.parse(prev.settledAt) : 0;
+      const tNew = o.settledAt ? Date.parse(o.settledAt) : 0;
+      if (tNew > tPrev) better = o;
+    }
     seen.set(o.id, better);
   });
   return [...seen.values()].sort((x, y) => x.id - y.id);
