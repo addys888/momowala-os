@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, slugify } from '../../core';
+import { TODAY, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, plateLedger, platesPerPacketFor, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
 function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const [showAddStock, setShowAddStock] = useState(false);
+  const [showPlates, setShowPlates] = useState(false);
   const [showTypes, setShowTypes] = useState(false);
   const [adjusting, setAdjusting] = useState(null); // { key, label } | null
   const [moving, setMoving] = useState(null); // { type, label, dir:'load'|'return', qty } | null
@@ -44,6 +45,21 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     setCartInv(newInv, { stockLogs: [...state.stockLogs, ...logs] });
     persistInv(cartId, deltas, { ...state.inventory, [cartId]: newInv });
     setShowAddStock(false);
+  };
+
+  // Record a plate handover to staff (theft-audit supply). Appends a
+  // PLATE_SUPPLY stock log (synced, append-only) and saves the packet size to
+  // the cart's menu config when the owner changes it.
+  const supplyPlates = (packets, perPacket) => {
+    const plates = packets * perPacket;
+    if (!(plates > 0)) { setShowPlates(false); return; }
+    const log = { id: Date.now(), cartId, date: TODAY, time: istTime(), type: 'PLATE_SUPPLY', item: 'plates', qty: plates, note: `${packets} packet${packets > 1 ? 's' : ''} × ${perPacket} plates` };
+    const menu = menuFor(state, cartId);
+    updateState({
+      stockLogs: [...state.stockLogs, log],
+      ...(perPacket !== platesPerPacketFor(state, cartId) ? { menus: { ...state.menus, [cartId]: { ...menu, platesPerPacket: perPacket } } } : {}),
+    });
+    setShowPlates(false);
   };
 
   // Adjust freezer up or down (wastage, spoilage, recount correction).
@@ -129,7 +145,17 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
         <Plus size={18}/> Record New Supplier Delivery{stockTypes.length === 0 ? ' — add stock types first' : ''}
       </button>
 
+      {/* Plate handover — the theft-audit supply. Every momo portion leaves on a
+          plate, so the plate count independently validates punched orders. */}
+      {(() => { const led = plateLedger(state, cartId, TODAY); return (
+        <button onClick={() => setShowPlates(true)}
+          style={{ width: '100%', background: '#fff', color: colors.ink, padding: 14, borderRadius: 12, border: `1.5px solid ${colors.ink}`, fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          🍽️ Give Plates to Staff{(led.supplied > 0 || led.opening > 0) ? ` — today: ${led.supplied} given · ${led.expected} should remain` : ''}
+        </button>
+      ); })()}
+
       {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
+      {showPlates && <PlateSupplyModal defaultPerPacket={platesPerPacketFor(state, cartId)} onAdd={supplyPlates} onClose={() => setShowPlates(false)} />}
       {showTypes && <StockTypesModal stockTypes={stockTypes} onSave={setStockTypes} onClose={() => setShowTypes(false)} />}
       {adjusting && <AdjustStockModal label={adjusting.label} current={inv[adjusting.key]?.freezer ?? 0} onApply={(delta, reason) => adjustStock(adjusting.key, delta, reason)} onClose={() => setAdjusting(null)} />}
       {moving && <MoveStockConfirm move={moving} bucket={inv[moving.type] || { freezer: 0, cart: 0 }} onConfirm={confirmMove} onClose={() => setMoving(null)} />}
@@ -398,6 +424,46 @@ function StockInModal({ stockTypes = [], onAdd, onClose }) {
   );
 }
 
+function PlateSupplyModal({ defaultPerPacket = 24, onAdd, onClose }) {
+  const [packets, setPackets] = useState('');
+  const [perPacket, setPerPacket] = useState(String(defaultPerPacket));
+  const nPackets = parseInt(packets) || 0;
+  const nPer = parseInt(perPacket) || 0;
+  const total = nPackets * nPer;
+
+  const numInput = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, fontWeight: 700, boxSizing: 'border-box', textAlign: 'right' };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>🍽️ Give Plates to Staff</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Every momo portion is served on one plate, so the plate count independently checks that all servings were punched. Count leftover plates at day-close.</div>
+
+        <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>PACKETS GIVEN</div>
+            <input type="number" inputMode="numeric" value={packets} onChange={e => setPackets(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="e.g. 3" style={numInput} autoFocus />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>PLATES / PACKET</div>
+            <input type="number" inputMode="numeric" value={perPacket} onChange={e => setPerPacket(e.target.value.replace(/\D/g, '').slice(0, 4))} style={numInput} />
+          </div>
+        </div>
+
+        <div style={{ background: colors.paper, borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <span style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>TOTAL PLATES</span>
+          <span style={{ fontSize: 16, fontWeight: 900 }}>{total}</span>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => onAdd(nPackets, nPer)} disabled={total === 0} style={{ flex: 2, padding: 14, background: total === 0 ? colors.border : colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: total === 0 ? 'not-allowed' : 'pointer' }}>Confirm Handover</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── OWNER: RECONCILIATION ───
 
-export { InventoryView, FreezerItem, MoveStockConfirm, ConsumableModal, ADJUST_REASONS, AdjustStockModal, StockTypesModal, StockInModal };
+export { InventoryView, FreezerItem, MoveStockConfirm, ConsumableModal, ADJUST_REASONS, AdjustStockModal, StockTypesModal, StockInModal, PlateSupplyModal };

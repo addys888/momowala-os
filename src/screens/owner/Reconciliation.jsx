@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, colors, isPaid, persistInv } from '../../core';
+import { TODAY, colors, isPaid, persistInv, plateLedger } from '../../core';
 import { SectionHeader } from '../../components/shared';
 
 function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold }) {
@@ -9,10 +9,17 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
   const [physicalCash, setPhysicalCash] = useState('');
   const [phonePeAmount, setPhonePeAmount] = useState('');
   const [remaining, setRemaining] = useState({}); // { [stockKey]: '' }
+  const [platesLeft, setPlatesLeft] = useState(''); // counted plates (optional)
   const [closed, setClosed] = useState(false);
 
   const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - cashRevenue : null;
   const upiDiff = phonePeAmount !== '' ? parseInt(phonePeAmount) - upiRevenue : null;
+  // Plate audit: plates are an independent check on punching — a shortfall vs
+  // expected means servings that were never punched. Optional, shown only when
+  // plates were supplied/carried; a missing count just skips the day's audit.
+  const plates = plateLedger(state, cartId, TODAY);
+  const platesActive = plates.supplied > 0 || plates.opening > 0;
+  const platesDiff = platesLeft !== '' ? parseInt(platesLeft) - plates.expected : null;
   // Stock is deducted as orders settle, so expected remaining = current cart count.
   const stockRows = stockTypes.map(st => {
     const expected = inv[st.key]?.cart ?? 0;
@@ -34,7 +41,12 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
       systemUpi: upiRevenue,
       phonePeAmount: parseInt(phonePeAmount) || 0,
       upiDiff: upiDiff || 0,
-      stock: stockRows.map(r => ({ key: r.key, label: r.label, expected: r.expected, actual: parseInt(r.val) || 0, diff: r.diff || 0 })),
+      stock: [
+        ...stockRows.map(r => ({ key: r.key, label: r.label, expected: r.expected, actual: parseInt(r.val) || 0, diff: r.diff || 0 })),
+        // Plate-audit row rides in the stock array (key '_plates') so it needs
+        // no schema change; Reports filters it out of the momo-stock math.
+        ...(platesActive && platesLeft !== '' ? [{ key: '_plates', label: 'Plates', expected: plates.expected, actual: parseInt(platesLeft) || 0, diff: platesDiff || 0, opening: plates.opening, supplied: plates.supplied, used: plates.used }] : []),
+      ],
       piecesSold,
       revenue: cashRevenue + upiRevenue,
       closedAt: new Date().toISOString()
@@ -121,6 +133,19 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
           unit="pcs"
         />
       ))}
+
+      {/* Plate audit — optional; counts leftover plates against the ledger */}
+      {platesActive && (
+        <ReconcileBlock
+          title="🍽️ Plates (theft check)"
+          systemValue={`${plates.expected} expected`}
+          label={`Plates left on cart — count them (${plates.opening > 0 ? `${plates.opening} carried + ` : ''}${plates.supplied} given − ${plates.used} served)`}
+          value={platesLeft}
+          onChange={setPlatesLeft}
+          diff={platesDiff}
+          unit=" plates"
+        />
+      )}
 
       {/* Close day button */}
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', background: '#FFF7E0', border: `1px solid #FFE08A`, borderRadius: 10, padding: '10px 12px', marginTop: 16, fontSize: 12.5, color: '#8A6D00' }}>

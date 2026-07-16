@@ -186,6 +186,38 @@ const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
 
 const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
 
+// ─── PLATE AUDIT (theft validation) ───
+// Every momo portion leaves on one disposable plate, so plates are a physical
+// audit trail: if servings happen without being punched, the plate count falls
+// but punched portions don't — the gap exposes unpunched sales.
+const PLATES_PER_PACKET_DEFAULT = 24;
+const platesPerPacketFor = (state, cartId) => menuFor(state, cartId).platesPerPacket || PLATES_PER_PACKET_DEFAULT;
+// One plate per momo portion (each qty of each momo line); lassi/add-ons none.
+const platesForOrder = (o, menuItems) =>
+  (o.items || []).reduce((s, it) => s + ((menuItems || []).some(m => m.id === it.id) ? it.qty : 0), 0);
+// Plates are used when the food is served — same moments stock deducts:
+// paid orders, and unpaid counter orders (served at punch). Cancelled: none.
+const usesPlates = (o) => isPaid(o) || (o.payment === 'pending' && o.source === 'staff-entry');
+// Daily plate ledger with carry-over: opening = plates counted at the most
+// recent day-close before `date`; supplied = today's PLATE_SUPPLY logs;
+// used = portions served today. expected = what should physically remain.
+function plateLedger(state, cartId, date) {
+  const menuItems = menuFor(state, cartId).items || [];
+  const supplied = (state.stockLogs || [])
+    .filter(l => l.cartId === cartId && l.type === 'PLATE_SUPPLY' && l.date === date)
+    .reduce((s, l) => s + (l.qty || 0), 0);
+  const used = (state.orders || [])
+    .filter(o => o.cartId === cartId && o.date === date && usesPlates(o))
+    .reduce((s, o) => s + platesForOrder(o, menuItems), 0);
+  const prevClose = (state.dayCloseLogs || [])
+    .filter(d => d.cartId === cartId && d.date < date && Array.isArray(d.stock) && d.stock.some(r => r.key === '_plates'))
+    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  const opening = prevClose ? (prevClose.stock.find(r => r.key === '_plates')?.actual ?? 0) : 0;
+  return { opening, supplied, used, expected: opening + supplied - used };
+}
+// The plate audit row a day-close tucks into its stock array (key '_plates').
+const dayClosePlates = (d) => Array.isArray(d?.stock) ? (d.stock.find(r => r.key === '_plates') || null) : null;
+
 // Group momo items by category (Steamed, Kurkure…), preserving first-seen order,
 // so the menu reads category → variants (Veg / Paneer / Corn) under it.
 
@@ -560,4 +592,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, PLATES_PER_PACKET_DEFAULT, platesPerPacketFor, platesForOrder, usesPlates, plateLedger, dayClosePlates };

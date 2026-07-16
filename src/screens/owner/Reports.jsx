@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, adminBtn, brand, colors, editInput, editLabel, isPaid, istDateLabel, localDate, menuFor } from '../../core';
+import { TODAY, adminBtn, brand, colors, dayClosePlates, editInput, editLabel, isPaid, istDateLabel, localDate, menuFor, platesForOrder } from '../../core';
 import { Reconciliation } from './Reconciliation';
 import { EditModalShell, MetricCard, SectionHeader } from '../../components/shared';
 
@@ -48,7 +48,9 @@ function soldBreakdown(orders, menuItems) {
 // array; falls back to the legacy veg/paneer/corn diffs for old records.
 
 function dayCloseStockRows(d) {
-  if (Array.isArray(d.stock)) return d.stock;
+  // The '_plates' row is the plate audit, not momo stock — keep it out of the
+  // stock-gap math (read it via dayClosePlates instead).
+  if (Array.isArray(d.stock)) return d.stock.filter(r => r.key !== '_plates');
   return [
     d.vegDiff != null ? { label: 'Veg', diff: d.vegDiff } : null,
     d.paneerDiff != null ? { label: 'Paneer', diff: d.paneerDiff } : null,
@@ -92,6 +94,9 @@ function Reports({ state, updateState, cartId }) {
   const cashGap = periodCloses.reduce((s, d) => s + (d.cashDiff || 0), 0);
   const upiGap = periodCloses.reduce((s, d) => s + (d.upiDiff || 0), 0);
   const stockGap = periodCloses.reduce((s, d) => s + dayCloseStockDiff(d), 0);
+  // Plate audit roll-up: counted-vs-expected plate gap across the period's closes.
+  const plateCloses = periodCloses.map(dayClosePlates).filter(Boolean);
+  const plateGap = plateCloses.reduce((s, p) => s + (p.diff || 0), 0);
 
   // Closed days → counted money; open days (incl. today) → live system orders.
   const openOrders = orders.filter(o => !closedDates.has(o.date));
@@ -102,6 +107,10 @@ function Reports({ state, updateState, cartId }) {
   const cash = openCash + closedCash;
   const upi = openUpi + closedUpi;
   const revenue = cash + upi;
+  // Price missing plates at the period's average revenue per portion — a plate
+  // shortfall ≈ servings that were never punched (possible leakage).
+  const periodPortions = orders.reduce((s, o) => s + platesForOrder(o, menu.items || []), 0);
+  const estLeakage = plateGap < 0 && periodPortions > 0 ? Math.round(-plateGap * (revenue / periodPortions)) : 0;
   const ordersCount = openOrders.length + periodCloses.reduce((s, d) => s + (d.totalOrders || 0), 0);
   const spend = expenses.reduce((s, e) => s + e.amount, 0);
   const wasted = wastage.reduce((s, w) => s + w.qty, 0);
@@ -249,14 +258,19 @@ function Reports({ state, updateState, cartId }) {
       {/* Reconciliation roll-up for the period (cash short/over, UPI, stock) */}
       {periodCloses.length > 0 && (<>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>RECONCILIATION GAPS — {label.toUpperCase()}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
-          {[['💵 Cash', cashGap, '₹'], ['📱 UPI', upiGap, '₹'], ['🥟 Stock', stockGap, ' pcs']].map(([lab, val, unit]) => (
+        <div style={{ display: 'grid', gridTemplateColumns: plateCloses.length > 0 ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+          {[['💵 Cash', cashGap, '₹'], ['📱 UPI', upiGap, '₹'], ['🥟 Stock', stockGap, ' pcs'], ...(plateCloses.length > 0 ? [['🍽️ Plates', plateGap, ' pl']] : [])].map(([lab, val, unit]) => (
             <div key={lab} style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 8px', textAlign: 'center' }}>
               <div style={{ fontSize: 17, fontWeight: 900, color: diffColor(val) }}>{val === 0 ? '✓' : `${val > 0 ? '+' : '−'}${unit === '₹' ? '₹' : ''}${Math.abs(val)}${unit === '₹' ? '' : unit}`}</div>
               <div style={{ fontSize: 10.5, color: colors.muted, fontWeight: 600, marginTop: 2 }}>{lab}</div>
             </div>
           ))}
         </div>
+        {estLeakage > 0 && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', background: '#FFE7E7', border: '1px solid #F5B5B5', borderRadius: 10, padding: '10px 12px', marginBottom: 12, marginTop: -6, fontSize: 12.5, color: colors.red }}>
+            <span>🍽️</span><span><strong>{-plateGap} plate{-plateGap > 1 ? 's' : ''} unaccounted</strong> across {plateCloses.length} audited day{plateCloses.length > 1 ? 's' : ''} ≈ <strong>₹{estLeakage.toLocaleString('en-IN')}</strong> of possibly unpunched servings (at this period's avg ₹/portion).</span>
+          </div>
+        )}
         <div style={{ fontSize: 11, color: colors.muted, marginBottom: 16, marginTop: -6 }}>− = short / missing vs system · + = extra · ✓ = matched, across {periodCloses.length} day-close{periodCloses.length > 1 ? 's' : ''}.</div>
       </>)}
 
@@ -297,6 +311,7 @@ function Reports({ state, updateState, cartId }) {
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.cashDiff || 0) }}>💵 {fmtDiff(d.cashDiff || 0)}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.upiDiff || 0) }}>📱 {fmtDiff(d.upiDiff || 0)}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(sd) }}>🥟 {sd === 0 ? '✓' : `${fmtDiff(sd)} pcs`}</span>
+                {(() => { const pl = dayClosePlates(d); return pl ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(pl.diff || 0) }}>🍽️ {(pl.diff || 0) === 0 ? '✓' : `${fmtDiff(pl.diff)} pl`}</span> : null; })()}
               </div>
               {stockRows.length > 0 && (
                 <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>{stockRows.map(x => `${x.label}: ${x.diff > 0 ? '+' : '−'}${Math.abs(x.diff)}`).join(' · ')}</div>
