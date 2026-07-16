@@ -43,22 +43,29 @@ export default function App() {
   // While staff OR owner is logged in, poll the cart's today orders so new
   // orders appear without a manual refresh — keeps the staff screen (and alert)
   // AND the owner dashboard/reports live, so two devices don't drift apart.
+  // lastSync feeds the "live · updated Xs ago" label; pollRef lets the owner's
+  // 🔄 button pull on demand without any extra background traffic.
+  const [lastSync, setLastSync] = useState(null);
+  const pollRef = useRef(null);
   useEffect(() => {
-    if (!session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) return;
+    if (!session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) { pollRef.current = null; return; }
     let alive = true;
     const tick = async () => {
       const fresh = await loadCartOrders(session.cartId, TODAY);
       if (!alive || !fresh) return;
+      setLastSync(Date.now());
       setState(prev => {
         const prevById = new Map(prev.orders.map(o => [o.id, o]));
         const changed = fresh.some(o => { const p = prevById.get(o.id); return !p || p.payment !== o.payment; });
         return changed ? { ...prev, orders: mergeOrders(prev.orders, fresh) } : prev;
       });
     };
+    pollRef.current = tick;
     const t = setInterval(tick, 12000);
     tick();
-    return () => { alive = false; clearInterval(t); };
+    return () => { alive = false; clearInterval(t); pollRef.current = null; };
   }, [session]);
+  const refreshNow = async () => { if (pollRef.current) await pollRef.current(); };
 
   useEffect(() => {
     storage.set('platform', state.platform);
@@ -98,7 +105,7 @@ export default function App() {
   const logout = () => setSession(null);
 
   return (
-    <StoreContext.Provider value={{ state, updateState, session, login, logout }}>
+    <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow }}>
       <BrowserRouter>
         <Routes>
           {/* Public — customer */}

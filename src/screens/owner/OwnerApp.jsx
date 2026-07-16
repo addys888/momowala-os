@@ -8,6 +8,7 @@ import { Reconciliation } from './Reconciliation';
 import { Reports } from './Reports';
 import { StaffRegistry } from './StaffRegistry';
 import { Alert, BottomNav, CartIcon, MetricCard, OrderRow, SectionHeader, TopBar } from '../../components/shared';
+import { useStore } from '../../store';
 
 function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
@@ -69,6 +70,20 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
 
 
 function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
+  // "live · updated Xs ago" + manual 🔄 — surfaces how fresh the auto-poll is
+  // and lets the owner pull on demand (no extra background traffic).
+  const { lastSync, refreshNow } = useStore();
+  const [, agoTick] = useState(0);
+  useEffect(() => { const t = setInterval(() => agoTick(n => n + 1), 5000); return () => clearInterval(t); }, []);
+  const [refreshing, setRefreshing] = useState(false);
+  const doRefresh = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    try { await refreshNow?.(); } finally { setRefreshing(false); }
+  };
+  const agoSec = lastSync ? Math.max(0, Math.round((Date.now() - lastSync) / 1000)) : null;
+  const agoLabel = agoSec === null ? 'syncing…' : agoSec < 60 ? `updated ${agoSec}s ago` : `updated ${Math.floor(agoSec / 60)}m ago`;
+
   const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
   // Uncollected (unpaid) orders across ALL days — money not yet collected and not
   // counted in revenue. Surfaced so nothing rolls past its day unseen.
@@ -151,7 +166,14 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
         </div>
       </div>
 
-      <SectionHeader title="Today's Snapshot" subtitle={istDateLabel(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10 }}>
+        <SectionHeader title="Today's Snapshot" subtitle={istDateLabel(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })} />
+        <button onClick={doRefresh} disabled={refreshing} title="Pull the latest orders now"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 20, padding: '6px 12px', fontSize: 11.5, fontWeight: 700, color: colors.muted, cursor: refreshing ? 'wait' : 'pointer', whiteSpace: 'nowrap', marginBottom: 14, flexShrink: 0 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: colors.green, display: 'inline-block' }} />
+          live · {refreshing ? 'refreshing…' : agoLabel} 🔄
+        </button>
+      </div>
 
       {/* Hero metric */}
       <div style={{ background: colors.ink, color: colors.primary, padding: 24, borderRadius: 16, marginBottom: 16 }}>
