@@ -356,6 +356,14 @@ export async function insertCart(cart) {
   return supabase.from('carts').insert({ ...cartToRow(cart), created_at: cart.createdAt });
 }
 
+// Hard-delete a stock log row (e.g. undoing an accidental plate handover).
+// Must hit the cloud too: the sync is append-only union, so a local-only
+// delete would be resurrected from the cloud on the next load.
+export async function deleteStockLog(id) {
+  if (!supabase) return { error: null };
+  return supabase.from('stock_logs').delete().eq('id', id);
+}
+
 // Immediately persist the cart's open/closed flag (NOT debounced) so it sticks
 // even if the owner refreshes right after toggling — the debounced sync would
 // otherwise be cancelled by the page unload and the cloud value would win back.

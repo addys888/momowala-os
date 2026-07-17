@@ -334,6 +334,9 @@ function Reports({ state, updateState, cartId }) {
               {stockRows.length > 0 && (
                 <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>{stockRows.map(x => `${x.label}: ${x.diff > 0 ? '+' : '−'}${Math.abs(x.diff)}`).join(' · ')}</div>
               )}
+              {(() => { const dmg = dayCloseWare(d).filter(r => (r.damaged || 0) > 0); return dmg.length > 0 ? (
+                <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>Damaged: {dmg.map(r => { const w = WARE_TYPES.find(t => `_ware:${t.key}` === r.key); return `${w?.key === 'glass' ? '🥤' : `🍽️${w?.short}`} ×${r.damaged}`; }).join(' · ')}</div>
+              ) : null; })()}
             </div>
           );
         })}

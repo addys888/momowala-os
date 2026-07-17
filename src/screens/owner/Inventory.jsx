@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, deleteStockLog, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
 import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, warePacksFor, wareLedger, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
@@ -64,6 +64,15 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       ...(packsChanged ? { menus: { ...state.menus, [cartId]: { ...menu, warePacks: packSizes } } } : {}),
     });
     setShowPlates(false);
+  };
+
+  // Undo a wrong handover entry: remove locally AND from the cloud — the
+  // append-only sync would resurrect a local-only delete on the next load.
+  const undoSupply = (log) => {
+    const w = WARE_TYPES.find(t => t.key === log.item);
+    if (!confirm(`Undo this handover — ${log.qty} × ${w?.label || log.item}? Re-enter the correct numbers after.`)) return;
+    updateState({ stockLogs: state.stockLogs.filter(l => l.id !== log.id) });
+    deleteStockLog(log.id);
   };
 
   // Adjust freezer up or down (wastage, spoilage, recount correction).
@@ -164,6 +173,29 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
 
       {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
       {showPlates && <WareSupplyModal packSizes={warePacksFor(state, cartId)} onAdd={supplyWare} onClose={() => setShowPlates(false)} />}
+
+      {/* Today's handovers — undo an accidental / wrong entry, then re-enter it. */}
+      {(() => {
+        const todaySupplies = (state.stockLogs || []).filter(l => l.cartId === cartId && l.type === 'PLATE_SUPPLY' && l.date === TODAY);
+        if (!todaySupplies.length) return null;
+        return (
+          <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 16px', background: '#FAF8F2', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: colors.muted }}>TODAY'S PLATE / GLASS HANDOVERS</div>
+            {todaySupplies.map(l => {
+              const w = WARE_TYPES.find(t => t.key === l.item);
+              return (
+                <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', borderTop: `1px solid ${colors.border}` }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13.5 }}>{w?.label || l.item} — {l.qty}</div>
+                    <div style={{ fontSize: 11, color: colors.muted }}>{l.note} · {l.time}</div>
+                  </div>
+                  <button onClick={() => undoSupply(l)} title="Undo this handover" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red} /></button>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
       {showTypes && <StockTypesModal stockTypes={stockTypes} onSave={setStockTypes} onClose={() => setShowTypes(false)} />}
       {adjusting && <AdjustStockModal label={adjusting.label} current={inv[adjusting.key]?.freezer ?? 0} onApply={(delta, reason) => adjustStock(adjusting.key, delta, reason)} onClose={() => setAdjusting(null)} />}
       {moving && <MoveStockConfirm move={moving} bucket={inv[moving.type] || { freezer: 0, cart: 0 }} onConfirm={confirmMove} onClose={() => setMoving(null)} />}

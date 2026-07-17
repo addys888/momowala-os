@@ -10,6 +10,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
   const [phonePeAmount, setPhonePeAmount] = useState('');
   const [remaining, setRemaining] = useState({}); // { [stockKey]: '' }
   const [wareLeft, setWareLeft] = useState({}); // { [wareKey]: '' } counted (optional)
+  const [wareDamaged, setWareDamaged] = useState({}); // { [wareKey]: '' } broken/torn today
   const [closed, setClosed] = useState(false);
 
   const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - cashRevenue : null;
@@ -24,7 +25,11 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
     .map(w => {
       const led = ware[w.key];
       const val = wareLeft[w.key] ?? '';
-      return { ...w, ...led, val, diff: val !== '' ? parseInt(val) - led.expected : null };
+      // Damaged (broken/torn) ware is legitimate loss — subtract it from the
+      // expected count so it never shows up as a theft gap.
+      const damaged = parseInt(wareDamaged[w.key]) || 0;
+      const effExpected = led.expected - damaged;
+      return { ...w, ...led, val, damaged, effExpected, diff: val !== '' ? parseInt(val) - effExpected : null };
     });
   // Stock is deducted as orders settle, so expected remaining = current cart count.
   const stockRows = stockTypes.map(st => {
@@ -52,7 +57,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
         // Ware-audit rows ride in the stock array (key '_ware:<type>') so they
         // need no schema change; Reports filters them out of momo-stock math.
         // Each counted value becomes tomorrow's opening balance for that ware.
-        ...wareRows.filter(r => r.val !== '').map(r => ({ key: `_ware:${r.key}`, label: r.label, expected: r.expected, actual: parseInt(r.val) || 0, diff: r.diff || 0, opening: r.opening, supplied: r.supplied, used: r.used })),
+        ...wareRows.filter(r => r.val !== '').map(r => ({ key: `_ware:${r.key}`, label: r.label, expected: r.expected, damaged: r.damaged, actual: parseInt(r.val) || 0, diff: r.diff || 0, opening: r.opening, supplied: r.supplied, used: r.used })),
       ],
       piecesSold,
       revenue: cashRevenue + upiRevenue,
@@ -141,15 +146,20 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
         />
       ))}
 
-      {/* Ware audit — optional; count each leftover ware type vs its ledger */}
+      {/* Ware audit — optional; count each leftover ware type vs its ledger.
+          Damaged (broken/torn) pieces are entered separately so legitimate
+          breakage never reads as a theft gap. */}
       {wareRows.map(r => (
         <ReconcileBlock
           key={r.key}
           title={`${r.emoji} ${r.label} — theft check`}
-          systemValue={`${r.expected} expected`}
+          systemValue={r.damaged > 0 ? `${r.expected} − ${r.damaged} damaged = ${r.effExpected}` : `${r.expected} expected`}
           label={`Left on cart — count them (${r.opening > 0 ? `${r.opening} carried + ` : ''}${r.supplied} given − ${r.used} served)`}
           value={r.val}
           onChange={(v) => setWareLeft(prev => ({ ...prev, [r.key]: v }))}
+          extraLabel="Damaged / broken today (optional)"
+          extraValue={wareDamaged[r.key] ?? ''}
+          onExtraChange={(v) => setWareDamaged(prev => ({ ...prev, [r.key]: v }))}
           diff={r.diff}
           unit=" pcs"
         />
@@ -169,13 +179,20 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
 }
 
 
-function ReconcileBlock({ title, systemValue, label, value, onChange, diff, unit }) {
+function ReconcileBlock({ title, systemValue, label, value, onChange, diff, unit, extraLabel, extraValue, onExtraChange }) {
   return (
     <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <div style={{ fontWeight: 700, fontSize: 14 }}>{title}</div>
         <div style={{ fontSize: 13, color: colors.muted }}>System: <strong style={{ color: colors.ink }}>{systemValue}</strong></div>
       </div>
+      {onExtraChange && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+          <div style={{ flex: 1, fontSize: 11, color: colors.muted }}>{extraLabel}</div>
+          <input type="number" inputMode="numeric" value={extraValue} onChange={e => onExtraChange(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="0"
+            style={{ width: 90, padding: '9px 12px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 15, fontWeight: 700, boxSizing: 'border-box', textAlign: 'right' }} />
+        </div>
+      )}
       <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>{label}</div>
       <input type="number" value={value} onChange={e => onChange(e.target.value)} placeholder="0"
         style={{ width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 18, fontWeight: 700, boxSizing: 'border-box' }} />
