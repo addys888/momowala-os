@@ -418,7 +418,9 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepM
       </div>
 
       {/* Items list */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 100 }}>
+      {/* Bottom clearance must outsize the fixed cart sheet (item list + total
+          + two payment rows) or the last menu items hide behind it. */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: cart.length > 0 ? 400 : 100 }}>
         {category === 'momos' && groupByCat(items).map(g => (
           <div key={g.cat} style={{ marginBottom: 6 }}>
             <CategoryBand cat={g.cat} count={g.items.length} />
@@ -442,7 +444,9 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepM
       {cart.length > 0 && (
         <div style={{ position: 'fixed', bottom: 70, left: 0, right: 0, background: colors.ink, color: colors.primary, padding: 16, boxShadow: '0 -4px 20px rgba(0,0,0,0.15)' }}>
           <div style={{ maxWidth: 700, margin: '0 auto' }}>
-            <div style={{ maxHeight: 200, overflowY: 'auto', marginBottom: 12 }}>
+            {/* Compact, scrollable — a big order must not grow the sheet over
+                the menu (staff couldn't reach the items at the bottom). */}
+            <div style={{ maxHeight: 128, overflowY: 'auto', marginBottom: 12 }}>
               {cart.map(item => (
                 <div key={item.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,214,10,0.2)' }}>
                   <div>
