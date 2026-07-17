@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, adminBtn, brand, cartOpenState, colors, isPaid, istDateLabel, istNowMinutes, menuFor, orderStockDeltas, plateLedger } from '../../core';
+import { TODAY, WARE_TYPES, adminBtn, brand, cartOpenState, colors, isPaid, istDateLabel, istNowMinutes, menuFor, orderStockDeltas, wareLedger } from '../../core';
 import { CartProfileModal, MenuEditor } from '../MenuEditor';
 import { InventoryView } from './Inventory';
 import { Reconciliation } from './Reconciliation';
@@ -89,9 +89,11 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
   // counted in revenue. Surfaced so nothing rolls past its day unseen.
   const uncollected = (state?.orders || []).filter(o => o.cartId === cartId && o.payment === 'pending').sort((a, b) => a.id - b.id);
   const uncollectedTotal = uncollected.reduce((s, o) => s + o.total, 0);
-  // Plate audit: how many disposable plates should physically be on the cart
-  // right now, given what the owner supplied and what punched orders served.
-  const plates = plateLedger(state, cartId, TODAY);
+  // Ware audit: how many small plates / large plates / glasses should
+  // physically be on the cart right now, given what the owner supplied and
+  // what punched orders served.
+  const ware = wareLedger(state, cartId, TODAY);
+  const activeWare = WARE_TYPES.filter(w => ware[w.key].supplied > 0 || ware[w.key].opening > 0);
   const lowTypes = stockTypes.filter(st => (inv[st.key]?.freezer ?? 0) < 100);
   const openState = cartOpenState(cart);
 
@@ -305,16 +307,21 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
       </div>
       </>}
 
-      {/* Plate audit — live "should remain" so the owner can spot-check the
-          physical plate stack anytime; a shortfall means unpunched servings. */}
-      {(plates.supplied > 0 || plates.opening > 0) && (
-        <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, padding: '13px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: 20 }}>🍽️</span>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: colors.muted }}>PLATES SHOULD REMAIN</div>
-            <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 2 }}>{plates.opening > 0 ? `${plates.opening} carried + ` : ''}{plates.supplied} given − {plates.used} served</div>
-          </div>
-          <div style={{ fontSize: 24, fontWeight: 900, color: plates.expected < 0 ? colors.red : colors.ink }}>{plates.expected}</div>
+      {/* Ware audit — live "should remain" per serving type so the owner can
+          spot-check the physical stacks anytime; a shortfall means unpunched
+          servings (half → 6" plate, full → 7" plate, mocktail → glass). */}
+      {activeWare.length > 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, overflow: 'hidden' }}>
+          <div style={{ padding: '10px 16px', background: '#FAF8F2', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: colors.muted }}>🍽️ PLATES / GLASSES SHOULD REMAIN</div>
+          {activeWare.map(w => { const l = ware[w.key]; return (
+            <div key={w.key} style={{ display: 'flex', alignItems: 'center', padding: '11px 16px', borderTop: `1px solid ${colors.border}` }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{w.label}</div>
+                <div style={{ fontSize: 11, color: colors.muted }}>{l.opening > 0 ? `${l.opening} carried + ` : ''}{l.supplied} given − {l.used} served</div>
+              </div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: l.expected < 0 ? colors.red : colors.ink }}>{l.expected}</div>
+            </div>
+          ); })}
         </div>
       )}
 

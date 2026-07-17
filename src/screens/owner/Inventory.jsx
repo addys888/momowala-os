@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, plateLedger, platesPerPacketFor, slugify } from '../../core';
+import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, warePacksFor, wareLedger, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
 function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
@@ -48,16 +48,20 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   };
 
   // Record a plate handover to staff (theft-audit supply). Appends a
-  // PLATE_SUPPLY stock log (synced, append-only) and saves the packet size to
-  // the cart's menu config when the owner changes it.
-  const supplyPlates = (packets, perPacket) => {
-    const plates = packets * perPacket;
-    if (!(plates > 0)) { setShowPlates(false); return; }
-    const log = { id: Date.now(), cartId, date: TODAY, time: istTime(), type: 'PLATE_SUPPLY', item: 'plates', qty: plates, note: `${packets} packet${packets > 1 ? 's' : ''} × ${perPacket} plates` };
+  // PLATE_SUPPLY stock logs (synced, append-only) — one row per ware type
+  // handed over (small plates / large plates / glasses); saves changed packet
+  // sizes to the cart's menu config.
+  const supplyWare = (entries, packSizes) => {
+    const logs = entries
+      .filter(e => e.packets > 0 && e.perPacket > 0)
+      .map((e, i) => ({ id: Date.now() + i, cartId, date: TODAY, time: istTime(), type: 'PLATE_SUPPLY', item: e.key, qty: e.packets * e.perPacket, note: `${e.packets} packet${e.packets > 1 ? 's' : ''} × ${e.perPacket}` }));
+    if (!logs.length) { setShowPlates(false); return; }
     const menu = menuFor(state, cartId);
+    const savedPacks = warePacksFor(state, cartId);
+    const packsChanged = WARE_TYPES.some(w => packSizes[w.key] !== savedPacks[w.key]);
     updateState({
-      stockLogs: [...state.stockLogs, log],
-      ...(perPacket !== platesPerPacketFor(state, cartId) ? { menus: { ...state.menus, [cartId]: { ...menu, platesPerPacket: perPacket } } } : {}),
+      stockLogs: [...state.stockLogs, ...logs],
+      ...(packsChanged ? { menus: { ...state.menus, [cartId]: { ...menu, warePacks: packSizes } } } : {}),
     });
     setShowPlates(false);
   };
@@ -147,15 +151,19 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
 
       {/* Plate handover — the theft-audit supply. Every momo portion leaves on a
           plate, so the plate count independently validates punched orders. */}
-      {(() => { const led = plateLedger(state, cartId, TODAY); return (
-        <button onClick={() => setShowPlates(true)}
-          style={{ width: '100%', background: '#fff', color: colors.ink, padding: 14, borderRadius: 12, border: `1.5px solid ${colors.ink}`, fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          🍽️ Give Plates to Staff{(led.supplied > 0 || led.opening > 0) ? ` — today: ${led.supplied} given · ${led.expected} should remain` : ''}
-        </button>
-      ); })()}
+      {(() => {
+        const led = wareLedger(state, cartId, TODAY);
+        const active = WARE_TYPES.filter(w => led[w.key].supplied > 0 || led[w.key].opening > 0);
+        return (
+          <button onClick={() => setShowPlates(true)}
+            style={{ width: '100%', background: '#fff', color: colors.ink, padding: 14, borderRadius: 12, border: `1.5px solid ${colors.ink}`, fontWeight: 700, fontSize: 14, cursor: 'pointer', marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, flexWrap: 'wrap' }}>
+            🍽️ Give Plates / Glasses to Staff{active.length > 0 ? ` — should remain: ${active.map(w => `${w.short} ${led[w.key].expected}`).join(' · ')}` : ''}
+          </button>
+        );
+      })()}
 
       {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
-      {showPlates && <PlateSupplyModal defaultPerPacket={platesPerPacketFor(state, cartId)} onAdd={supplyPlates} onClose={() => setShowPlates(false)} />}
+      {showPlates && <WareSupplyModal packSizes={warePacksFor(state, cartId)} onAdd={supplyWare} onClose={() => setShowPlates(false)} />}
       {showTypes && <StockTypesModal stockTypes={stockTypes} onSave={setStockTypes} onClose={() => setShowTypes(false)} />}
       {adjusting && <AdjustStockModal label={adjusting.label} current={inv[adjusting.key]?.freezer ?? 0} onApply={(delta, reason) => adjustStock(adjusting.key, delta, reason)} onClose={() => setAdjusting(null)} />}
       {moving && <MoveStockConfirm move={moving} bucket={inv[moving.type] || { freezer: 0, cart: 0 }} onConfirm={confirmMove} onClose={() => setMoving(null)} />}
@@ -424,40 +432,44 @@ function StockInModal({ stockTypes = [], onAdd, onClose }) {
   );
 }
 
-function PlateSupplyModal({ defaultPerPacket = 24, onAdd, onClose }) {
-  const [packets, setPackets] = useState('');
-  const [perPacket, setPerPacket] = useState(String(defaultPerPacket));
-  const nPackets = parseInt(packets) || 0;
-  const nPer = parseInt(perPacket) || 0;
-  const total = nPackets * nPer;
+function WareSupplyModal({ packSizes, onAdd, onClose }) {
+  // One row per ware type: packets given × plates(or glasses)/packet.
+  const [packets, setPackets] = useState(() => Object.fromEntries(WARE_TYPES.map(w => [w.key, ''])));
+  const [perPack, setPerPack] = useState(() => Object.fromEntries(WARE_TYPES.map(w => [w.key, String(packSizes[w.key] || 24)])));
+  const clean = (v) => v.replace(/\D/g, '').slice(0, 4);
+  const entries = WARE_TYPES.map(w => ({ key: w.key, label: w.label, packets: parseInt(packets[w.key]) || 0, perPacket: parseInt(perPack[w.key]) || 0 }));
+  const totalUnits = entries.reduce((s, e) => s + e.packets * e.perPacket, 0);
+  const submit = () => onAdd(entries, Object.fromEntries(entries.map(e => [e.key, e.perPacket || 24])));
 
-  const numInput = { width: '100%', padding: '12px 14px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 16, fontWeight: 700, boxSizing: 'border-box', textAlign: 'right' };
+  const numInput = { width: '100%', padding: '10px 12px', border: `2px solid ${colors.border}`, borderRadius: 10, fontSize: 15, fontWeight: 700, boxSizing: 'border-box', textAlign: 'right' };
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
-      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>🍽️ Give Plates to Staff</div>
-        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Every momo portion is served on one plate, so the plate count independently checks that all servings were punched. Count leftover plates at day-close.</div>
+      <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 440, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>🍽️ Give Plates / Glasses to Staff</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Half momo → 6" plate · Full momo → 7" plate · Mocktail → 350ml glass. The counts independently check that every serving was punched. Leave a row blank if none given.</div>
 
-        <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>PACKETS GIVEN</div>
-            <input type="number" inputMode="numeric" value={packets} onChange={e => setPackets(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="e.g. 3" style={numInput} autoFocus />
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>PLATES / PACKET</div>
-            <input type="number" inputMode="numeric" value={perPacket} onChange={e => setPerPacket(e.target.value.replace(/\D/g, '').slice(0, 4))} style={numInput} />
-          </div>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 4, fontSize: 11, color: colors.muted, fontWeight: 700 }}>
+          <div style={{ flex: 1.4 }}>ITEM</div>
+          <div style={{ width: 84, textAlign: 'right' }}>PACKETS</div>
+          <div style={{ width: 84, textAlign: 'right' }}>PER PACKET</div>
         </div>
+        {WARE_TYPES.map(w => (
+          <div key={w.key} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ flex: 1.4, fontSize: 13, fontWeight: 700 }}>{w.label}</div>
+            <input type="number" inputMode="numeric" value={packets[w.key]} onChange={e => setPackets(p => ({ ...p, [w.key]: clean(e.target.value) }))} placeholder="0" style={{ ...numInput, width: 84, flexShrink: 0 }} />
+            <input type="number" inputMode="numeric" value={perPack[w.key]} onChange={e => setPerPack(p => ({ ...p, [w.key]: clean(e.target.value) }))} style={{ ...numInput, width: 84, flexShrink: 0 }} />
+          </div>
+        ))}
 
-        <div style={{ background: colors.paper, borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <span style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>TOTAL PLATES</span>
-          <span style={{ fontSize: 16, fontWeight: 900 }}>{total}</span>
+        <div style={{ background: colors.paper, borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '6px 0 16px' }}>
+          <span style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>TOTAL HANDED OVER</span>
+          <span style={{ fontSize: 15, fontWeight: 900 }}>{entries.filter(e => e.packets > 0).map(e => `${WARE_TYPES.find(w => w.key === e.key).short} ${e.packets * e.perPacket}`).join(' · ') || 0}</span>
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
-          <button onClick={() => onAdd(nPackets, nPer)} disabled={total === 0} style={{ flex: 2, padding: 14, background: total === 0 ? colors.border : colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: total === 0 ? 'not-allowed' : 'pointer' }}>Confirm Handover</button>
+          <button onClick={submit} disabled={totalUnits === 0} style={{ flex: 2, padding: 14, background: totalUnits === 0 ? colors.border : colors.ink, color: colors.primary, border: 'none', borderRadius: 10, fontWeight: 700, cursor: totalUnits === 0 ? 'not-allowed' : 'pointer' }}>Confirm Handover</button>
         </div>
       </div>
     </div>
@@ -466,4 +478,4 @@ function PlateSupplyModal({ defaultPerPacket = 24, onAdd, onClose }) {
 
 // ─── OWNER: RECONCILIATION ───
 
-export { InventoryView, FreezerItem, MoveStockConfirm, ConsumableModal, ADJUST_REASONS, AdjustStockModal, StockTypesModal, StockInModal, PlateSupplyModal };
+export { InventoryView, FreezerItem, MoveStockConfirm, ConsumableModal, ADJUST_REASONS, AdjustStockModal, StockTypesModal, StockInModal, WareSupplyModal };

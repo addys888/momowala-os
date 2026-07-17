@@ -186,37 +186,64 @@ const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
 
 const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
 
-// ─── PLATE AUDIT (theft validation) ───
-// Every momo portion leaves on one disposable plate, so plates are a physical
-// audit trail: if servings happen without being punched, the plate count falls
-// but punched portions don't — the gap exposes unpunched sales.
-const PLATES_PER_PACKET_DEFAULT = 24;
-const platesPerPacketFor = (state, cartId) => menuFor(state, cartId).platesPerPacket || PLATES_PER_PACKET_DEFAULT;
-// One plate per momo portion (each qty of each momo line); lassi/add-ons none.
-const platesForOrder = (o, menuItems) =>
-  (o.items || []).reduce((s, it) => s + ((menuItems || []).some(m => m.id === it.id) ? it.qty : 0), 0);
-// Plates are used when the food is served — same moments stock deducts:
+// ─── SERVING-WARE AUDIT (theft validation) ───
+// Every serving leaves on a specific disposable: Half momo → 6" small plate,
+// Full momo → 7" large plate, mocktail/lassi → 350ml lid glass. Ware is a
+// physical audit trail: if servings happen without being punched, the ware
+// count falls but punched portions don't — the gap exposes unpunched sales.
+// Tracking half/full separately also catches full-punched-as-half mispunches
+// (the two plate gaps cross in opposite directions).
+const WARE_PER_PACKET_DEFAULT = 24;
+const WARE_TYPES = [
+  { key: 'plate_s', label: 'Small plate 6" (half momo)', short: '6"', emoji: '🍽️' },
+  { key: 'plate_l', label: 'Large plate 7" (full momo)', short: '7"', emoji: '🍽️' },
+  { key: 'glass', label: 'Glass 350ml (mocktail)', short: '🥤', emoji: '🥤' },
+];
+// Per-ware packet size (configurable per cart; lives in the menus blob).
+const warePacksFor = (state, cartId) => {
+  const saved = menuFor(state, cartId).warePacks || {};
+  return Object.fromEntries(WARE_TYPES.map(w => [w.key, saved[w.key] || WARE_PER_PACKET_DEFAULT]));
+};
+// Ware used by one order: each half momo line qty → small plate, full → large
+// plate, each mocktail/lassi qty → glass. Add-ons use nothing.
+const wareForOrder = (o, menu) => {
+  const out = { plate_s: 0, plate_l: 0, glass: 0 };
+  (o.items || []).forEach(it => {
+    if ((menu.items || []).some(m => m.id === it.id)) {
+      if (it.type === 'half') out.plate_s += it.qty; else out.plate_l += it.qty;
+    } else if ((menu.lassi || []).some(l => l.id === it.id)) {
+      out.glass += it.qty;
+    }
+  });
+  return out;
+};
+// Ware is used when the food is served — same moments stock deducts:
 // paid orders, and unpaid counter orders (served at punch). Cancelled: none.
 const usesPlates = (o) => isPaid(o) || (o.payment === 'pending' && o.source === 'staff-entry');
-// Daily plate ledger with carry-over: opening = plates counted at the most
-// recent day-close before `date`; supplied = today's PLATE_SUPPLY logs;
-// used = portions served today. expected = what should physically remain.
-function plateLedger(state, cartId, date) {
-  const menuItems = menuFor(state, cartId).items || [];
-  const supplied = (state.stockLogs || [])
-    .filter(l => l.cartId === cartId && l.type === 'PLATE_SUPPLY' && l.date === date)
-    .reduce((s, l) => s + (l.qty || 0), 0);
-  const used = (state.orders || [])
-    .filter(o => o.cartId === cartId && o.date === date && usesPlates(o))
-    .reduce((s, o) => s + platesForOrder(o, menuItems), 0);
+// Daily per-ware ledger with carry-over: opening = counted at the most recent
+// day-close before `date` (rows keyed '_ware:<key>'); supplied = today's
+// PLATE_SUPPLY logs (item = ware key); used = servings today.
+function wareLedger(state, cartId, date) {
+  const menu = menuFor(state, cartId);
   const prevClose = (state.dayCloseLogs || [])
-    .filter(d => d.cartId === cartId && d.date < date && Array.isArray(d.stock) && d.stock.some(r => r.key === '_plates'))
+    .filter(d => d.cartId === cartId && d.date < date && Array.isArray(d.stock) && d.stock.some(r => String(r.key).startsWith('_ware:')))
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-  const opening = prevClose ? (prevClose.stock.find(r => r.key === '_plates')?.actual ?? 0) : 0;
-  return { opening, supplied, used, expected: opening + supplied - used };
+  const usedBy = { plate_s: 0, plate_l: 0, glass: 0 };
+  (state.orders || [])
+    .filter(o => o.cartId === cartId && o.date === date && usesPlates(o))
+    .forEach(o => { const w = wareForOrder(o, menu); WARE_TYPES.forEach(t => { usedBy[t.key] += w[t.key]; }); });
+  const out = {};
+  WARE_TYPES.forEach(t => {
+    const supplied = (state.stockLogs || [])
+      .filter(l => l.cartId === cartId && l.type === 'PLATE_SUPPLY' && l.item === t.key && l.date === date)
+      .reduce((s, l) => s + (l.qty || 0), 0);
+    const opening = prevClose ? (prevClose.stock.find(r => r.key === `_ware:${t.key}`)?.actual ?? 0) : 0;
+    out[t.key] = { opening, supplied, used: usedBy[t.key], expected: opening + supplied - usedBy[t.key] };
+  });
+  return out;
 }
-// The plate audit row a day-close tucks into its stock array (key '_plates').
-const dayClosePlates = (d) => Array.isArray(d?.stock) ? (d.stock.find(r => r.key === '_plates') || null) : null;
+// The ware audit rows a day-close tucks into its stock array ('_ware:<key>').
+const dayCloseWare = (d) => Array.isArray(d?.stock) ? d.stock.filter(r => String(r.key).startsWith('_ware:')) : [];
 
 // Group momo items by category (Steamed, Kurkure…), preserving first-seen order,
 // so the menu reads category → variants (Veg / Paneer / Corn) under it.
@@ -592,4 +619,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, PLATES_PER_PACKET_DEFAULT, platesPerPacketFor, platesForOrder, usesPlates, plateLedger, dayClosePlates };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare };
