@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, colors, isPaid, persistInv, wareLedger } from '../../core';
+import { TODAY, WARE_TYPES, colors, isOnline, isPaid, persistInv, wareLedger } from '../../core';
 import { SectionHeader } from '../../components/shared';
 
 function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold }) {
@@ -13,6 +13,9 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
   const [wareDamaged, setWareDamaged] = useState({}); // { [wareKey]: '' } broken/torn today
   const [closed, setClosed] = useState(false);
 
+  // Aggregator sales — informational only: the platform pays weekly, so this
+  // money is never expected in the cash box or PhonePe.
+  const onlineRevenue = todayOrders.filter(isOnline).reduce((s, o) => s + o.total, 0);
   const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - cashRevenue : null;
   const upiDiff = phonePeAmount !== '' ? parseInt(phonePeAmount) - upiRevenue : null;
   // Ware audit: plates/glasses are an independent check on punching — a
@@ -105,9 +108,12 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
           </div>
           <div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Total Revenue</div>
-            <div style={{ fontSize: 24, fontWeight: 800 }}>₹{cashRevenue + upiRevenue}</div>
+            <div style={{ fontSize: 24, fontWeight: 800 }}>₹{cashRevenue + upiRevenue + onlineRevenue}</div>
           </div>
         </div>
+        {onlineRevenue > 0 && (
+          <div style={{ fontSize: 11, opacity: 0.75, marginTop: 8 }}>includes 🛵 ₹{onlineRevenue} Zomato/Swiggy — weekly payout, NOT expected in cash box or PhonePe below.</div>
+        )}
       </div>
 
       {/* Cash reconciliation */}

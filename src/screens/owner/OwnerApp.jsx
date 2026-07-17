@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, adminBtn, brand, cartOpenState, colors, isPaid, istDateLabel, istNowMinutes, menuFor, orderStockDeltas, wareLedger } from '../../core';
+import { TODAY, WARE_TYPES, adminBtn, brand, cartOpenState, colors, isOnline, isPaid, istDateLabel, istNowMinutes, menuFor, orderStockDeltas, wareLedger } from '../../core';
 import { CartProfileModal, MenuEditor } from '../MenuEditor';
 import { InventoryView } from './Inventory';
 import { Reconciliation } from './Reconciliation';
@@ -33,6 +33,9 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   const todayRevenue = todayOrders.reduce((sum, o) => sum + (isPaid(o) ? o.total : 0), 0);
   const cashRevenue = todayOrders.filter(o => o.payment === 'cash').reduce((sum, o) => sum + o.total, 0);
   const upiRevenue = todayOrders.filter(o => o.payment === 'upi').reduce((sum, o) => sum + o.total, 0);
+  // Aggregator sales — real revenue, but paid out weekly by the platform, so
+  // never part of the cash-box / PhonePe reconciliation.
+  const onlineRevenue = todayOrders.filter(isOnline).reduce((sum, o) => sum + o.total, 0);
   const piecesSold = todayOrders.filter(o => isPaid(o)).reduce((sum, o) => {
     return sum + o.items.reduce((s, item) => {
       const m = menu.items.find(x => x.id === item.id);
@@ -48,7 +51,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       {showProfile && <CartProfileModal cart={cart} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
@@ -69,7 +72,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
 }
 
 
-function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, piecesSold, todayOrders }) {
+function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders }) {
   // "live · updated Xs ago" + manual 🔄 — surfaces how fresh the auto-poll is
   // and lets the owner pull on demand (no extra background traffic).
   const { lastSync, refreshNow } = useStore();
@@ -101,7 +104,11 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
   const closeByDate = Object.fromEntries((state?.dayCloseLogs || []).filter(d => d.cartId === cartId).map(d => [d.date, d]));
   const paidByDate = {};
   (state?.orders || []).filter(o => o.cartId === cartId && isPaid(o)).forEach(o => { paidByDate[o.date] = (paidByDate[o.date] || 0) + o.total; });
-  const dayRev = (date) => { const dc = closeByDate[date]; return dc ? (dc.physicalCash || 0) + (dc.phonePeAmount || 0) : (paidByDate[date] || 0); };
+  const onlineByDate = {};
+  (state?.orders || []).filter(o => o.cartId === cartId && isOnline(o)).forEach(o => { onlineByDate[o.date] = (onlineByDate[o.date] || 0) + o.total; });
+  // Closed days use counted money + that day's aggregator sales (platform money
+  // is never in the count); open days use live system totals (already include online).
+  const dayRev = (date) => { const dc = closeByDate[date]; return dc ? (dc.physicalCash || 0) + (dc.phonePeAmount || 0) + (onlineByDate[date] || 0) : (paidByDate[date] || 0); };
   // last 7 IST calendar dates ending today (UTC-anchored to avoid drift)
   const [ty, tm, tdd] = TODAY.split('-').map(Number);
   const baseMs = Date.UTC(ty, tm - 1, tdd);
@@ -135,7 +142,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
   const shareToday = async () => {
     const text =
       `🥟 ${cart?.name || 'Cart'} — ${istDateLabel(new Date(), { weekday: 'short', day: 'numeric', month: 'short' })}\n` +
-      `Revenue: ₹${todayRevenue.toLocaleString('en-IN')}  (💵 ₹${cashRevenue} · 📱 ₹${upiRevenue})\n` +
+      `Revenue: ₹${todayRevenue.toLocaleString('en-IN')}  (💵 ₹${cashRevenue} · 📱 ₹${upiRevenue}${onlineRevenue > 0 ? ` · 🛵 ₹${onlineRevenue}` : ''})\n` +
       `Orders: ${todayOrders.filter(isPaid).length} · Pieces sold: ${piecesSold}\n` +
       `Expenses: ₹${todayExpenses.toLocaleString('en-IN')} · Net: ₹${todayNet.toLocaleString('en-IN')}`;
     try { if (navigator.share) { await navigator.share({ title: `${cart?.name} — today`, text }); return; } } catch { /* cancelled */ }
@@ -216,9 +223,10 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
       </div>
 
       {/* Split metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
         <MetricCard label="Cash" value={`₹${cashRevenue}`} icon={<IndianRupee size={16}/>} color={colors.green} />
-        <MetricCard label="UPI / Online" value={`₹${upiRevenue}`} icon={<Smartphone size={16}/>} color={colors.ink} />
+        <MetricCard label="UPI" value={`₹${upiRevenue}`} icon={<Smartphone size={16}/>} color={colors.ink} />
+        <MetricCard label="🛵 Online" value={`₹${onlineRevenue}`} icon={<Smartphone size={16}/>} color={colors.accent} />
       </div>
 
       {/* Share today's summary */}

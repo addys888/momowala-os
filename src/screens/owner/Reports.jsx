@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, adminBtn, brand, colors, dayCloseWare, editInput, editLabel, isPaid, istDateLabel, localDate, menuFor, wareForOrder } from '../../core';
+import { TODAY, WARE_TYPES, adminBtn, brand, colors, dayCloseWare, editInput, editLabel, isOnline, isPaid, istDateLabel, localDate, menuFor, wareForOrder } from '../../core';
 import { Reconciliation } from './Reconciliation';
 import { EditModalShell, MetricCard, SectionHeader } from '../../components/shared';
 
@@ -109,7 +109,13 @@ function Reports({ state, updateState, cartId }) {
   const closedUpi = periodCloses.reduce((s, d) => s + (d.phonePeAmount || 0), 0);
   const cash = openCash + closedCash;
   const upi = openUpi + closedUpi;
-  const revenue = cash + upi;
+  // Aggregator sales come straight from orders for the WHOLE period (open and
+  // closed days alike) — the platform pays weekly, so this money never appears
+  // in the counted cash/PhonePe that closed days use above.
+  const online = orders.filter(isOnline).reduce((s, o) => s + o.total, 0);
+  const zomatoOrders = orders.filter(o => o.payment === 'zomato');
+  const swiggyOrders = orders.filter(o => o.payment === 'swiggy');
+  const revenue = cash + upi + online;
   // Price each ware type's shortfall at its own average line price this period
   // (half-portion price for 6" plates, full for 7", drink price for glasses) —
   // a shortfall ≈ servings that were never punched (possible leakage).
@@ -214,9 +220,26 @@ function Reports({ state, updateState, cartId }) {
       <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 14, marginBottom: 12 }}>
         <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5 }}>{label.toUpperCase()} · SALES</div>
         <div style={{ fontSize: 34, fontWeight: 900 }}>₹{revenue.toLocaleString('en-IN')}</div>
-        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{ordersCount} orders · 💵 ₹{cash} · 📱 ₹{upi}</div>
+        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{ordersCount} orders · 💵 ₹{cash} · 📱 ₹{upi}{online > 0 ? <> · 🛵 ₹{online}</> : null}</div>
         {periodCloses.length > 0 && <div style={{ fontSize: 10.5, opacity: 0.6, marginTop: 4 }}>Closed days use money counted at day-close; today is live.</div>}
       </div>
+
+      {/* Aggregator channel tracking — the weekly-payout money. Compare these
+          totals against the Zomato/Swiggy payout statements. */}
+      {online > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+          <div style={{ background: '#FDE8EA', border: '1px solid #F5B5BC', borderRadius: 12, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#E23744', fontWeight: 800 }}>🛵 ZOMATO — {label.toUpperCase()}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#E23744' }}>₹{zomatoOrders.reduce((s, o) => s + o.total, 0).toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 11, color: colors.muted }}>{zomatoOrders.length} order{zomatoOrders.length !== 1 ? 's' : ''} · payout weekly</div>
+          </div>
+          <div style={{ background: '#FFF0E0', border: '1px solid #F5CFA4', borderRadius: 12, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: '#C56A00', fontWeight: 800 }}>🛵 SWIGGY — {label.toUpperCase()}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#C56A00' }}>₹{swiggyOrders.reduce((s, o) => s + o.total, 0).toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 11, color: colors.muted }}>{swiggyOrders.length} order{swiggyOrders.length !== 1 ? 's' : ''} · payout weekly</div>
+          </div>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         <MetricCard label="Expenses" value={`₹${spend.toLocaleString('en-IN')}`} icon={<IndianRupee size={16}/>} color={colors.red} />
         <MetricCard label="Net (sales − spend)" value={`₹${net.toLocaleString('en-IN')}`} icon={<TrendingUp size={16}/>} color={net >= 0 ? colors.green : colors.red} />
@@ -311,7 +334,8 @@ function Reports({ state, updateState, cartId }) {
           }
           const sd = dayCloseStockDiff(d);
           const stockRows = dayCloseStockRows(d).filter(x => (x.diff || 0) !== 0);
-          const collected = (d.physicalCash || 0) + (d.phonePeAmount || 0); // money actually counted
+          const onlineDay = (state.orders || []).filter(o => o.cartId === cartId && o.date === date && isOnline(o)).reduce((s, o) => s + o.total, 0);
+          const collected = (d.physicalCash || 0) + (d.phonePeAmount || 0) + onlineDay; // counted money + platform sales
           const system = (d.systemCash || 0) + (d.systemUpi || 0);
           return (
             <div key={date} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>

@@ -160,6 +160,8 @@ const SEED_CARTS = [
 const PAY_BADGE = {
   cash: { bg: '#E7F5E7', fg: '#0F7B0F' },
   upi: { bg: '#E7EEFF', fg: '#0050B3' },
+  zomato: { bg: '#FDE8EA', fg: '#E23744' },
+  swiggy: { bg: '#FFF0E0', fg: '#C56A00' },
   pending: { bg: '#FFF1E7', fg: '#FF4D00' },
   cancelled: { bg: '#FFE7E7', fg: '#C81E1E' },
 };
@@ -219,7 +221,9 @@ const wareForOrder = (o, menu) => {
 };
 // Ware is used when the food is served — same moments stock deducts:
 // paid orders, and unpaid counter orders (served at punch). Cancelled: none.
-const usesPlates = (o) => isPaid(o) || (o.payment === 'pending' && o.source === 'staff-entry');
+// Zomato/Swiggy orders leave in delivery packaging, not on the cart's plates
+// or glasses — excluded from the ware audit (stock still deducts normally).
+const usesPlates = (o) => (isPaid(o) && !isOnline(o)) || (o.payment === 'pending' && o.source === 'staff-entry');
 // Daily per-ware ledger with carry-over: opening = counted at the most recent
 // day-close before `date` (rows keyed '_ware:<key>'); supplied = today's
 // PLATE_SUPPLY logs (item = ware key); used = servings today.
@@ -430,10 +434,14 @@ function playOrderAlert() {
   } catch { /* speech not available */ }
 }
 
-// An order counts as real revenue only once paid (cash/UPI). 'pending' QR
-// orders and staff-'cancelled' orders never touch revenue or pieces sold.
+// An order counts as real revenue once paid. Counter payments (cash/UPI) land
+// in the cash box / PhonePe; aggregator orders (Zomato/Swiggy) are guaranteed
+// sales paid out weekly by the platform — revenue and stock, but never part of
+// the cash/UPI reconciliation. 'pending' and 'cancelled' never touch revenue.
 
-const isPaid = (o) => o.payment === 'cash' || o.payment === 'upi';
+const isPaid = (o) => o.payment === 'cash' || o.payment === 'upi' || o.payment === 'zomato' || o.payment === 'swiggy';
+// Aggregator (delivery-platform) order — money arrives as a weekly payout.
+const isOnline = (o) => o.payment === 'zomato' || o.payment === 'swiggy';
 
 // Reasons a staff member can give when cancelling an order.
 
@@ -619,4 +627,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare };

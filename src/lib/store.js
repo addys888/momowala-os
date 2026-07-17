@@ -168,7 +168,7 @@ const unionById = (a = [], b = []) => {
 // cancel/settle never propagated, localStorage kept the stale copy, and
 // devices drifted apart by a stuck order that no reload could fix.
 // Equal-rank conflicts (e.g. cash vs upi) resolve by the later settledAt.
-const PAY_RANK = { pending: 0, cash: 1, upi: 1, cancelled: 2 };
+const PAY_RANK = { pending: 0, cash: 1, upi: 1, zomato: 1, swiggy: 1, cancelled: 2 };
 export const mergeOrders = (a = [], b = []) => {
   const seen = new Map();
   [...a, ...b].forEach((o) => {

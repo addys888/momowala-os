@@ -245,7 +245,7 @@ function OrderPlacedToast({ info, onClose }) {
         <CheckCircle2 size={56} color={colors.primary} style={{ margin: '0 auto 12px' }} />
         <div style={{ fontSize: 18, fontWeight: 800 }}>Order registered!</div>
         <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div>
-        <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
+        <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : info.payment === 'zomato' ? '🛵 Zomato — weekly payout' : info.payment === 'swiggy' ? '🛵 Swiggy — weekly payout' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
         <button onClick={onClose} style={{ marginTop: 18, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>Next order</button>
       </div>
     </div>
@@ -465,6 +465,12 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepM
               <button onClick={() => onPlaceOrder('upi')} disabled={placing} style={{ flex: 1, background: colors.primary, color: colors.ink, border: 'none', padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '📱 UPI'}</button>
               <button onClick={() => onPlaceOrder('unpaid')} disabled={placing} style={{ flex: 1, background: 'transparent', color: colors.primary, border: `1.5px solid ${colors.primary}`, padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '⏳ Unpaid'}</button>
             </div>
+            {/* Aggregator orders — platform collects the money (weekly payout),
+                so these never touch the cash/UPI reconciliation. */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <button onClick={() => onPlaceOrder('zomato')} disabled={placing} style={{ flex: 1, background: '#E23744', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '🛵 Zomato'}</button>
+              <button onClick={() => onPlaceOrder('swiggy')} disabled={placing} style={{ flex: 1, background: '#FC8019', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '🛵 Swiggy'}</button>
+            </div>
           </div>
         </div>
       )}
@@ -490,15 +496,17 @@ function MyOrdersScreen({ orders, onSettle, onCancel, settling = new Set() }) {
   const liveCount = orders.filter(o => o.payment !== 'cancelled').length;
   const cashCount = orders.filter(o => o.payment === 'cash').length;
   const upiCount = orders.filter(o => o.payment === 'upi').length;
+  const onlineCount = orders.filter(o => o.payment === 'zomato' || o.payment === 'swiggy').length;
 
   return (
     <div>
       <SectionHeader title="My Shift Orders" subtitle={`${liveCount} order${liveCount !== 1 ? 's' : ''} so far`} />
 
       {/* Counts only — money totals live on the owner side so staff focus on punching, not reconciling the cash box. */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
         <MetricCard label="Cash orders" value={`${cashCount}`} icon={<IndianRupee size={16}/>} color={colors.green} />
         <MetricCard label="UPI orders" value={`${upiCount}`} icon={<Smartphone size={16}/>} color={colors.ink} />
+        <MetricCard label="Online orders" value={`${onlineCount}`} icon={<Smartphone size={16}/>} color={colors.accent} />
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
