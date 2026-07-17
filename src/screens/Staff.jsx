@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../lib/store';
-import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, orderStockDeltas, persistInv, playOrderAlert, restoreInventory, staffCancellable, unlockAudio } from '../core';
+import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, orderStockDeltas, persistInv, playOrderAlert, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 
 function StaffApp({ state, updateState, onExit, cartId, staffName }) {
@@ -195,11 +195,11 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
             {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} Order sound {soundOn ? 'On' : 'Off'}
           </button>
         </div>
-        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} inv={inv} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
+        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} settling={settling} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
-        {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} myOrders={myOrders} staffName={staffName} />}
+        {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} ware={wareLedger(state, cartId, TODAY)} myOrders={myOrders} staffName={staffName} />}
       </div>
 
       <BottomNav tab={tab} setTab={setTab} tabs={[
@@ -331,7 +331,7 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
 }
 
 
-function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepMins, onSetPrep }) {
+function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, ware = {}, prepMins, onSetPrep }) {
   const [category, setCategory] = useState('momos');
   const items = menu?.items || [], lassi = menu?.lassi || [], addons = menu?.addons || [];
 
@@ -344,6 +344,16 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepM
   const stockLeft = stockTypes
     .map(st => ({ key: st.key, label: st.label, left: (inv?.[st.key]?.cart ?? 0) - (pending[st.key] || 0) }))
     .sort((a, b) => b.left - a.left);
+
+  // Live "plates / glasses left" — same accountability the owner sees. Half →
+  // 6" plate, full → 7" plate, mocktail → glass. Subtracts the ware the current
+  // order would use ("after this order"). Only shown for ware the owner has
+  // actually handed over today (supplied or carried), and a compact label.
+  const pendingWare = wareForOrder({ items: cart }, menu);
+  const WARE_SHORT = { plate_s: '🍽️ 6" plate', plate_l: '🍽️ 7" plate', glass: '🥤 Glass' };
+  const wareLeft = WARE_TYPES
+    .filter(t => (ware[t.key]?.supplied || 0) + (ware[t.key]?.opening || 0) > 0)
+    .map(t => ({ key: t.key, label: WARE_SHORT[t.key] || t.short, left: (ware[t.key]?.expected ?? 0) - (pendingWare[t.key] || 0) }));
 
   const addToCart = (id, name, price, type = null, qty = 1) => {
     const itemKey = `${id}-${type || 'std'}`;
@@ -385,6 +395,29 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, prepM
                   <span style={{ fontSize: 18, fontWeight: 900 }}>{s.left}</span>
                   {state === 'out' && <span style={{ fontSize: 10, fontWeight: 800 }}>OUT</span>}
                   {state === 'low' && <span style={{ fontSize: 10, fontWeight: 800 }}>LOW</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Live plates / glasses left — staff accountability, mirrors the owner's
+          ware audit so nothing goes missing without being noticed. */}
+      {wareLeft.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 10, color: colors.muted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>🍽️ PLATES / GLASSES SHOULD REMAIN {cart.length > 0 && <span style={{ color: colors.accent }}>· after this order</span>}</div>
+          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+            {wareLeft.map(s => {
+              const st = s.left <= 0 ? 'out' : s.left <= 6 ? 'low' : 'ok';
+              const bg = st === 'out' ? '#FFE7E7' : st === 'low' ? '#FFF1E7' : colors.ink;
+              const fg = st === 'out' ? colors.red : st === 'low' ? colors.accent : colors.primary;
+              return (
+                <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 8, background: bg, color: fg, borderRadius: 12, padding: '8px 14px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                  <span style={{ fontSize: 12, fontWeight: 600 }}>{s.label}</span>
+                  <span style={{ fontSize: 18, fontWeight: 900 }}>{s.left}</span>
+                  {st === 'out' && <span style={{ fontSize: 10, fontWeight: 800 }}>OUT</span>}
+                  {st === 'low' && <span style={{ fontSize: 10, fontWeight: 800 }}>LOW</span>}
                 </div>
               );
             })}
@@ -558,8 +591,10 @@ function MyOrdersScreen({ orders, onSettle, onCancel, settling = new Set() }) {
 }
 
 
-function ShiftStatus({ inv, stockTypes = [], myOrders, staffName }) {
+function ShiftStatus({ inv, stockTypes = [], ware = {}, myOrders, staffName }) {
   const orderCount = myOrders.filter(o => o.payment !== 'cancelled').length;
+  const WARE_SHORT = { plate_s: '🍽️ 6" plate (half)', plate_l: '🍽️ 7" plate (full)', glass: '🥤 Glass (mocktail)' };
+  const wareRows = WARE_TYPES.filter(t => (ware[t.key]?.supplied || 0) + (ware[t.key]?.opening || 0) > 0);
 
   return (
     <div>
@@ -580,6 +615,16 @@ function ShiftStatus({ inv, stockTypes = [], myOrders, staffName }) {
         ))}
         {stockTypes.length === 0 && <div style={{ fontSize: 13, color: colors.muted, textAlign: 'center', padding: 8 }}>No stock tracked</div>}
       </div>
+
+      {/* Plates / glasses that should physically be on the cart right now. */}
+      {wareRows.length > 0 && (
+        <div style={{ background: '#fff', padding: 16, borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
+          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>PLATES / GLASSES SHOULD REMAIN</div>
+          {wareRows.map(t => (
+            <StockRow key={t.key} label={WARE_SHORT[t.key] || t.label} value={ware[t.key]?.expected ?? 0} unit="left" low={(ware[t.key]?.expected ?? 0) <= 6} />
+          ))}
+        </div>
+      )}
 
       <Alert
         type="info"
