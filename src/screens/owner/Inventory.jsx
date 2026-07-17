@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, deleteStockLog, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
 import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, warePacksFor, wareLedger, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
@@ -66,13 +66,16 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     setShowPlates(false);
   };
 
-  // Undo a wrong handover entry: remove locally AND from the cloud — the
-  // append-only sync would resurrect a local-only delete on the next load.
+  // Undo a wrong handover by posting a REVERSING entry (negative qty), never a
+  // delete. A hard delete resurrects: the append-only sync re-adds it from any
+  // device that still has the row cached. A reversal is itself append-only, so
+  // the +qty and −qty always sum to zero on every device — permanent. The
+  // reversed original's id is stored in the note (↩#<id>) so the list hides it.
   const undoSupply = (log) => {
     const w = WARE_TYPES.find(t => t.key === log.item);
-    if (!confirm(`Undo this handover — ${log.qty} × ${w?.label || log.item}? Re-enter the correct numbers after.`)) return;
-    updateState({ stockLogs: state.stockLogs.filter(l => l.id !== log.id) });
-    deleteStockLog(log.id);
+    if (!confirm(`Undo this handover — ${log.qty} × ${w?.label || log.item}? This posts a reversing entry; re-enter the correct numbers after.`)) return;
+    const reversal = { id: Date.now(), cartId, date: log.date, time: istTime(), type: 'PLATE_SUPPLY', item: log.item, qty: -(log.qty || 0), note: `↩#${log.id} reversed (${log.note || ''})` };
+    updateState({ stockLogs: [...state.stockLogs, reversal] });
   };
 
   // Adjust freezer up or down (wastage, spoilage, recount correction).
@@ -174,9 +177,12 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       {showAddStock && <StockInModal stockTypes={stockTypes} onAdd={addStock} onClose={() => setShowAddStock(false)} />}
       {showPlates && <WareSupplyModal packSizes={warePacksFor(state, cartId)} onAdd={supplyWare} onClose={() => setShowPlates(false)} />}
 
-      {/* Today's handovers — undo an accidental / wrong entry, then re-enter it. */}
+      {/* Today's handovers — undo an accidental / wrong entry (posts a reversal).
+          Hide reversal rows (qty ≤ 0) and any original that's been reversed. */}
       {(() => {
-        const todaySupplies = (state.stockLogs || []).filter(l => l.cartId === cartId && l.type === 'PLATE_SUPPLY' && l.date === TODAY);
+        const reversedIds = new Set();
+        (state.stockLogs || []).forEach(l => { if (l.cartId === cartId && l.type === 'PLATE_SUPPLY') { const m = /↩#(\d+)/.exec(l.note || ''); if (m) reversedIds.add(Number(m[1])); } });
+        const todaySupplies = (state.stockLogs || []).filter(l => l.cartId === cartId && l.type === 'PLATE_SUPPLY' && l.date === TODAY && (l.qty || 0) > 0 && !reversedIds.has(l.id));
         if (!todaySupplies.length) return null;
         return (
           <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, overflow: 'hidden' }}>
