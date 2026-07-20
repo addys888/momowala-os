@@ -409,6 +409,21 @@ async function pushState(state) {
         const stripped = rows.map(({ customer_name, customer_phone, prep_status, ...rest }) => rest);
         r = await supabase.from('orders').upsert(stripped, { onConflict: 'id' });
       }
+      // A single row the DB rejects (e.g. a payment value not yet allowed by the
+      // orders_payment_check constraint before its migration is run) must NOT
+      // blank out the whole day's sync. On a check-constraint / 400, retry with
+      // only the payment values every install accepts, so all legacy orders still
+      // persist; the newer ones sync once the constraint migration is applied.
+      if (r.error && /check constraint|violates|payment|22P02|23514|400/i.test(`${r.error.message} ${r.error.code} ${r.status ?? ''}`)) {
+        const SAFE = new Set(['cash', 'upi', 'pending', 'cancelled']);
+        const safe = rows.filter((o) => SAFE.has(o.payment));
+        if (safe.length) {
+          const r2 = await supabase.from('orders').upsert(safe, { onConflict: 'id' });
+          if (!r2.error) return r2;
+          const stripped = safe.map(({ customer_name, customer_phone, prep_status, ...rest }) => rest);
+          return supabase.from('orders').upsert(stripped, { onConflict: 'id' });
+        }
+      }
       return r;
     };
     // carts + staff have column-level (not table-level) grants since the security

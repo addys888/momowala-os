@@ -13,7 +13,7 @@ create table if not exists orders (
   time text not null,
   items jsonb not null default '[]',
   total integer not null,
-  payment text not null check (payment in ('cash', 'upi', 'pending', 'cancelled')),
+  payment text not null check (payment in ('cash', 'upi', 'pending', 'cancelled', 'zomato', 'swiggy')),
   cancel_reason text,
   prep_status text,
   staff text,
@@ -463,7 +463,7 @@ alter table orders add column if not exists customer_phone text;
 -- Live prep status for the customer tracker: null=placed, 'preparing', 'ready'.
 alter table orders add column if not exists prep_status text;
 alter table orders drop constraint if exists orders_payment_check;
-alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending', 'cancelled'));
+alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending', 'cancelled', 'zomato', 'swiggy'));
 
 -- ── Migration: multi-cart (which QSR cart an order belongs to) ──
 alter table orders add column if not exists outlet text;
