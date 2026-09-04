@@ -19,14 +19,37 @@ const urlBase64ToUint8Array = (base64String) => {
 };
 
 // 'on' | 'off' | 'denied' | 'unsupported'
+// Once the browser has GRANTED notification permission, reminders are considered
+// set up on this device — permission is durable (survives reloads, app-logouts,
+// SW updates) unlike the live push subscription, which can momentarily read empty
+// while the service worker is still registering on load. So we key the toggle off
+// the permission, not the subscription, and never re-prompt a device already set
+// up. `ensureSubscribed` then silently keeps the actual subscription alive.
 export async function reminderStatus() {
   if (!pushSupported()) return 'unsupported';
+  if (Notification.permission === 'granted') return 'on';
   if (Notification.permission === 'denied') return 'denied';
+  return 'off';
+}
+
+// Silently (re)create the push subscription and re-register it in the DB. Safe to
+// call on every load when permission is granted: it never prompts, waits for the
+// service worker to be active (avoids the load race), re-subscribes if the browser
+// dropped the subscription, and re-saves it so the reminder cron always has a live
+// endpoint. This is what makes an already-set-up device stay ON and never ask.
+export async function ensureSubscribed(cartId, role) {
+  if (!pushSupported() || Notification.permission !== 'granted') return;
   try {
-    const reg = await navigator.serviceWorker.getRegistration();
-    const sub = reg && await reg.pushManager.getSubscription();
-    return sub ? 'on' : 'off';
-  } catch { return 'off'; }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC) });
+    }
+    await fetch('/api/push-subscribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subscription: sub.toJSON(), cartId, role: role || 'owner' }),
+    });
+  } catch { /* offline / transient — retried on the next load */ }
 }
 
 export async function enableReminders(cartId, role) {

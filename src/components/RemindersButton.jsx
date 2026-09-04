@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { pushSupported, enableReminders, reminderStatus } from '../lib/push';
+import { pushSupported, enableReminders, reminderStatus, ensureSubscribed } from '../lib/push';
 import { colors } from '../core';
 
 // Compact opt-in tile for daily push reminders (1h before opening + at closing).
@@ -9,7 +9,17 @@ export function RemindersButton({ cartId, role = 'owner' }) {
   const [status, setStatus] = useState('loading');
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => { let alive = true; reminderStatus().then(s => alive && setStatus(s)); return () => { alive = false; }; }, []);
+  useEffect(() => {
+    let alive = true;
+    reminderStatus().then(s => {
+      if (!alive) return;
+      setStatus(s);
+      // Already set up on this device → silently refresh the subscription in the
+      // DB (no prompt), so it stays ON and never asks again.
+      if (s === 'on') ensureSubscribed(cartId, role);
+    });
+    return () => { alive = false; };
+  }, [cartId, role]);
 
   if (status === 'loading' || status === 'unsupported' || !pushSupported()) return null;
 
