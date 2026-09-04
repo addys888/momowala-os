@@ -1,18 +1,22 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../lib/store';
-import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, orderStockDeltas, persistInv, playOrderAlert, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
+import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, persistInv, playOrderAlert, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
+import { RemindersButton } from '../components/RemindersButton';
+import { printReceipt } from '../lib/escpos';
 
 function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [tab, setTab] = useState('order');
   const [cart, setCart] = useState([]);
+  const [addTarget, setAddTarget] = useState(null); // pending order we're adding items to
   const [cancelTarget, setCancelTarget] = useState(null);
   const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
   const [placing, setPlacing] = useState(false); // in-flight guard for the pay buttons
   const placingRef = React.useRef(false); // synchronous guard — blocks rapid double-taps before re-render
   const settlingRef = React.useRef(new Set()); // per-order guard against double-settle on pending orders
   const [settling, setSettling] = useState(() => new Set());
+  const [splitSettle, setSplitSettle] = useState(null); // pending order being settled as split
   const [orderAlert, setOrderAlert] = useState(null); // new incoming customer order
   const [soundOn, setSoundOn] = useState(() => storage.get('alertSound', true) !== false);
   const prevPendingRef = React.useRef(null);
@@ -58,7 +62,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const pendingOrders = state.orders.filter(o => o.cartId === cartId && o.payment === 'pending').sort((a, b) => a.id - b.id);
   const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
 
-  const placeOrder = async (payment) => {
+  const placeOrder = async (payment, extra) => {
     // Re-entrancy guard: the counter person can tap Cash/UPI again while the
     // token RPC is still in flight (laggy network). Without this, every tap
     // burned a server token AND fired a stock-deduction delta, while only the
@@ -85,6 +89,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         // 'unpaid' parks the order (payment collected later in the Pending tab);
         // cash/upi settle on the spot. Either way the food is made now.
         payment: payment === 'unpaid' ? 'pending' : payment,
+        split: payment === 'split' ? { cash: extra?.cash || 0, upi: extra?.upi || 0 } : null,
         staff: staffName,
         source: 'staff-entry',
         stockDeducted: true, // counter food leaves the cart at punch, paid or not
@@ -98,16 +103,37 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       const deltas = orderStockDeltas(cart, menu.items);
       persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
       setCart([]);
-      setJustPlaced({ token, total, payment });
+      setJustPlaced({ token, total, payment, order });
     } finally {
       placingRef.current = false;
       setPlacing(false);
     }
   };
 
+  // Append items to an existing pending order (customer added more before paying).
+  // The original items already deducted stock at punch, so we deduct ONLY the
+  // newly-added items and recompute the total — same token, still pending. Plates/
+  // glasses re-derive from the items, so the theft audit stays correct too.
+  const addToOrder = (target, extraItems) => {
+    const reset = () => { setCart([]); setAddTarget(null); setTab('pending'); };
+    if (!target || !extraItems?.length) { reset(); return; }
+    const order = state.orders.find(o => o.id === target.id);
+    if (!order || order.payment !== 'pending') { reset(); return; }
+    const newItems = [...order.items, ...extraItems];
+    const newTotal = newItems.reduce((s, it) => s + it.price * it.qty, 0);
+    const newInv = deductInventory(inv, extraItems, menu.items);
+    updateState(s => ({
+      inventory: { ...s.inventory, [cartId]: newInv },
+      orders: s.orders.map(o => o.id === target.id ? { ...o, items: newItems, total: newTotal } : o),
+    }));
+    const deltas = orderStockDeltas(extraItems, menu.items);
+    persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+    reset();
+  };
+
   // Customer QR orders arrive as 'pending'; staff confirms payment here,
   // and only then is stock deducted.
-  const settleOrder = (orderId, payment) => {
+  const settleOrder = (orderId, payment, extra) => {
     if (settlingRef.current.has(orderId)) return;
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment !== 'pending') return;
@@ -119,8 +145,9 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       // where the transient stockDeducted flag would be lost.
       const alreadyDeducted = order.source === 'staff-entry' || !!order.stockDeducted;
       const newInv = alreadyDeducted ? inv : deductInventory(inv, order.items, menu.items);
+      const split = payment === 'split' ? { cash: extra?.cash || 0, upi: extra?.upi || 0 } : null;
       setCartInv(newInv, {
-        orders: state.orders.map(o => o.id === orderId ? { ...o, payment, staff: staffName, settledAt: new Date().toISOString(), stockDeducted: true } : o),
+        orders: state.orders.map(o => o.id === orderId ? { ...o, payment, split, staff: staffName, settledAt: new Date().toISOString(), stockDeducted: true } : o),
       });
       if (!alreadyDeducted) {
         const deltas = orderStockDeltas(order.items, menu.items);
@@ -195,9 +222,10 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
             {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} Order sound {soundOn ? 'On' : 'Off'}
           </button>
         </div>
-        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} />}
-        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} />}
-        {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onCancel={(id) => setCancelTarget(id)} settling={settling} />}
+        {tab === 'order' && <RemindersButton cartId={cartId} role="staff" />}
+        {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} vendors={{ zomato: vendorEnabledFor(state, cartId, 'zomato'), swiggy: vendorEnabledFor(state, cartId, 'swiggy') }} addTarget={addTarget} onAddToOrder={(items) => addToOrder(addTarget, items)} onCancelAdd={() => { setAddTarget(null); setCart([]); }} />}
+        {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} onAddItems={(o) => { setCart([]); setAddTarget(o); setTab('order'); }} />}
+        {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} settling={settling} onlineVendors={onlineVendorsFor(state, cartId)} printer={printerCfgFor(state, cartId)} cart={cartInfo} />}
         {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} ware={wareLedger(state, cartId, TODAY)} myOrders={myOrders} staffName={staffName} />}
       </div>
@@ -218,7 +246,15 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         />
       )}
 
-      {justPlaced && <OrderPlacedToast info={justPlaced} onClose={() => setJustPlaced(null)} />}
+      {splitSettle && (
+        <SplitPayModal
+          total={splitSettle.total}
+          onConfirm={({ cash, upi }) => { settleOrder(splitSettle.id, 'split', { cash, upi }); setSplitSettle(null); }}
+          onClose={() => setSplitSettle(null)}
+        />
+      )}
+
+      {justPlaced && <OrderPlacedToast info={justPlaced} printer={printerCfgFor(state, cartId)} cart={cartInfo} onClose={() => setJustPlaced(null)} />}
 
       {orderAlert && (
         <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 70, background: colors.ink, color: '#fff', borderRadius: 14, padding: '14px 16px', boxShadow: '0 12px 40px rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', gap: 12, animation: 'none' }}>
@@ -237,16 +273,21 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 
 // Brief success confirmation after a staff order is registered.
 
-function OrderPlacedToast({ info, onClose }) {
-  useEffect(() => { const t = setTimeout(onClose, 2600); return () => clearTimeout(t); }, [info]);
+function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
+  // Printing needs a deliberate tap (and navigates to RawBT), so don't auto-close
+  // when the printer is on — otherwise keep the quick 2.6s dismiss.
+  useEffect(() => { if (printer.enabled) return; const t = setTimeout(onClose, 2600); return () => clearTimeout(t); }, [info]);
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: colors.ink, color: colors.primary, borderRadius: 20, padding: '32px 28px', textAlign: 'center', maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)' }}>
         <CheckCircle2 size={56} color={colors.primary} style={{ margin: '0 auto 12px' }} />
         <div style={{ fontSize: 18, fontWeight: 800 }}>Order registered!</div>
         <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div>
-        <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : info.payment === 'zomato' ? '🛵 Zomato — weekly payout' : info.payment === 'swiggy' ? '🛵 Swiggy — weekly payout' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
-        <button onClick={onClose} style={{ marginTop: 18, background: colors.primary, color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>Next order</button>
+        <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : info.payment === 'zomato' ? '🛵 Zomato — weekly payout' : info.payment === 'swiggy' ? '🛵 Swiggy — weekly payout' : info.payment === 'split' ? '🔀 Split — cash + UPI' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
+        {printer.enabled && info.order && (
+          <button onClick={() => printReceipt(info.order, cart, { footer: printer.footer })} style={{ marginTop: 16, background: '#fff', color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>🖨️ Print bill</button>
+        )}
+        <button onClick={onClose} style={{ marginTop: 10, background: printer.enabled ? 'transparent' : colors.primary, color: printer.enabled ? colors.primary : colors.ink, border: printer.enabled ? `1.5px solid ${colors.primary}` : 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>Next order</button>
       </div>
     </div>
   );
@@ -279,7 +320,7 @@ function CancelReasonModal({ order, onCancel, onConfirm }) {
 
 // ─── STAFF: PENDING CUSTOMER ORDERS ───
 
-function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set() }) {
+function PendingOrders({ orders, onSettle, onSplitSettle, onCancel, onPrep, onAddItems, settling = new Set() }) {
   return (
     <div>
       <SectionHeader title="Pending Payment" subtitle="QR orders waiting to be collected" />
@@ -322,6 +363,8 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
                 <button onClick={() => onSettle(o.id, 'upi')} disabled={busy} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>📱 UPI</button>
                 <button onClick={() => onCancel(o.id)} style={{ background: '#fff', color: colors.red, border: `1px solid ${colors.border}`, padding: 12, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>✕</button>
               </div>
+              {onSplitSettle && <button onClick={() => onSplitSettle(o)} disabled={busy} style={{ width: '100%', marginTop: 8, background: 'transparent', color: '#5B3FA6', border: '1.5px solid #D9CFF0', padding: '8px', borderRadius: 10, fontWeight: 800, fontSize: 12.5, cursor: busy ? 'wait' : 'pointer' }}>🔀 Split cash + UPI</button>}
+              {onAddItems && o.source === 'staff-entry' && <button onClick={() => onAddItems(o)} disabled={busy} style={{ width: '100%', marginTop: 8, background: 'transparent', color: brand.navy, border: `1.5px solid ${colors.border}`, padding: '8px', borderRadius: 10, fontWeight: 800, fontSize: 12.5, cursor: busy ? 'wait' : 'pointer' }}>➕ Add more items</button>}
             </div>
           </div>
         ); })}
@@ -331,7 +374,44 @@ function PendingOrders({ orders, onSettle, onCancel, onPrep, settling = new Set(
 }
 
 
-function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, ware = {}, prepMins, onSetPrep }) {
+// Part-payment entry: split a bill across cash + UPI. Enforces cash + UPI =
+// bill total so every rupee is attributed to a counted bucket (leak-proof).
+// Entering one amount auto-fills the other with the remainder.
+function SplitPayModal({ total, onConfirm, onClose }) {
+  const [cash, setCash] = useState('');
+  const [upi, setUpi] = useState('');
+  const [error, setError] = useState('');
+  const c = parseInt(cash) || 0, u = parseInt(upi) || 0;
+  const sum = c + u;
+  const setCashV = (v) => { const n = v.replace(/\D/g, ''); setCash(n); setUpi(n === '' ? '' : String(Math.max(0, total - (parseInt(n) || 0)))); };
+  const setUpiV = (v) => { const n = v.replace(/\D/g, ''); setUpi(n); setCash(n === '' ? '' : String(Math.max(0, total - (parseInt(n) || 0)))); };
+  const submit = () => {
+    if (sum !== total) { setError(`Cash + UPI must equal ₹${total} (now ₹${sum}).`); return; }
+    if (c <= 0 || u <= 0) { setError('Enter a non-zero amount for both cash and UPI.'); return; }
+    onConfirm({ cash: c, upi: u });
+  };
+  return (
+    <EditModalShell title={`Split payment · ₹${total}`} onClose={onClose} onSave={submit} error={error}>
+      <div style={{ fontSize: 12.5, color: colors.muted, marginBottom: 12 }}>How much of the ₹{total} bill is paid each way? They must add up to the bill.</div>
+      <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ flex: 1 }}>
+          <div style={editLabel}>💵 CASH ₹</div>
+          <input type="tel" inputMode="numeric" value={cash} onChange={e => setCashV(e.target.value)} placeholder="0" style={{ ...editInput, fontWeight: 800, fontSize: 18 }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <div style={editLabel}>📱 UPI ₹</div>
+          <input type="tel" inputMode="numeric" value={upi} onChange={e => setUpiV(e.target.value)} placeholder="0" style={{ ...editInput, fontWeight: 800, fontSize: 18 }} />
+        </div>
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: sum === total ? '#0F7B0F' : colors.muted, marginTop: 2 }}>
+        {sum === total ? '✓ Adds up to ₹' + total : `₹${sum} of ₹${total} · ₹${total - sum} left`}
+      </div>
+    </EditModalShell>
+  );
+}
+
+function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, ware = {}, prepMins, onSetPrep, vendors = {}, addTarget = null, onAddToOrder, onCancelAdd }) {
+  const [showSplit, setShowSplit] = useState(false);
   const [category, setCategory] = useState('momos');
   const items = menu?.items || [], lassi = menu?.lassi || [], addons = menu?.addons || [];
 
@@ -378,7 +458,16 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, ware 
 
   return (
     <div>
-      <SectionHeader title="New Order" subtitle="Tap items to add" />
+      {addTarget
+        ? <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#EAF0FF', border: `1px solid #BFD0F0`, borderRadius: 12, padding: '10px 14px', marginBottom: 14 }}>
+            <span style={{ fontSize: 18 }}>➕</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 800, color: brand.navy }}>Adding to order #{addTarget.token}</div>
+              <div style={{ fontSize: 11.5, color: colors.muted }}>Pick the extra items, then tap “Add to #{addTarget.token}”. It stays unpaid.</div>
+            </div>
+            <button onClick={() => onCancelAdd?.()} style={{ background: '#fff', border: `1px solid ${colors.border}`, color: colors.muted, borderRadius: 8, padding: '5px 10px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+          </div>
+        : <SectionHeader title="New Order" subtitle="Tap items to add" />}
 
       {/* Live momos left on cart — updates as items are added and after each order */}
       {stockLeft.length > 0 && (
@@ -494,20 +583,28 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, inv, ware 
               ))}
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 10 }}>
-              <div style={{ fontSize: 11, opacity: 0.7 }}>TOTAL</div>
-              <div style={{ fontSize: 28, fontWeight: 900 }}>₹{total}</div>
+              <div style={{ fontSize: 11, opacity: 0.7 }}>{addTarget ? `ADDING TO #${addTarget.token}` : 'TOTAL'}</div>
+              <div style={{ fontSize: 28, fontWeight: 900 }}>₹{total}{addTarget ? <span style={{ fontSize: 13, opacity: 0.7, fontWeight: 600 }}> → new total ₹{addTarget.total + total}</span> : null}</div>
             </div>
+            {addTarget ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => onCancelAdd?.()} disabled={placing} style={{ background: 'transparent', color: colors.muted, border: `1.5px solid ${colors.border}`, padding: '13px 14px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={() => onAddToOrder?.(cart)} disabled={placing || cart.length === 0} style={{ flex: 1, background: brand.navy, color: '#fff', border: 'none', padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: (placing || cart.length === 0) ? 'default' : 'pointer', opacity: (placing || cart.length === 0) ? 0.5 : 1 }}>➕ Add {cart.reduce((s, i) => s + i.qty, 0)} item{cart.reduce((s, i) => s + i.qty, 0) !== 1 ? 's' : ''} to #{addTarget.token}</button>
+              </div>
+            ) : (<>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => onPlaceOrder('cash')} disabled={placing} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '💵 Cash'}</button>
               <button onClick={() => onPlaceOrder('upi')} disabled={placing} style={{ flex: 1, background: colors.primary, color: colors.ink, border: 'none', padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '📱 UPI'}</button>
               <button onClick={() => onPlaceOrder('unpaid')} disabled={placing} style={{ flex: 1, background: 'transparent', color: colors.primary, border: `1.5px solid ${colors.primary}`, padding: '13px 8px', borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '⏳ Unpaid'}</button>
             </div>
-            {/* Aggregator orders — platform collects the money (weekly payout),
-                so these never touch the cash/UPI reconciliation. */}
+            {/* Rarely-used routes — split + aggregators — share one compact line. */}
             <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button onClick={() => onPlaceOrder('zomato')} disabled={placing} style={{ flex: 1, background: '#E23744', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '🛵 Zomato'}</button>
-              <button onClick={() => onPlaceOrder('swiggy')} disabled={placing} style={{ flex: 1, background: '#FC8019', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1 }}>{placing ? '…' : '🛵 Swiggy'}</button>
+              <button onClick={() => setShowSplit(true)} disabled={placing} style={{ flex: 1, background: 'transparent', color: '#5B3FA6', border: '1.5px solid #D9CFF0', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1, whiteSpace: 'nowrap' }}>🔀 Split</button>
+              {vendors.zomato && <button onClick={() => onPlaceOrder('zomato')} disabled={placing} style={{ flex: 1, background: '#E23744', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1, whiteSpace: 'nowrap' }}>{placing ? '…' : '🛵 Zomato'}</button>}
+              {vendors.swiggy && <button onClick={() => onPlaceOrder('swiggy')} disabled={placing} style={{ flex: 1, background: '#FC8019', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1, whiteSpace: 'nowrap' }}>{placing ? '…' : '🛵 Swiggy'}</button>}
             </div>
+            {showSplit && <SplitPayModal total={total} onConfirm={({ cash, upi }) => { setShowSplit(false); onPlaceOrder('split', { cash, upi }); }} onClose={() => setShowSplit(false)} />}
+            </>)}
           </div>
         </div>
       )}
@@ -526,7 +623,7 @@ const priceVisible = (o) => {
   return Date.now() - t <= PRICE_MASK_MS;
 };
 
-function MyOrdersScreen({ orders, onSettle, onCancel, settling = new Set() }) {
+function MyOrdersScreen({ orders, onSettle, onSplitSettle, onCancel, settling = new Set(), onlineVendors = false, printer = {}, cart }) {
   // Re-render every 20s so the cancel window AND the price-mask close on their own.
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick(n => n + 1), 20000); return () => clearInterval(t); }, []);
@@ -540,10 +637,10 @@ function MyOrdersScreen({ orders, onSettle, onCancel, settling = new Set() }) {
       <SectionHeader title="My Shift Orders" subtitle={`${liveCount} order${liveCount !== 1 ? 's' : ''} so far`} />
 
       {/* Counts only — money totals live on the owner side so staff focus on punching, not reconciling the cash box. */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: (onlineVendors || onlineCount > 0) ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10, marginBottom: 16 }}>
         <MetricCard label="Cash orders" value={`${cashCount}`} icon={<IndianRupee size={16}/>} color={colors.green} />
         <MetricCard label="UPI orders" value={`${upiCount}`} icon={<Smartphone size={16}/>} color={colors.ink} />
-        <MetricCard label="Online orders" value={`${onlineCount}`} icon={<Smartphone size={16}/>} color={colors.accent} />
+        {(onlineVendors || onlineCount > 0) && <MetricCard label="Online orders" value={`${onlineCount}`} icon={<Smartphone size={16}/>} color={colors.accent} />}
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -559,15 +656,17 @@ function MyOrdersScreen({ orders, onSettle, onCancel, settling = new Set() }) {
                 <div style={{ fontWeight: 800, fontSize: 16, textDecoration: (cancelled && showPrice) ? 'line-through' : 'none', color: showPrice ? (cancelled ? colors.muted : colors.ink) : colors.muted }}>{showPrice ? `₹${o.total}` : '₹•••'}</div>
               </div>
               <OrderItemLines items={o.items} muted={cancelled} />
+              {printer.enabled && !cancelled && <button onClick={() => printReceipt(o, cart, { footer: printer.footer })} style={{ marginTop: 10, background: '#fff', border: `1px solid ${colors.border}`, color: colors.ink, padding: '7px 10px', borderRadius: 8, fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>🖨️ Print bill</button>}
               {pending ? (
                 <div style={{ marginTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                     <span style={{ fontSize: 10, padding: '3px 9px', background: PAY_BADGE.pending.bg, color: PAY_BADGE.pending.fg, borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>UNPAID</span>
                     <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>Mark how they paid ↓</span>
                   </div>
-                  <div style={{ display: 'flex', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                     <button onClick={() => onSettle(o.id, 'cash')} disabled={busy} style={{ flex: 1, background: colors.green, color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>💵 Cash</button>
                     <button onClick={() => onSettle(o.id, 'upi')} disabled={busy} style={{ flex: 1, background: '#0050B3', color: '#fff', border: 'none', padding: 11, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>📱 UPI</button>
+                    {onSplitSettle && <button onClick={() => onSplitSettle(o)} disabled={busy} title="Split cash + UPI" style={{ background: '#fff', color: '#5B3FA6', border: '1.5px solid #D9CFF0', padding: 11, borderRadius: 10, fontWeight: 800, fontSize: 14, cursor: busy ? 'wait' : 'pointer' }}>🔀</button>}
                     <button onClick={() => onCancel(o.id)} title="Cancel (no-show)" style={{ background: '#fff', color: colors.red, border: `1px solid ${colors.border}`, padding: 11, borderRadius: 10, fontWeight: 700, fontSize: 14, cursor: 'pointer' }}>✕</button>
                   </div>
                 </div>

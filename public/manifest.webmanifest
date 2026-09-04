@@ -1,0 +1,13 @@
+{
+  "name": "Cartlyft · QSR OS",
+  "short_name": "Cartlyft",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0A2F5C",
+  "theme_color": "#0A2F5C",
+  "icons": [
+    { "src": "/momowala-logo.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/momowala-logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

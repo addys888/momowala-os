@@ -40,6 +40,30 @@ export default function App() {
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', check); window.removeEventListener('focus', check); };
   }, []);
 
+  // Self-update on new deploys. A device left open for days keeps running the
+  // exact build it first loaded — old code with old sync behaviour. That is the
+  // ROOT of the repeated menu-clobber incidents: a client-side fix can't reach a
+  // client that never reloads. Each build stamps its id into the bundle AND into
+  // /version.json; when they differ a newer build shipped, so reload — but only
+  // when the operator returns to the tab (visible/focus), never mid-order, and
+  // never on the background timer. Data is already in localStorage, so a reload
+  // at a visible moment is safe.
+  useEffect(() => {
+    const checkVersion = async () => {
+      if (document.visibilityState !== 'visible') return;
+      try {
+        const r = await fetch('/version.json?t=' + Date.now(), { cache: 'no-store' });
+        if (!r.ok) return;
+        const { v } = await r.json();
+        if (v && typeof __BUILD_ID__ !== 'undefined' && v !== __BUILD_ID__) window.location.reload();
+      } catch { /* offline or not deployed yet — ignore */ }
+    };
+    document.addEventListener('visibilitychange', checkVersion);
+    window.addEventListener('focus', checkVersion);
+    checkVersion();
+    return () => { document.removeEventListener('visibilitychange', checkVersion); window.removeEventListener('focus', checkVersion); };
+  }, []);
+
   // While staff OR owner is logged in, poll the cart's today orders so new
   // orders appear without a manual refresh — keeps the staff screen (and alert)
   // AND the owner dashboard/reports live, so two devices don't drift apart.
@@ -79,6 +103,7 @@ export default function App() {
     storage.set('dayCloseLogs', state.dayCloseLogs);
     storage.set('wastageLogs', state.wastageLogs);
     storage.set('expenses', state.expenses);
+    storage.set('payoutMarks', state.payoutMarks);
     syncToCloud(state);
   }, [state]);
 

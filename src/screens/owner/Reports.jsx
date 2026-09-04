@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
+import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX, ChevronDown, ChevronRight } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, adminBtn, brand, colors, dayCloseWare, editInput, editLabel, isOnline, isPaid, istDateLabel, localDate, menuFor, wareForOrder } from '../../core';
+import { TODAY, WARE_TYPES, adminBtn, brand, colors, cashPart, upiPart, dayCloseWare, editInput, editLabel, isOnline, isPaid, istDateLabel, localDate, menuFor, vendorEnabledFor, wareForOrder } from '../../core';
 import { Reconciliation } from './Reconciliation';
 import { EditModalShell, MetricCard, SectionHeader } from '../../components/shared';
 
@@ -66,8 +66,35 @@ const fmtDiff = (n) => n === 0 ? '✓ matched' : `${n > 0 ? '+' : '−'}${Math.a
 const diffColor = (n) => n === 0 ? '#0F7B0F' : (n < 0 ? '#C81E1E' : '#B5460B');
 
 
+// Simple responsive bar chart for the earnings trend (no chart lib — matches the
+// app's flat style). Tallest bar is accented; values render in ₹k above.
+function EarningsChart({ data }) {
+  const max = Math.max(1, ...data.map(d => d.value));
+  const H = 100; // bar height budget — leaves headroom above so the tallest
+  const fmt = (v) => v >= 1000 ? (Math.round(v / 100) / 10) + 'k' : (v || '');
+  return (
+    // paddingTop + generous height guarantee the top value label never clips the
+    // card header (the tallest bar's ₹ label was getting cut off).
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: data.length > 10 ? 4 : 8, height: H + 52, paddingTop: 6, overflowX: 'auto', overflowY: 'hidden' }}>
+      {data.map((d, i) => {
+        const h = d.value > 0 ? Math.max(3, Math.round(d.value / max * H)) : 2;
+        const top = d.value === max && d.value > 0;
+        return (
+          <div key={i} style={{ flex: '1 0 auto', minWidth: data.length > 10 ? 18 : 32, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <div style={{ fontSize: 9, color: colors.muted, fontWeight: 700, height: 13, whiteSpace: 'nowrap' }}>{fmt(d.value)}</div>
+            <div style={{ width: '100%', maxWidth: 30, height: h, background: top ? colors.accent : (d.value > 0 ? colors.ink : '#E8E5DC'), borderRadius: 5 }} />
+            <div style={{ fontSize: 9, color: colors.muted, fontWeight: 600, whiteSpace: 'nowrap' }}>{d.label}</div>
+            {d.sub && <div style={{ fontSize: 8, color: colors.muted }}>{d.sub}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Reports({ state, updateState, cartId }) {
   const [view, setView] = useState('revenue'); // 'revenue' | 'expense' sub-tab
+  const [chartMode, setChartMode] = useState('daily'); // earnings chart: daily | weekly | monthly
   const [period, setPeriod] = useState('today');
   const [pickedDate, setPickedDate] = useState(TODAY); // for the single-day view
   const [expMonth, setExpMonth] = useState(TODAY.slice(0, 7)); // YYYY-MM for the expense tab
@@ -75,6 +102,8 @@ function Reports({ state, updateState, cartId }) {
   const [editExpenseItem, setEditExpenseItem] = useState(null); // expense being edited
   const [showAllItems, setShowAllItems] = useState(false);
   const [delExpense, setDelExpense] = useState(null); // expense pending delete-confirm
+  const [payoutYear, setPayoutYear] = useState(TODAY.slice(0, 4)); // year filter for the payout ledger
+  const [openMonths, setOpenMonths] = useState({}); // YYYY-MM -> bool; current month opens by default
   const menu = menuFor(state, cartId);
   // Inclusive date range for the chosen view. 'day' is a single picked date.
   const from = period === 'day' ? pickedDate : periodStart(period);
@@ -103,8 +132,8 @@ function Reports({ state, updateState, cartId }) {
 
   // Closed days → counted money; open days (incl. today) → live system orders.
   const openOrders = orders.filter(o => !closedDates.has(o.date));
-  const openCash = openOrders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
-  const openUpi = openOrders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
+  const openCash = openOrders.reduce((s, o) => s + cashPart(o), 0);
+  const openUpi = openOrders.reduce((s, o) => s + upiPart(o), 0);
   const closedCash = periodCloses.reduce((s, d) => s + (d.physicalCash || 0), 0);
   const closedUpi = periodCloses.reduce((s, d) => s + (d.phonePeAmount || 0), 0);
   const cash = openCash + closedCash;
@@ -115,7 +144,54 @@ function Reports({ state, updateState, cartId }) {
   const online = orders.filter(isOnline).reduce((s, o) => s + o.total, 0);
   const zomatoOrders = orders.filter(o => o.payment === 'zomato');
   const swiggyOrders = orders.filter(o => o.payment === 'swiggy');
-  const revenue = cash + upi + online;
+  // ── Weekly Zomato/Swiggy payout ledger ──────────────────────────────────
+  // Every online order rolled into its ISO week (Mon–Sun), independent of the
+  // period toggle. Grouped by month + bounded by a year filter so the list
+  // stays a constant height no matter how much history accrues. Each week can
+  // be ticked off ('received') as its weekly platform payout is matched.
+  const onlineAll = state.orders.filter(o => o.cartId === cartId && isOnline(o));
+  const weekMap = {};
+  onlineAll.forEach(o => {
+    const [y, m, dd] = o.date.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, dd));
+    dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7)); // back to Monday
+    const ws = dt.toISOString().split('T')[0];
+    const w = weekMap[ws] || { start: ws, zomato: 0, swiggy: 0, count: 0 };
+    if (o.payment === 'zomato') w.zomato += o.total; else w.swiggy += o.total;
+    w.count += 1;
+    weekMap[ws] = w;
+  });
+  const weekEndOf = (ws) => { const [y, m, dd] = ws.split('-').map(Number); const dt = new Date(Date.UTC(y, m - 1, dd + 6)); return dt.toISOString().split('T')[0]; };
+  const weekId = (ws) => parseInt(ws.replaceAll('-', ''), 10);
+  const thisWeekStart = periodStart('week');
+  const receivedById = new Map((state.payoutMarks || []).filter(m => m.cartId === cartId).map(m => [m.id, !!m.received]));
+  const weekStatus = (ws) => ws === thisWeekStart ? 'progress' : (receivedById.get(weekId(ws)) ? 'received' : 'pending');
+  const togglePayout = (ws) => {
+    const id = weekId(ws);
+    const mark = { id, cartId, weekStart: ws, received: !(receivedById.get(id) === true), updatedAt: new Date().toISOString() };
+    updateState(prev => ({ ...prev, payoutMarks: [...(prev.payoutMarks || []).filter(m => m.id !== id), mark] }));
+  };
+  // Years that actually have online sales (newest first), for the filter.
+  const payoutYears = [...new Set(Object.keys(weekMap).map(ws => ws.slice(0, 4)))].sort().reverse();
+  // Weeks in the selected year → grouped into months (newest first).
+  const yearWeeks = Object.values(weekMap).filter(w => w.start.slice(0, 4) === payoutYear);
+  const monthMap = {};
+  yearWeeks.forEach(w => {
+    const mk = w.start.slice(0, 7);
+    const g = monthMap[mk] || { key: mk, weeks: [], zomato: 0, swiggy: 0 };
+    g.weeks.push(w); g.zomato += w.zomato; g.swiggy += w.swiggy;
+    monthMap[mk] = g;
+  });
+  const payoutMonths = Object.values(monthMap)
+    .map(g => ({ ...g, weeks: g.weeks.sort((a, b) => b.start.localeCompare(a.start)) }))
+    .sort((a, b) => b.key.localeCompare(a.key));
+  const currentMonthKey = TODAY.slice(0, 7);
+  // Finalised (not in-progress) weeks still awaiting a payout match, this year.
+  const pendingWeeks = yearWeeks.filter(w => weekStatus(w.start) === 'pending');
+  const pendingTotal = pendingWeeks.reduce((s, w) => s + w.zomato + w.swiggy, 0);
+  // Headline SALES is in-hand money only (cash + UPI). Aggregator sales are shown
+  // separately below since the platform pays out weekly, not into the cash box.
+  const revenue = cash + upi;
   // Price each ware type's shortfall at its own average line price this period
   // (half-portion price for 6" plates, full for 7", drink price for glasses) —
   // a shortfall ≈ servings that were never punched (possible leakage).
@@ -145,7 +221,7 @@ function Reports({ state, updateState, cartId }) {
   const sysByDate = {};
   state.orders.filter(o => o.cartId === cartId && isPaid(o)).forEach(o => {
     const e = sysByDate[o.date] || { date: o.date, revenue: 0, orders: 0, pieces: 0 };
-    e.revenue += o.total; e.orders += 1;
+    e.revenue += isOnline(o) ? 0 : o.total; e.orders += 1; // revenue in-hand only; online excluded
     (o.items || []).forEach(it => { const m = menuItemsForHist.find(x => x.id === it.id); if (m && m.stockKey) e.pieces += (it.type === 'half' ? m.pcsHalf : m.pcsFull) * it.qty; });
     sysByDate[o.date] = e;
   });
@@ -153,6 +229,45 @@ function Reports({ state, updateState, cartId }) {
   const historyDates = [...new Set([...Object.keys(sysByDate), ...Object.keys(closeByDate)])]
     .filter(d => period === 'today' || period === 'day' ? inRange(d) : d >= from)
     .sort().reverse().slice(0, 31);
+
+  // ── Earnings chart series (in-hand revenue) ──────────────────────────────
+  // Closed days use the money counted at day-close; open days use live orders.
+  const dayRevenue = (d) => { const c = closeByDate[d]; return c ? ((c.physicalCash || 0) + (c.phonePeAmount || 0)) : (sysByDate[d]?.revenue || 0); };
+  const shiftD = (d, n) => { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10); };
+  const dailySeries = [...Array(14)].map((_, i) => shiftD(TODAY, -(13 - i))).map(d => ({ label: istDateLabel(d, { day: 'numeric' }), sub: istDateLabel(d, { weekday: 'short' }).slice(0, 2), value: dayRevenue(d) }));
+  const weeklySeries = [...Array(8)].map((_, i) => {
+    const monday = shiftD(TODAY, -(((new Date(TODAY + 'T00:00:00Z').getUTCDay() + 6) % 7) + (7 - i) * 7));
+    const value = [...Array(7)].reduce((s, _2, k) => s + dayRevenue(shiftD(monday, k)), 0);
+    return { label: istDateLabel(monday, { day: 'numeric', month: 'short' }), value };
+  });
+  const monthlySeries = [...Array(6)].map((_, i) => {
+    const [y, m] = TODAY.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1 - (5 - i), 1));
+    const mk = dt.toISOString().slice(0, 7);
+    const value = Object.keys(sysByDate).concat(Object.keys(closeByDate)).filter((v, idx, a) => a.indexOf(v) === idx).filter(d => d.slice(0, 7) === mk).reduce((s, d) => s + dayRevenue(d), 0);
+    return { label: istDateLabel(mk + '-01', { month: 'short' }), value };
+  });
+  const chartSeries = chartMode === 'weekly' ? weeklySeries : chartMode === 'monthly' ? monthlySeries : dailySeries;
+
+  // ── KPI dashboard: this period vs the immediately-preceding equal window ──
+  const daysIn = (a, b) => { let n = 0, d = a; while (d <= b) { n++; d = shiftD(d, 1); } return n; };
+  const periodLen = daysIn(from, to);
+  const prevTo = shiftD(from, -1);
+  const prevFrom = shiftD(prevTo, -(periodLen - 1));
+  const rangeRev = (a, b) => { let s = 0, d = a; while (d <= b) { s += dayRevenue(d); d = shiftD(d, 1); } return s; };
+  const prevRevenue = rangeRev(prevFrom, prevTo);
+  const prevOrders = state.orders.filter(o => o.cartId === cartId && o.date >= prevFrom && o.date <= prevTo && isPaid(o)).length;
+  const prevSpend = (state.expenses || []).filter(e => e.cartId === cartId && e.date >= prevFrom && e.date <= prevTo).reduce((s, e) => s + e.amount, 0);
+  const prevNet = prevRevenue - prevSpend;
+  const avgOrder = ordersCount ? Math.round(revenue / ordersCount) : 0;
+  const prevAvg = prevOrders ? Math.round(prevRevenue / prevOrders) : 0;
+  const pct = (c, p) => p > 0 ? Math.round(((c - p) / p) * 100) : null;
+  const payTotal = cash + upi + online;
+  const pmix = payTotal > 0 ? { cash: Math.round(cash / payTotal * 100), upi: Math.round(upi / payTotal * 100), online: Math.round(online / payTotal * 100) } : { cash: 0, upi: 0, online: 0 };
+  const itemRev = {};
+  orders.forEach(o => (o.items || []).forEach(it => { itemRev[it.name] = (itemRev[it.name] || 0) + it.price * it.qty; }));
+  const topSellers = Object.entries(itemRev).map(([name, rev]) => ({ name, rev })).sort((a, b) => b.rev - a.rev).slice(0, 5);
+  const maxItemRev = topSellers[0]?.rev || 1;
 
   // Sold pieces by category + top-selling items for the chosen period.
   const { byCat, items: soldItems } = soldBreakdown(orders, menu.items || []);
@@ -216,28 +331,168 @@ function Reports({ state, updateState, cartId }) {
       )}
       {period !== 'day' && <div style={{ marginBottom: 6 }} />}
 
-      {/* Sales + net */}
-      <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 14, marginBottom: 12 }}>
-        <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5 }}>{label.toUpperCase()} · SALES</div>
-        <div style={{ fontSize: 34, fontWeight: 900 }}>₹{revenue.toLocaleString('en-IN')}</div>
-        <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{ordersCount} orders · 💵 ₹{cash} · 📱 ₹{upi}{online > 0 ? <> · 🛵 ₹{online}</> : null}</div>
-        {periodCloses.length > 0 && <div style={{ fontSize: 10.5, opacity: 0.6, marginTop: 4 }}>Closed days use money counted at day-close; today is live.</div>}
+      {/* KPI tiles — headline metrics with period-over-period deltas */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+        {[
+          { lab: '💰 Revenue', val: `₹${revenue.toLocaleString('en-IN')}`, d: pct(revenue, prevRevenue), hero: true },
+          { lab: '🧾 Orders', val: `${ordersCount}`, d: pct(ordersCount, prevOrders) },
+          { lab: '🛍️ Avg order', val: `₹${avgOrder}`, d: pct(avgOrder, prevAvg) },
+          { lab: '📈 Net profit', val: `₹${net.toLocaleString('en-IN')}`, d: pct(net, prevNet) },
+        ].map((k, i) => (
+          <div key={i} style={{ background: k.hero ? colors.ink : '#fff', color: k.hero ? colors.primary : colors.ink, border: k.hero ? 'none' : `1px solid ${colors.border}`, borderRadius: 12, padding: 14 }}>
+            <div style={{ fontSize: 11.5, color: k.hero ? colors.primary : colors.muted, opacity: k.hero ? 0.7 : 1, fontWeight: 600 }}>{k.lab}</div>
+            <div style={{ fontSize: 23, fontWeight: 900, marginTop: 5, letterSpacing: -0.5 }}>{k.val}</div>
+            <div style={{ marginTop: 4 }}>
+              {k.d == null
+                ? <span style={{ fontSize: 10.5, color: k.hero ? colors.primary : colors.muted, opacity: 0.55 }}>— no prior data</span>
+                : <span style={{ fontSize: 11.5, fontWeight: 800, color: k.d >= 0 ? (k.hero ? '#7CE38B' : '#0F7B0F') : (k.hero ? '#FF8A8A' : '#C81E1E') }}>{k.d >= 0 ? '▲' : '▼'} {Math.abs(k.d)}% vs prev {{ today: 'day', week: 'week', month: 'month', day: 'day' }[period]}</span>}
+            </div>
+          </div>
+        ))}
       </div>
 
+      {/* Payment mix */}
+      {payTotal > 0 && (
+        <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+            <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>💳 PAYMENT MIX</div>
+            <div style={{ fontSize: 11, color: colors.muted }}>₹{payTotal.toLocaleString('en-IN')} total</div>
+          </div>
+          <div style={{ display: 'flex', height: 10, borderRadius: 6, overflow: 'hidden', gap: 2 }}>
+            {cash > 0 && <div style={{ width: `${pmix.cash}%`, background: '#1D9E75' }} />}
+            {upi > 0 && <div style={{ width: `${pmix.upi}%`, background: '#378ADD' }} />}
+            {online > 0 && <div style={{ width: `${pmix.online}%`, background: '#D85A30' }} />}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 10, fontSize: 12 }}>
+            <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#1D9E75', marginRight: 6 }} />Cash ₹{cash.toLocaleString('en-IN')} · {pmix.cash}%</span>
+            <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#378ADD', marginRight: 6 }} />UPI ₹{upi.toLocaleString('en-IN')} · {pmix.upi}%</span>
+            {online > 0 && <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#D85A30', marginRight: 6 }} />Online ₹{online.toLocaleString('en-IN')} · {pmix.online}%</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Earnings chart — daily / weekly / monthly in-hand revenue trend */}
+      <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>📈 EARNINGS TREND</div>
+          <div style={{ display: 'flex', gap: 4, background: '#F1EFE8', borderRadius: 20, padding: 3 }}>
+            {[['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']].map(([k, lab]) => (
+              <button key={k} onClick={() => setChartMode(k)} style={{ border: 'none', background: chartMode === k ? '#fff' : 'transparent', color: chartMode === k ? colors.ink : colors.muted, borderRadius: 16, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>{lab}</button>
+            ))}
+          </div>
+        </div>
+        <EarningsChart data={chartSeries} />
+        <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 8 }}>{chartMode === 'daily' ? 'Last 14 days' : chartMode === 'weekly' ? 'Last 8 weeks (Mon–Sun)' : 'Last 6 months'} · in-hand (cash + UPI)</div>
+      </div>
+
+      {/* Top sellers by revenue this period */}
+      {topSellers.length > 0 && (
+        <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 14, padding: 16, marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>🏆 TOP SELLERS · {label.toUpperCase()}</div>
+          {topSellers.map((t, i) => (
+            <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: i < topSellers.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: colors.muted, width: 16 }}>{i + 1}</span>
+              <span style={{ flex: 1, fontSize: 13, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
+              <div style={{ width: '38%', height: 8, background: '#F1EFE8', borderRadius: 4, overflow: 'hidden' }}>
+                <div style={{ width: `${Math.max(6, Math.round(t.rev / maxItemRev * 100))}%`, height: '100%', background: colors.ink, borderRadius: 4 }} />
+              </div>
+              <span style={{ fontSize: 12.5, fontWeight: 800, minWidth: 52, textAlign: 'right' }}>₹{t.rev.toLocaleString('en-IN')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Aggregator channel tracking — the weekly-payout money. Compare these
-          totals against the Zomato/Swiggy payout statements. */}
-      {online > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
-          <div style={{ background: '#FDE8EA', border: '1px solid #F5B5BC', borderRadius: 12, padding: '12px 14px' }}>
+          totals against the Zomato/Swiggy payout statements. A vendor's card
+          shows only when the owner has it on, or it has sales in the period. */}
+      {online > 0 && (() => {
+        const zTot = zomatoOrders.reduce((s, o) => s + o.total, 0);
+        const sTot = swiggyOrders.reduce((s, o) => s + o.total, 0);
+        const showZ = zTot > 0 || vendorEnabledFor(state, cartId, 'zomato');
+        const showS = sTot > 0 || vendorEnabledFor(state, cartId, 'swiggy');
+        if (!showZ && !showS) return null;
+        return (
+        <div style={{ display: 'grid', gridTemplateColumns: showZ && showS ? '1fr 1fr' : '1fr', gap: 10, marginBottom: 12 }}>
+          {showZ && <div style={{ background: '#FDE8EA', border: '1px solid #F5B5BC', borderRadius: 12, padding: '12px 14px' }}>
             <div style={{ fontSize: 11, color: '#E23744', fontWeight: 800 }}>🛵 ZOMATO — {label.toUpperCase()}</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: '#E23744' }}>₹{zomatoOrders.reduce((s, o) => s + o.total, 0).toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#E23744' }}>₹{zTot.toLocaleString('en-IN')}</div>
             <div style={{ fontSize: 11, color: colors.muted }}>{zomatoOrders.length} order{zomatoOrders.length !== 1 ? 's' : ''} · payout weekly</div>
-          </div>
-          <div style={{ background: '#FFF0E0', border: '1px solid #F5CFA4', borderRadius: 12, padding: '12px 14px' }}>
+          </div>}
+          {showS && <div style={{ background: '#FFF0E0', border: '1px solid #F5CFA4', borderRadius: 12, padding: '12px 14px' }}>
             <div style={{ fontSize: 11, color: '#C56A00', fontWeight: 800 }}>🛵 SWIGGY — {label.toUpperCase()}</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: '#C56A00' }}>₹{swiggyOrders.reduce((s, o) => s + o.total, 0).toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: '#C56A00' }}>₹{sTot.toLocaleString('en-IN')}</div>
             <div style={{ fontSize: 11, color: colors.muted }}>{swiggyOrders.length} order{swiggyOrders.length !== 1 ? 's' : ''} · payout weekly</div>
+          </div>}
+        </div>
+        );
+      })()}
+
+      {/* Weekly Zomato/Swiggy payout ledger — months collapse, a year filter
+          bounds the list, and each finished week is tapped to tick off its
+          weekly payout. Scales to years of history at a constant height. */}
+      {payoutYears.length > 0 && (
+        <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 14, padding: 16, marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>🛵 ZOMATO / SWIGGY — WEEKLY PAYOUT</div>
+            {payoutYears.length > 1 && (
+              <select value={payoutYear} onChange={e => setPayoutYear(e.target.value)} style={{ fontSize: 12, fontWeight: 700, border: `1px solid ${colors.border}`, borderRadius: 8, padding: '3px 6px', background: '#fff', color: colors.ink }}>
+                {payoutYears.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            )}
           </div>
+          <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 3, marginBottom: 12 }}>Tap a finished week when its payout lands to tick it off.</div>
+
+          {pendingWeeks.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#FFF3E0', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
+              <Clock size={16} color="#B5460B" />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 800, color: '#B5460B' }}>{pendingWeeks.length} week{pendingWeeks.length !== 1 ? 's' : ''} to validate</div>
+                <div style={{ fontSize: 11, color: '#B5460B', opacity: 0.85 }}>awaiting payout match</div>
+              </div>
+              <div style={{ fontSize: 15, fontWeight: 900, color: '#B5460B' }}>₹{pendingTotal.toLocaleString('en-IN')}</div>
+            </div>
+          )}
+
+          {payoutMonths.length === 0 && (
+            <div style={{ fontSize: 12, color: colors.muted, padding: '8px 0' }}>No Zomato/Swiggy sales in {payoutYear}.</div>
+          )}
+
+          {payoutMonths.map(mo => {
+            const isOpen = openMonths[mo.key] ?? (mo.key === currentMonthKey);
+            const moTotal = mo.zomato + mo.swiggy;
+            return (
+              <div key={mo.key} style={{ marginBottom: 4 }}>
+                <div onClick={() => setOpenMonths(p => ({ ...p, [mo.key]: !isOpen }))} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 2px', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {isOpen ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />}
+                    <span style={{ fontSize: 14, fontWeight: 800 }}>{istDateLabel(mo.key + '-01', { month: 'long', year: 'numeric' })}</span>
+                  </div>
+                  <span style={{ fontSize: 12.5, color: colors.muted }}>₹{moTotal.toLocaleString('en-IN')} · {mo.weeks.length} wk{mo.weeks.length !== 1 ? 's' : ''}</span>
+                </div>
+                {isOpen && (
+                  <div style={{ border: `1px solid ${colors.border}`, borderRadius: 12, overflow: 'hidden', marginBottom: 8 }}>
+                    {mo.weeks.map((w, i) => {
+                      const st = weekStatus(w.start);
+                      const total = w.zomato + w.swiggy;
+                      const pill = st === 'received' ? { bg: '#E7F6E7', fg: '#0F7B0F', icon: <Check size={12} />, txt: 'received' }
+                        : st === 'pending' ? { bg: '#FFF3E0', fg: '#B5460B', icon: <Clock size={12} />, txt: 'pending' }
+                        : { bg: '#F1EFE8', fg: colors.muted, icon: <Clock size={12} />, txt: 'in progress' };
+                      const clickable = st !== 'progress';
+                      return (
+                        <div key={w.start} onClick={clickable ? () => togglePayout(w.start) : undefined} style={{ padding: '10px 12px', borderTop: i > 0 ? `1px solid ${colors.border}` : 'none', cursor: clickable ? 'pointer' : 'default' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                            <span style={{ fontSize: 14, fontWeight: 700 }}>{istDateLabel(w.start, { day: 'numeric', month: 'short' })} – {istDateLabel(weekEndOf(w.start), { day: 'numeric', month: 'short' })} <span style={{ color: colors.muted, fontWeight: 400 }}>· ₹{total.toLocaleString('en-IN')}</span></span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 700, color: pill.fg, background: pill.bg, padding: '2px 8px', borderRadius: 20, whiteSpace: 'nowrap' }}>{pill.icon}{pill.txt}</span>
+                          </div>
+                          <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 3 }}>Zomato ₹{w.zomato.toLocaleString('en-IN')} · Swiggy ₹{w.swiggy.toLocaleString('en-IN')} · {w.count} order{w.count !== 1 ? 's' : ''}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
@@ -334,8 +589,7 @@ function Reports({ state, updateState, cartId }) {
           }
           const sd = dayCloseStockDiff(d);
           const stockRows = dayCloseStockRows(d).filter(x => (x.diff || 0) !== 0);
-          const onlineDay = (state.orders || []).filter(o => o.cartId === cartId && o.date === date && isOnline(o)).reduce((s, o) => s + o.total, 0);
-          const collected = (d.physicalCash || 0) + (d.phonePeAmount || 0) + onlineDay; // counted money + platform sales
+          const collected = (d.physicalCash || 0) + (d.phonePeAmount || 0); // in-hand counted money only
           const system = (d.systemCash || 0) + (d.systemUpi || 0);
           return (
             <div key={date} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
@@ -346,14 +600,20 @@ function Reports({ state, updateState, cartId }) {
                   {system !== collected && <div style={{ fontSize: 10.5, color: colors.muted }}>system ₹{system.toLocaleString('en-IN')}</div>}
                 </div>
               </div>
-              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>📦 {d.totalOrders} orders · 🥟 {d.piecesSold} pcs · counted money</div>
+              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>{d.unrecorded ? 'no orders punched · money entered by hand' : `📦 ${d.totalOrders} orders · 🥟 ${d.piecesSold} pcs · counted money`}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {/* A hand-entered day has nothing to compare against — showing
+                    "✓ matched" chips would claim a check that never happened. */}
+                {d.unrecorded ? (
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#FFF4E5', color: '#B5460B' }}>✎ Entered by hand</span>
+                ) : (<>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.cashDiff || 0) }}>💵 {fmtDiff(d.cashDiff || 0)}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(d.upiDiff || 0) }}>📱 {fmtDiff(d.upiDiff || 0)}</span>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(sd) }}>🥟 {sd === 0 ? '✓' : `${fmtDiff(sd)} pcs`}</span>
                 {dayCloseWare(d).map(r => { const w = WARE_TYPES.find(t => `_ware:${t.key}` === r.key); if (!w) return null; return (
                   <span key={r.key} style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#F5F4F0', color: diffColor(r.diff || 0) }}>{w.key === 'glass' ? '🥤' : `🍽️${w.short}`} {(r.diff || 0) === 0 ? '✓' : fmtDiff(r.diff)}</span>
                 ); })}
+                </>)}
               </div>
               {stockRows.length > 0 && (
                 <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 5 }}>{stockRows.map(x => `${x.label}: ${x.diff > 0 ? '+' : '−'}${Math.abs(x.diff)}`).join(' · ')}</div>

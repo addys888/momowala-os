@@ -160,6 +160,7 @@ const SEED_CARTS = [
 const PAY_BADGE = {
   cash: { bg: '#E7F5E7', fg: '#0F7B0F' },
   upi: { bg: '#E7EEFF', fg: '#0050B3' },
+  split: { bg: '#EFE9FB', fg: '#5B3FA6' },
   zomato: { bg: '#FDE8EA', fg: '#E23744' },
   swiggy: { bg: '#FFF0E0', fg: '#C56A00' },
   pending: { bg: '#FFF1E7', fg: '#FF4D00' },
@@ -188,6 +189,52 @@ const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
 
 const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
 
+// Per-cart opt-in for aggregator (Zomato/Swiggy) order tracking. Stored in the
+// menus blob (like stockTypes) so enabling a cart needs no schema change.
+// Momowala predates the flag and stays on unless explicitly switched off;
+// every other cart is off until opted in at onboarding or later.
+const onlineVendorsFor = (state, cartId) => {
+  const v = menuFor(state, cartId).onlineVendors;
+  return v === undefined ? cartId === 'momowala' : !!v;
+};
+
+// Owner-level per-vendor switch UNDER the admin opt-in: with online vendors
+// enabled for the cart, each vendor defaults to on and an explicit false in
+// menus[cartId].vendors turns just that one off (e.g. Zomato yes, Swiggy no).
+const vendorEnabledFor = (state, cartId, vendor) =>
+  onlineVendorsFor(state, cartId) && menuFor(state, cartId).vendors?.[vendor] !== false;
+
+// Daily "carry from home" prep checklist — items the owner brings fresh each day
+// and ticks off before opening. Configurable per cart (stored in the menus blob);
+// momowala ships with this starter list, other carts start empty until set up.
+const DEFAULT_PREP_CHECKLIST = [
+  { id: 'plates', label: 'Plates 6"/7", tissue, chammach, toothpick, steel bag, thaila' },
+  { id: 'ice', label: 'Ice' },
+  { id: 'veg', label: 'Coriander, mint, lemon, potato, onion, tomato & veggies' },
+  { id: 'cream', label: 'Fresh cream' },
+  { id: 'coffeemix', label: 'Frozen hand-blended coffee mix' },
+  { id: 'oil', label: 'Oil' },
+  { id: 'gas', label: 'Gas & imli coal' },
+  { id: 'breadcrumb', label: 'Breadcrumbs' },
+  { id: 'springroll', label: 'Spring roll sheets' },
+  { id: 'masala', label: 'Masala (chaat masala & peri peri)' },
+  { id: 'mayo', label: 'Mayo' },
+  { id: 'milk', label: 'Milk (for cold coffee)' },
+  { id: 'soda', label: 'Soda & Sprite (for mocktails)' },
+  { id: 'containers', label: 'Packing containers (online orders)' },
+];
+const prepChecklistFor = (state, cartId) => {
+  const list = menuFor(state, cartId).prepChecklist;
+  if (Array.isArray(list)) return list;
+  return cartId === 'momowala' ? DEFAULT_PREP_CHECKLIST : [];
+};
+// Per-cart thermal-printer config (menus blob). Off until the owner enables it,
+// so the print buttons only appear for carts that actually have a printer.
+const printerCfgFor = (state, cartId) => {
+  const p = menuFor(state, cartId).printer || {};
+  return { enabled: !!p.enabled, footer: p.footer || '' };
+};
+
 // ─── SERVING-WARE AUDIT (theft validation) ───
 // Every serving leaves on a specific disposable: Half momo → 6" small plate,
 // Full momo → 7" large plate, mocktail/lassi → 350ml lid glass. Ware is a
@@ -206,14 +253,29 @@ const warePacksFor = (state, cartId) => {
   const saved = menuFor(state, cartId).warePacks || {};
   return Object.fromEntries(WARE_TYPES.map(w => [w.key, saved[w.key] || WARE_PER_PACKET_DEFAULT]));
 };
-// Ware used by one order: each half momo line qty → small plate, full → large
-// plate, each mocktail/lassi qty → glass. Add-ons use nothing.
+// Ware used by one order. Default: half momo → 6" plate, full → 7" plate, any
+// drink → glass. Each item may override with a `ware` flag on its menu def:
+//   'none'  → uses no counted ware (paper-tray snacks, bottled water)
+//   'glass' → uses a glass even though it lives in the momo list
+//   'plate' → uses a plate by half/full size even if it's in the drink list
+// The flag is read from the CURRENT menu (not the order snapshot), so fixing an
+// item's serving type retroactively corrects the whole audit — including history.
+// Add-ons use nothing.
 const wareForOrder = (o, menu) => {
   const out = { plate_s: 0, plate_l: 0, glass: 0 };
+  const addPlate = (it) => { if (it.type === 'half') out.plate_s += it.qty; else out.plate_l += it.qty; };
   (o.items || []).forEach(it => {
-    if ((menu.items || []).some(m => m.id === it.id)) {
-      if (it.type === 'half') out.plate_s += it.qty; else out.plate_l += it.qty;
-    } else if ((menu.lassi || []).some(l => l.id === it.id)) {
+    const mi = (menu.items || []).find(m => m.id === it.id);
+    if (mi) {
+      if (mi.ware === 'none') return;
+      if (mi.ware === 'glass') { out.glass += it.qty; return; }
+      addPlate(it);
+      return;
+    }
+    const li = (menu.lassi || []).find(l => l.id === it.id);
+    if (li) {
+      if (li.ware === 'none') return;
+      if (li.ware === 'plate') { addPlate(it); return; }
       out.glass += it.qty;
     }
   });
@@ -224,30 +286,97 @@ const wareForOrder = (o, menu) => {
 // Zomato/Swiggy orders leave in delivery packaging, not on the cart's plates
 // or glasses — excluded from the ware audit (stock still deducts normally).
 const usesPlates = (o) => (isPaid(o) && !isOnline(o)) || (o.payment === 'pending' && o.source === 'staff-entry');
-// Daily per-ware ledger with carry-over: opening = counted at the most recent
-// day-close before `date` (rows keyed '_ware:<key>'); supplied = today's
-// PLATE_SUPPLY logs (item = ware key); used = servings today.
+// Daily per-ware ledger with a RUNNING carry-over. Opening for `date` = the last
+// physically-counted balance (from a prior day-close), carried forward across any
+// un-counted days in between by adding what was supplied and subtracting what was
+// used on those days. This survives skipped day-closes: previously opening reset
+// to 0 (and to 0 for un-audited ware types even when a different type was counted),
+// so any gap in the closing ritual produced nonsensical expected counts. Each ware
+// type carries from the last close that actually counted THAT key.
 function wareLedger(state, cartId, date) {
   const menu = menuFor(state, cartId);
-  const prevClose = (state.dayCloseLogs || [])
-    .filter(d => d.cartId === cartId && d.date < date && Array.isArray(d.stock) && d.stock.some(r => String(r.key).startsWith('_ware:')))
-    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-  const usedBy = { plate_s: 0, plate_l: 0, glass: 0 };
+  // Per-ware supplied and used, bucketed by date, for everything up to `date`.
+  // PLATE_SUPPLY = real handovers; WARE_RESET = a manual recount/hard-reset
+  // correction (qty = target − then-current, so the balance lands on the target).
+  const supByDate = {}; // date -> { [wareKey]: qty }
+  (state.stockLogs || [])
+    .filter(l => l.cartId === cartId && (l.type === 'PLATE_SUPPLY' || l.type === 'WARE_RESET') && l.date <= date)
+    .forEach(l => { (supByDate[l.date] ||= {})[l.item] = (supByDate[l.date][l.item] || 0) + (l.qty || 0); });
+  const usedByDate = {}; // date -> { plate_s, plate_l, glass }
   (state.orders || [])
-    .filter(o => o.cartId === cartId && o.date === date && usesPlates(o))
-    .forEach(o => { const w = wareForOrder(o, menu); WARE_TYPES.forEach(t => { usedBy[t.key] += w[t.key]; }); });
+    .filter(o => o.cartId === cartId && o.date <= date && usesPlates(o))
+    .forEach(o => { const w = wareForOrder(o, menu); const acc = (usedByDate[o.date] ||= { plate_s: 0, plate_l: 0, glass: 0 }); WARE_TYPES.forEach(t => { acc[t.key] += w[t.key]; }); });
+  const closesAsc = (state.dayCloseLogs || [])
+    .filter(d => d.cartId === cartId && Array.isArray(d.stock))
+    .sort((a, b) => (a.date < b.date ? -1 : 1));
+  // The remaining that CARRIES to the next day for a close row. If the owner took
+  // the leftover off the cart at close (`carry` stored, e.g. 0 for plates), use
+  // it; otherwise fall back to the counted `actual` (glass, older records).
+  const carriedOf = (closeRow) => closeRow ? (closeRow.carry ?? closeRow.actual ?? 0) : 0;
   const out = {};
   WARE_TYPES.forEach(t => {
-    const supplied = (state.stockLogs || [])
-      .filter(l => l.cartId === cartId && l.type === 'PLATE_SUPPLY' && l.item === t.key && l.date === date)
-      .reduce((s, l) => s + (l.qty || 0), 0);
-    const opening = prevClose ? (prevClose.stock.find(r => r.key === `_ware:${t.key}`)?.actual ?? 0) : 0;
-    out[t.key] = { opening, supplied, used: usedBy[t.key], expected: opening + supplied - usedBy[t.key] };
+    // Most recent close BEFORE `date` that counted this specific ware key.
+    const counted = [...closesAsc].reverse().find(d => d.date < date && d.stock.some(r => r.key === `_ware:${t.key}` && r.actual != null));
+    const baseDate = counted ? counted.date : null;
+    let opening = carriedOf(counted?.stock.find(r => r.key === `_ware:${t.key}`));
+    // Carry the baseline forward across any un-counted days in between. Only when
+    // a baseline exists — WITHOUT one there is no trustworthy starting point, so
+    // opening stays 0 and `expected` reflects just today's supplied − used.
+    // (Carrying from inception wrongly assumed handovers were logged from day one,
+    // inflating the Home "should remain" after a fresh handover.)
+    if (baseDate !== null) {
+      Object.keys(supByDate).forEach(d => { if (d > baseDate && d < date) opening += (supByDate[d][t.key] || 0); });
+      Object.keys(usedByDate).forEach(d => { if (d > baseDate && d < date) opening -= (usedByDate[d][t.key] || 0); });
+    }
+    const supplied = supByDate[date]?.[t.key] || 0;
+    const used = usedByDate[date]?.[t.key] || 0;
+    // If `date` itself is already reconciled, the cart now physically holds what
+    // was carried (0 for plates taken off, counted amount for glass kept) — so the
+    // live "should remain" collapses to that, not the pre-close arithmetic.
+    const todayCloseRow = closesAsc.find(d => d.date === date)?.stock?.find(r => r.key === `_ware:${t.key}`);
+    const closed = !!todayCloseRow;
+    const expected = closed ? carriedOf(todayCloseRow) : (opening + supplied - used);
+    // `anchored` = a prior close physically counted this ware, so `expected` is
+    // trustworthy. Until then (no baseline yet) the running total is carried from
+    // incomplete early records and must NOT be read as a theft signal — the first
+    // count establishes the baseline instead.
+    out[t.key] = { opening, supplied, used, expected, closed, anchored: baseDate !== null };
   });
   return out;
 }
 // The ware audit rows a day-close tucks into its stock array ('_ware:<key>').
 const dayCloseWare = (d) => Array.isArray(d?.stock) ? d.stock.filter(r => String(r.key).startsWith('_ware:')) : [];
+
+// Over-punch detector for momo stock. The live cart counter floors at 0, so
+// punching (or wasting) more pieces than were loaded is silently swallowed —
+// hiding a real "sold more than we had" signal. This recomputes the UN-clamped
+// net cart since the last day-close (which resets the cart to 0): loads − unloads
+// − pieces actually deducted by orders − wastage. A negative result means more
+// left the cart than was ever put on it. Returns { stockKey: overPcs } for
+// negatives only (empty = clean). Purely a read-only signal; it never changes
+// the counter, so it can't regress normal stock behaviour.
+function momoOversell(state, cartId, date) {
+  const lastClose = (state.dayCloseLogs || [])
+    .filter(d => d.cartId === cartId && d.date <= date)
+    .map(d => d.date).sort().pop() || null;
+  const inWindow = (d) => (lastClose === null || d > lastClose) && d <= date;
+  const menu = menuFor(state, cartId);
+  const net = {};
+  (state.cartLoadings || []).filter(l => l.cartId === cartId && inWindow(l.date)).forEach(l => {
+    if (l.type === 'CART_LOAD') net[l.item] = (net[l.item] || 0) + (l.qty || 0);
+    else if (l.type === 'CART_UNLOAD') net[l.item] = (net[l.item] || 0) - (l.qty || 0);
+    else if (l.type === 'CART_ADJUST') net[l.item] = (net[l.item] || 0) + (l.qty || 0); // signed recount correction
+  });
+  // Only orders that actually deducted stock and weren't cancelled (cancel
+  // restores), mirroring exactly what the live counter reflects.
+  (state.orders || []).filter(o => o.cartId === cartId && inWindow(o.date) && o.stockDeducted && o.payment !== 'cancelled')
+    .forEach(o => Object.entries(orderStockDeltas(o.items, menu.items)).forEach(([k, pcs]) => { net[k] = (net[k] || 0) - pcs; }));
+  (state.wastageLogs || []).filter(w => w.cartId === cartId && inWindow(w.date) && w.stockKey)
+    .forEach(w => { net[w.stockKey] = (net[w.stockKey] || 0) - (w.qty || 0); });
+  const out = {};
+  Object.entries(net).forEach(([k, v]) => { if (v < 0) out[k] = -v; });
+  return out;
+}
 
 // Group momo items by category (Steamed, Kurkure…), preserving first-seen order,
 // so the menu reads category → variants (Veg / Paneer / Corn) under it.
@@ -439,7 +568,12 @@ function playOrderAlert() {
 // sales paid out weekly by the platform — revenue and stock, but never part of
 // the cash/UPI reconciliation. 'pending' and 'cancelled' never touch revenue.
 
-const isPaid = (o) => o.payment === 'cash' || o.payment === 'upi' || o.payment === 'zomato' || o.payment === 'swiggy';
+const isPaid = (o) => o.payment === 'cash' || o.payment === 'upi' || o.payment === 'split' || o.payment === 'zomato' || o.payment === 'swiggy';
+// Split orders record how much of the bill went to each method ({cash, upi}).
+// These attribute an order's rupees to the correct counted bucket so a part-cash
+// part-UPI payment never misfires the cash/PhonePe reconciliation.
+const cashPart = (o) => o.payment === 'cash' ? o.total : (o.payment === 'split' ? (o.split?.cash || 0) : 0);
+const upiPart = (o) => o.payment === 'upi' ? o.total : (o.payment === 'split' ? (o.split?.upi || 0) : 0);
 // Aggregator (delivery-platform) order — money arrives as a weekly payout.
 const isOnline = (o) => o.payment === 'zomato' || o.payment === 'swiggy';
 
@@ -565,6 +699,7 @@ const getInitialState = () => {
     dayCloseLogs: tag(storage.get('dayCloseLogs', [])),
     wastageLogs: tag(storage.get('wastageLogs', [])),
     expenses: tag(storage.get('expenses', [])),
+    payoutMarks: tag(storage.get('payoutMarks', [])),
     staffOnDuty: storage.get('staffOnDuty', null),
   };
 };
@@ -627,4 +762,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, momoOversell };

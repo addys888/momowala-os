@@ -13,7 +13,8 @@ create table if not exists orders (
   time text not null,
   items jsonb not null default '[]',
   total integer not null,
-  payment text not null check (payment in ('cash', 'upi', 'pending', 'cancelled', 'zomato', 'swiggy')),
+  payment text not null check (payment in ('cash', 'upi', 'split', 'pending', 'cancelled', 'zomato', 'swiggy')),
+  split jsonb,   -- for payment='split': { cash, upi } — the two must sum to total
   cancel_reason text,
   prep_status text,
   staff text,
@@ -73,6 +74,8 @@ create table if not exists day_close_logs (
   actual_corn integer,
   corn_diff integer,
   stock jsonb,            -- generic per-stock-type reconciliation [{key,label,expected,actual,diff}]
+  holiday boolean,        -- cart never opened that day (nothing to reconcile)
+  unrecorded boolean,     -- cart ran but no orders were punched; money entered by hand
   pieces_sold integer,
   revenue integer,
   closed_at timestamptz,
@@ -168,6 +171,60 @@ create table if not exists expenses (
 -- back-fill the funding-source column on existing installs
 alter table expenses add column if not exists fund text;
 
+-- Owner's weekly Zomato/Swiggy payout validation flags. One row per cart per
+-- ISO week (Mon–Sun). id = week-start as YYYYMMDD int. `received` toggles as the
+-- owner ticks each week off against the platform's weekly payout statement.
+-- MENU WRITE LOCKDOWN. The July 2026 clobbers came from devices running old
+-- app builds (kept open for days, never reloaded) background-pushing their
+-- stale whole-menu blob — no client-side fix can reach a device that never
+-- reloads. So writes are locked at the database: menu edits go through this
+-- SECURITY DEFINER function that rewrites ONLY the named cart's menu, and
+-- anon loses direct INSERT/UPDATE on menus entirely — a stale build's direct
+-- upsert is rejected by Postgres itself. The history trigger still snapshots
+-- every change made through the function.
+create or replace function set_cart_menu(p_cart_id text, p_menu jsonb)
+returns void language plpgsql security definer as $$
+begin
+  update menus
+     set data = jsonb_set(coalesce(data, '{}'::jsonb), array[p_cart_id], p_menu, true),
+         updated_at = now()
+   where id = 1;
+  if not found then
+    insert into menus (id, data, updated_at) values (1, jsonb_build_object(p_cart_id, p_menu), now());
+  end if;
+end $$;
+grant execute on function set_cart_menu(text, jsonb) to anon;
+revoke insert, update, delete on menus from anon;  -- reads stay open; writes only via the function
+
+-- Safety net for the menus blob: every write to menus is snapshotted BEFORE it
+-- lands, so any accidental overwrite (the July 2026 "menu items vanished"
+-- incident) can be rolled back by copying a row back from here. Insert-only
+-- for the browser role; nothing in the app reads it.
+create table if not exists menus_history (
+  id bigserial primary key,
+  snapshot jsonb not null,
+  replaced_at timestamptz not null default now()
+);
+alter table menus_history enable row level security;  -- no anon policy ⇒ browser can't read/change history
+create or replace function snapshot_menus() returns trigger
+language plpgsql security definer as $$
+begin
+  insert into menus_history (snapshot) values (to_jsonb(old));
+  return new;
+end $$;
+drop trigger if exists menus_history_trg on menus;
+create trigger menus_history_trg before update on menus
+  for each row execute function snapshot_menus();
+
+create table if not exists payout_marks (
+  id bigint primary key,
+  cart_id text,
+  week_start date not null,
+  received boolean not null default true,
+  updated_at timestamptz not null default now()
+);
+grant all on payout_marks to anon;
+
 -- Per-cart, per-day order token counter. Tokens are allocated atomically by
 -- the next_order_token() RPC so two devices ordering at once can never get the
 -- same number (the old client-side count+1 collided across phones).
@@ -259,12 +316,13 @@ alter table inventory enable row level security;
 alter table staff enable row level security;
 alter table carts enable row level security;
 alter table platform enable row level security;
+alter table payout_marks enable row level security;
 
 -- drop-then-create so the whole file is safe to re-run
 do $$
 declare t text;
 begin
-  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','menus','wastage_logs','expenses','order_counters']
+  foreach t in array array['orders','stock_logs','cart_loadings','day_close_logs','inventory','staff','carts','menus','wastage_logs','expenses','order_counters','payout_marks']
   loop
     execute format('drop policy if exists "anon full access" on %I', t);
     execute format('create policy "anon full access" on %I for all to anon using (true) with check (true)', t);
@@ -451,6 +509,11 @@ alter table day_close_logs add column if not exists actual_corn integer;
 alter table day_close_logs add column if not exists corn_diff integer;
 -- Generic per-stock-type reconciliation (replaces the hardcoded veg/paneer/corn cols).
 alter table day_close_logs add column if not exists stock jsonb;
+-- How the day was closed: holiday = cart never opened; unrecorded = it ran but
+-- no orders were punched, so the money was entered by hand. Without these the
+-- flags only lived on the device that set them and were lost on cloud reload.
+alter table day_close_logs add column if not exists holiday boolean;
+alter table day_close_logs add column if not exists unrecorded boolean;
 
 -- ── Migration: pending payment + staff accounts ──
 -- Allow the new 'pending' payment status and record when an order is settled.
@@ -462,8 +525,10 @@ alter table orders add column if not exists customer_name text;
 alter table orders add column if not exists customer_phone text;
 -- Live prep status for the customer tracker: null=placed, 'preparing', 'ready'.
 alter table orders add column if not exists prep_status text;
+-- Split (part-cash / part-UPI) payments: the breakdown rides in a jsonb column.
+alter table orders add column if not exists split jsonb;
 alter table orders drop constraint if exists orders_payment_check;
-alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'pending', 'cancelled', 'zomato', 'swiggy'));
+alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'split', 'pending', 'cancelled', 'zomato', 'swiggy'));
 
 -- ── Migration: multi-cart (which QSR cart an order belongs to) ──
 alter table orders add column if not exists outlet text;

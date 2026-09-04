@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
 import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, warePacksFor, wareLedger, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
@@ -21,10 +21,12 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const newInv = { ...inv };
     const newOps = {};
     next.forEach(st => { if (!newInv[st.key]) { newInv[st.key] = { freezer: 0, cart: 0 }; newOps[st.key] = { df: 0, dc: 0 }; } });
+    const newMenus = { ...state.menus, [cartId]: { ...menu, stockTypes: next } };
     updateState({
-      menus: { ...state.menus, [cartId]: { ...menu, stockTypes: next } },
+      menus: newMenus,
       inventory: { ...state.inventory, [cartId]: newInv },
     });
+    pushMenus(newMenus, cartId);
     if (Object.keys(newOps).length) persistInv(cartId, newOps, { ...state.inventory, [cartId]: newInv });
   };
 
@@ -59,10 +61,12 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const menu = menuFor(state, cartId);
     const savedPacks = warePacksFor(state, cartId);
     const packsChanged = WARE_TYPES.some(w => packSizes[w.key] !== savedPacks[w.key]);
+    const newMenus = packsChanged ? { ...state.menus, [cartId]: { ...menu, warePacks: packSizes } } : null;
     updateState({
       stockLogs: [...state.stockLogs, ...logs],
-      ...(packsChanged ? { menus: { ...state.menus, [cartId]: { ...menu, warePacks: packSizes } } } : {}),
+      ...(newMenus ? { menus: newMenus } : {}),
     });
+    if (newMenus) pushMenus(newMenus, cartId);
     setShowPlates(false);
   };
 
@@ -122,6 +126,24 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     };
     setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
     persistInv(cartId, { [type]: { df: qty, dc: -qty } }, { ...state.inventory, [cartId]: newInv });
+  };
+
+  // Correct / hard-reset a stock type's CART count after a miscount or mishap.
+  // Sets the cart piece count to the true number via an ATOMIC absolute set
+  // (cset), and logs a CART_ADJUST entry for the audit trail. This is the momo
+  // equivalent of the plate/glass reset on Home.
+  const correctCart = (type) => {
+    const cur = inv[type]?.cart ?? 0;
+    const raw = window.prompt(`Recount "${labelFor(type)}" on the cart.\nSystem shows ${cur} pcs. Enter the TRUE count now (0 to reset):`, '0');
+    if (raw === null) return;
+    const target = parseInt(raw, 10);
+    if (!Number.isFinite(target) || target < 0) { alert('Enter a valid number (0 or more).'); return; }
+    const delta = target - cur;
+    if (delta === 0) return;
+    const newInv = { ...inv, [type]: { ...(inv[type] || { freezer: 0, cart: 0 }), cart: target } };
+    const log = { id: Date.now(), cartId, date: TODAY, time: istTime(), type: 'CART_ADJUST', item: type, qty: delta, note: `Cart recount → set to ${target} (${delta > 0 ? '+' : ''}${delta})` };
+    setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
+    persistInv(cartId, { [type]: { cset: target } }, { ...state.inventory, [cartId]: newInv });
   };
 
   // Confirmed from the move modal (load to cart / return to freezer).
@@ -214,7 +236,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
         </div>
         {stockTypes.map(st => {
           const b = inv[st.key] || { freezer: 0, cart: 0 };
-          return <FreezerItem key={st.key} typeKey={st.key} label={st.label} stock={b.freezer} cart={b.cart} onMove={(dir, qty) => setMoving({ type: st.key, label: st.label, dir, qty })} onAdjust={() => setAdjusting({ key: st.key, label: st.label })} />;
+          return <FreezerItem key={st.key} typeKey={st.key} label={st.label} stock={b.freezer} cart={b.cart} onMove={(dir, qty) => setMoving({ type: st.key, label: st.label, dir, qty })} onAdjust={() => setAdjusting({ key: st.key, label: st.label })} onCorrectCart={() => correctCart(st.key)} />;
         })}
         {stockTypes.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No stock types yet. Tap "Edit stock types" to add the items this cart freezes.</div>}
       </div>
@@ -260,7 +282,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
 }
 
 
-function FreezerItem({ typeKey, label, stock, cart, onMove, onAdjust }) {
+function FreezerItem({ typeKey, label, stock, cart, onMove, onAdjust, onCorrectCart }) {
   const [qty, setQty] = useState(50);
   return (
     <div style={{ padding: '12px 0', borderBottom: `1px solid ${colors.border}` }}>
@@ -279,9 +301,16 @@ function FreezerItem({ typeKey, label, stock, cart, onMove, onAdjust }) {
           Cart → Freezer
         </button>
       </div>
-      <button onClick={onAdjust} style={{ background: 'transparent', color: colors.muted, border: 'none', padding: '2px 0', fontWeight: 600, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
-        Adjust freezer (wastage / recount)
-      </button>
+      <div style={{ display: 'flex', gap: 16 }}>
+        <button onClick={onAdjust} style={{ background: 'transparent', color: colors.muted, border: 'none', padding: '2px 0', fontWeight: 600, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+          Adjust freezer (wastage / recount)
+        </button>
+        {onCorrectCart && (
+          <button onClick={onCorrectCart} style={{ background: 'transparent', color: colors.muted, border: 'none', padding: '2px 0', fontWeight: 600, fontSize: 12, cursor: 'pointer', textDecoration: 'underline' }}>
+            Correct cart count
+          </button>
+        )}
+      </div>
     </div>
   );
 }
