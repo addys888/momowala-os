@@ -1,10 +1,274 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, colors, isOnline, isPaid, persistInv, wareLedger } from '../../core';
+import { TODAY, WARE_TYPES, colors, isOnline, isPaid, istDateLabel, menuFor, persistInv, wareLedger } from '../../core';
 import { SectionHeader } from '../../components/shared';
 
+// How many days back the reconciliation day-picker shows (today + this many prior).
+const RECON_DAYS_BACK = 13;
+
+// A day's money/pieces summary computed straight from orders — used both to label
+// the day strip and to drive a back-dated (late/forgotten) close.
+function dayStatsFor(state, cartId, date) {
+  const menu = menuFor(state, cartId);
+  const dayOrders = state.orders.filter(o => o.cartId === cartId && o.date === date);
+  const paid = dayOrders.filter(isPaid);
+  const cash = dayOrders.filter(o => o.payment === 'cash').reduce((s, o) => s + o.total, 0);
+  const upi = dayOrders.filter(o => o.payment === 'upi').reduce((s, o) => s + o.total, 0);
+  const online = dayOrders.filter(isOnline).reduce((s, o) => s + o.total, 0);
+  const pieces = paid.reduce((s, o) => s + (o.items || []).reduce((ss, it) => {
+    const m = menu.items.find(x => x.id === it.id);
+    return m ? ss + (it.type === 'half' ? m.pcsHalf : m.pcsFull) * it.qty : ss;
+  }, 0), 0);
+  return { orders: dayOrders, paidCount: paid.length, cash, upi, online, pieces };
+}
+
+// Short chip label: Today / Yesterday / "3 Sep".
+function dayChipLabel(date, yesterday) {
+  if (date === TODAY) return 'Today';
+  if (date === yesterday) return 'Yesterday';
+  return istDateLabel(date, { day: 'numeric', month: 'short' });
+}
+
 function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold }) {
+  const [selectedDate, setSelectedDate] = useState(TODAY);
+
+  // Recent IST calendar dates, newest first (UTC-anchored to avoid TZ drift).
+  const [ty, tm, tdd] = TODAY.split('-').map(Number);
+  const baseMs = Date.UTC(ty, tm - 1, tdd);
+  const recentDays = [...Array(RECON_DAYS_BACK + 1)].map((_, i) => new Date(baseMs - i * 86400000).toISOString().split('T')[0]);
+  const yesterday = recentDays[1];
+
+  const closeByDate = Object.fromEntries(state.dayCloseLogs.filter(d => d.cartId === cartId).map(d => [d.date, d]));
+  const orderCountByDate = {};
+  state.orders.filter(o => o.cartId === cartId).forEach(o => { orderCountByDate[o.date] = (orderCountByDate[o.date] || 0) + 1; });
+
+  // Status for a day: closed | holiday | empty (past, no orders, open) | pending (past, had orders, open) | today.
+  const statusFor = (date) => {
+    const dc = closeByDate[date];
+    if (dc) return dc.holiday ? 'holiday' : 'closed';
+    if (date === TODAY) return 'today';
+    return (orderCountByDate[date] || 0) > 0 ? 'pending' : 'empty';
+  };
+
+  const closeHoliday = (date) => {
+    updateState(prev => ({
+      dayCloseLogs: [...prev.dayCloseLogs, {
+        id: Date.now(), cartId, date,
+        totalOrders: 0,
+        systemCash: 0, physicalCash: 0, cashDiff: 0,
+        systemUpi: 0, phonePeAmount: 0, upiDiff: 0,
+        stock: [], piecesSold: 0, revenue: 0,
+        holiday: true,
+        closedAt: new Date().toISOString(),
+      }],
+    }));
+  };
+
+  // Back-dated (late) close for a day whose reconciliation was missed. Only cash
+  // and UPI are counted — stock and plates/glasses can't be re-counted after the
+  // fact, so no inventory is touched. Records the day so it stops reading as
+  // "forgotten" in reports.
+  const closeLate = (date, physicalCash, phonePeAmount) => {
+    const s = dayStatsFor(state, cartId, date);
+    const pc = parseInt(physicalCash) || 0;
+    const pp = parseInt(phonePeAmount) || 0;
+    updateState(prev => ({
+      dayCloseLogs: [...prev.dayCloseLogs, {
+        id: Date.now(), cartId, date,
+        totalOrders: s.paidCount,
+        systemCash: s.cash, physicalCash: pc, cashDiff: pc - s.cash,
+        systemUpi: s.upi, phonePeAmount: pp, upiDiff: pp - s.upi,
+        stock: [], piecesSold: s.pieces, revenue: s.cash + s.upi,
+        closedAt: new Date().toISOString(),
+      }],
+    }));
+  };
+
+  const status = statusFor(selectedDate);
+
+  return (
+    <div>
+      <SectionHeader title="Reconciliation" subtitle="Close the day — cash, stock, plates & glasses" />
+
+      <DayStrip days={recentDays} selectedDate={selectedDate} onSelect={setSelectedDate}
+        statusFor={statusFor} yesterday={yesterday} />
+
+      {selectedDate === TODAY ? (
+        <TodayReconcile state={state} updateState={updateState} cartId={cartId} inv={inv}
+          stockTypes={stockTypes} todayOrders={todayOrders} cashRevenue={cashRevenue}
+          upiRevenue={upiRevenue} piecesSold={piecesSold} />
+      ) : status === 'closed' || status === 'holiday' ? (
+        <ClosedSummary log={closeByDate[selectedDate]} date={selectedDate} />
+      ) : status === 'empty' ? (
+        <HolidayEmpty date={selectedDate} onMarkClosed={() => closeHoliday(selectedDate)} />
+      ) : (
+        <LateReconcile date={selectedDate} stats={dayStatsFor(state, cartId, selectedDate)}
+          onClose={(cash, upi) => closeLate(selectedDate, cash, upi)} />
+      )}
+    </div>
+  );
+}
+
+
+// ─── Day picker strip ───
+
+function DayStrip({ days, selectedDate, onSelect, statusFor, yesterday }) {
+  const badge = { closed: '✓ done', holiday: '🏖️ closed', empty: '—', pending: '● pending', today: '—' };
+  const badgeColor = { closed: colors.green, holiday: '#8A6D00', empty: colors.muted, pending: colors.accent, today: colors.muted };
+  return (
+    <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8, marginBottom: 16, WebkitOverflowScrolling: 'touch' }}>
+      {days.map(date => {
+        const st = statusFor(date);
+        const active = date === selectedDate;
+        return (
+          <button key={date} onClick={() => onSelect(date)}
+            style={{
+              flex: '0 0 auto', minWidth: 92, textAlign: 'center', cursor: 'pointer',
+              background: active ? colors.ink : '#fff',
+              color: active ? colors.primary : colors.ink,
+              border: `1px solid ${active ? colors.ink : colors.border}`,
+              borderRadius: 12, padding: '10px 12px',
+            }}>
+            <div style={{ fontWeight: 800, fontSize: 13.5, whiteSpace: 'nowrap' }}>{dayChipLabel(date, yesterday)}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, marginTop: 3, color: active ? colors.primary : badgeColor[st] }}>{badge[st]}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+
+// ─── Empty day → mark cart closed (holiday) ───
+
+function HolidayEmpty({ date, onMarkClosed }) {
+  const label = istDateLabel(date, { day: 'numeric', month: 'short' });
+  return (
+    <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 16, padding: 28, textAlign: 'center' }}>
+      <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>No orders on {label}</div>
+      <div style={{ fontSize: 13.5, color: colors.muted, lineHeight: 1.5, maxWidth: 340, margin: '0 auto 20px' }}>
+        If the cart was shut that day, mark it closed so it's not flagged as forgotten.
+      </div>
+      <button onClick={onMarkClosed}
+        style={{ background: colors.ink, color: colors.primary, border: 'none', padding: '14px 22px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>
+        🏖️ Mark cart closed (holiday)
+      </button>
+    </div>
+  );
+}
+
+
+// ─── Closed day → read-only summary ───
+
+function ClosedSummary({ log, date }) {
+  const label = istDateLabel(date, { weekday: 'long', day: 'numeric', month: 'long' });
+  if (log?.holiday) {
+    return (
+      <div>
+        <div style={{ background: '#FFF7E0', border: '1px solid #FFE08A', color: '#8A6D00', padding: 28, borderRadius: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 34, marginBottom: 8 }}>🏖️</div>
+          <div style={{ fontSize: 18, fontWeight: 800 }}>Cart was closed</div>
+          <div style={{ fontSize: 13.5, marginTop: 4, opacity: 0.85 }}>{label} · marked as a holiday — no sales.</div>
+        </div>
+      </div>
+    );
+  }
+  const money = (n) => `₹${(n || 0).toLocaleString('en-IN')}`;
+  const wareRows = (log?.stock || []).filter(r => String(r.key).startsWith('_ware:'));
+  const stockRows = (log?.stock || []).filter(r => !String(r.key).startsWith('_ware:'));
+  return (
+    <div>
+      <div style={{ background: colors.green, color: '#fff', padding: 20, borderRadius: 16, marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 16 }}>
+          <CheckCircle2 size={18} /> Day closed
+        </div>
+        <div style={{ fontSize: 13, opacity: 0.9, marginTop: 2 }}>{label} · {log?.totalOrders || 0} orders · counted {money(log?.revenue)}</div>
+      </div>
+
+      <SummaryRow label="💰 Cash box" system={money(log?.systemCash)} counted={money(log?.physicalCash)} diff={log?.cashDiff} unit="₹" />
+      <SummaryRow label="📱 UPI / PhonePe" system={money(log?.systemUpi)} counted={money(log?.phonePeAmount)} diff={log?.upiDiff} unit="₹" />
+
+      {stockRows.map(r => (
+        <SummaryRow key={r.key} label={`🥟 ${r.label}`} system={`${r.expected} pcs`} counted={`${r.actual} pcs`} diff={r.diff} unit="pcs" />
+      ))}
+      {wareRows.map(r => (
+        <SummaryRow key={r.key} label={`🍽️ ${r.label}`} system={`${r.expected}${r.damaged ? ` − ${r.damaged} dmg` : ''}`} counted={`${r.actual}`} diff={r.diff} unit=" pcs" />
+      ))}
+
+      <div style={{ fontSize: 11.5, color: colors.muted, textAlign: 'center', marginTop: 12 }}>
+        Closed {log?.closedAt ? new Date(log.closedAt).toLocaleString('en-IN') : ''} · logs are read-only
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, system, counted, diff, unit }) {
+  const hasDiff = typeof diff === 'number';
+  const color = !hasDiff || diff === 0 ? colors.green : Math.abs(diff) < 50 ? '#D4A017' : colors.red;
+  return (
+    <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: hasDiff && diff !== 0 ? 8 : 0 }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{label}</div>
+        <div style={{ fontSize: 13, color: colors.muted }}>
+          System <strong style={{ color: colors.ink }}>{system}</strong> · Counted <strong style={{ color: colors.ink }}>{counted}</strong>
+        </div>
+      </div>
+      {hasDiff && diff !== 0 && (
+        <div style={{ fontSize: 12.5, fontWeight: 700, color, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <AlertCircle size={13} /> Difference: {diff > 0 ? '+' : ''}{diff}{unit}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ─── Past day whose reconciliation was missed → cash/UPI-only late close ───
+
+function LateReconcile({ date, stats, onClose }) {
+  const [physicalCash, setPhysicalCash] = useState('');
+  const [phonePeAmount, setPhonePeAmount] = useState('');
+  const label = istDateLabel(date, { weekday: 'long', day: 'numeric', month: 'long' });
+  const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - stats.cash : null;
+  const upiDiff = phonePeAmount !== '' ? parseInt(phonePeAmount) - stats.upi : null;
+
+  return (
+    <div>
+      <div style={{ background: '#FFF7E0', border: '1px solid #FFE08A', borderRadius: 12, padding: '12px 14px', marginBottom: 16, fontSize: 12.5, color: '#8A6D00', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+        <span>⏳</span>
+        <span><strong>{label}</strong> was never closed. Confirm the cash & UPI collected — plates and stock can't be re-counted for a past day, so only the money is reconciled.</span>
+      </div>
+
+      <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 12, marginBottom: 16 }}>
+        <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5, marginBottom: 8 }}>SYSTEM RECORDED THAT DAY</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div><div style={{ fontSize: 11, opacity: 0.7 }}>Paid Orders</div><div style={{ fontSize: 24, fontWeight: 800 }}>{stats.paidCount}</div></div>
+          <div><div style={{ fontSize: 11, opacity: 0.7 }}>Cash + UPI</div><div style={{ fontSize: 24, fontWeight: 800 }}>₹{stats.cash + stats.upi}</div></div>
+        </div>
+        {stats.online > 0 && (
+          <div style={{ fontSize: 11, opacity: 0.75, marginTop: 8 }}>plus 🛵 ₹{stats.online} Zomato/Swiggy — weekly payout, not in the cash box.</div>
+        )}
+      </div>
+
+      <ReconcileBlock title="💰 Cash Box" systemValue={`₹${stats.cash}`} label="Physical cash collected that day"
+        value={physicalCash} onChange={setPhysicalCash} diff={cashDiff} unit="₹" />
+      <ReconcileBlock title="📱 UPI / PhonePe" systemValue={`₹${stats.upi}`} label="Total in PhonePe that day"
+        value={phonePeAmount} onChange={setPhonePeAmount} diff={upiDiff} unit="₹" />
+
+      <button onClick={() => onClose(physicalCash, phonePeAmount)}
+        disabled={physicalCash === '' || phonePeAmount === ''}
+        style={{ width: '100%', background: (physicalCash === '' || phonePeAmount === '') ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: (physicalCash === '' || phonePeAmount === '') ? 'not-allowed' : 'pointer', marginTop: 6 }}>
+        Save Late Close
+      </button>
+    </div>
+  );
+}
+
+
+// ─── Today → live full reconciliation (cash, UPI, stock, plates/glasses) ───
+
+function TodayReconcile({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold }) {
   const alreadyClosed = state.dayCloseLogs.some(d => d.cartId === cartId && d.date === TODAY);
   const [physicalCash, setPhysicalCash] = useState('');
   const [phonePeAmount, setPhonePeAmount] = useState('');
@@ -96,8 +360,6 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
 
   return (
     <div>
-      <SectionHeader title="End of Day Reconciliation" subtitle="The 10:30 PM ritual" />
-
       {/* System totals */}
       <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 12, marginBottom: 16 }}>
         <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5, marginBottom: 8 }}>SYSTEM RECORDED TODAY</div>

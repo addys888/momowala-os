@@ -451,6 +451,10 @@ alter table day_close_logs add column if not exists actual_corn integer;
 alter table day_close_logs add column if not exists corn_diff integer;
 -- Generic per-stock-type reconciliation (replaces the hardcoded veg/paneer/corn cols).
 alter table day_close_logs add column if not exists stock jsonb;
+-- ── Migration: holiday closes ──
+-- Marks a day the cart was shut (no orders) so it reads as "closed for the day"
+-- instead of a forgotten reconciliation. All money/stock fields stay 0.
+alter table day_close_logs add column if not exists holiday boolean default false;
 
 -- ── Migration: pending payment + staff accounts ──
 -- Allow the new 'pending' payment status and record when an order is settled.

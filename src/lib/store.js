@@ -122,6 +122,7 @@ const dayCloseToRow = (d) => ({
   stock: d.stock ?? null,
   pieces_sold: d.piecesSold,
   revenue: d.revenue,
+  holiday: d.holiday ?? false,
   closed_at: d.closedAt,
 });
 
@@ -148,6 +149,7 @@ const rowToDayClose = (r) => ({
   stock: r.stock ?? undefined,
   piecesSold: r.pieces_sold,
   revenue: r.revenue,
+  holiday: r.holiday ?? false,
   closedAt: r.closed_at,
 });
 
@@ -444,13 +446,21 @@ async function pushState(state) {
       }
       return r;
     };
-    // Day-close append, resilient to the `stock` column not existing yet.
+    // Day-close append, resilient to newer optional columns (`holiday`, `stock`)
+    // not existing yet — strip them progressively and retry on a missing-column
+    // error so an older DB schema still accepts the core reconciliation fields.
     const appendDayClose = async (rows) => {
       if (!rows.length) return { error: null };
-      let r = await supabase.from('day_close_logs').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
-      if (r.error && /stock|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
-        const stripped = rows.map(({ stock, ...rest }) => rest);
-        r = await supabase.from('day_close_logs').upsert(stripped, { onConflict: 'id', ignoreDuplicates: true });
+      const put = (rs) => supabase.from('day_close_logs').upsert(rs, { onConflict: 'id', ignoreDuplicates: true });
+      const missingCol = (r) => r.error && /holiday|stock|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`);
+      let r = await put(rows);
+      if (missingCol(r)) {
+        const noHoliday = rows.map(({ holiday, ...rest }) => rest);
+        r = await put(noHoliday);
+        if (missingCol(r)) {
+          const noStock = noHoliday.map(({ stock, ...rest }) => rest);
+          r = await put(noStock);
+        }
       }
       return r;
     };
