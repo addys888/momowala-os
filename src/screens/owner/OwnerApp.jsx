@@ -15,6 +15,11 @@ import { useStore } from '../../store';
 function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
   const [showProfile, setShowProfile] = useState(false);
+  // Deep-link target for the Reconcile tab (set by the dashboard nudge). Cleared
+  // on any normal tab switch so opening Reconcile by hand still starts on today.
+  const [reconcileDate, setReconcileDate] = useState(null);
+  const goReconcile = (date) => { setReconcileDate(date || null); setTab('reconcile'); };
+  const navTab = (t) => { setReconcileDate(null); setTab(t); };
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
@@ -94,16 +99,16 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       {showProfile && <CartProfileModal cart={cart} printer={printerCfgFor(state, cartId)} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={() => setTab('reconcile')} onSeeOrders={() => setTab('orders')} onResetWare={resetWare} updateState={updateState} />}
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onResetWare={resetWare} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
-        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
+        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} initialDate={reconcileDate} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'reports' && <Reports state={state} updateState={updateState} cartId={cartId} />}
       </div>
 
-      <BottomNav tab={tab} setTab={setTab} tabs={[
+      <BottomNav tab={tab} setTab={navTab} tabs={[
         { id: 'dashboard', icon: <Home size={20}/>, label: 'Home' },
         { id: 'orders', icon: <ShoppingCart size={20}/>, label: 'Orders' },
         { id: 'inventory', icon: <Boxes size={20}/>, label: 'Stock' },
@@ -220,6 +225,12 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
   const lastCloseDate = cartCloses.map(d => d.date).sort().pop() || null;
   const daysSinceClose = lastCloseDate ? Math.round((Date.parse(TODAY) - Date.parse(lastCloseDate)) / 86400000) : null;
   const showCloseNudge = (todayOrders?.length || 0) > 0 && !closedToday;
+  // Deep-link the nudge to the OLDEST unreconciled day (with orders) in the last
+  // week, so tapping it opens Reconcile right on the day that needs back-filling.
+  const shiftDayD = (d, n) => { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10); };
+  const closedSet = new Set(cartCloses.map(d => d.date));
+  let nudgeDate = TODAY;
+  for (let i = 6; i >= 0; i--) { const d = shiftDayD(TODAY, -i); if (state.orders.some(o => o.cartId === cartId && o.date === d) && !closedSet.has(d)) { nudgeDate = d; break; } }
   // "live · updated Xs ago" + manual 🔄 — surfaces how fresh the auto-poll is
   // and lets the owner pull on demand (no extra background traffic).
   const { lastSync, refreshNow } = useStore();
@@ -326,7 +337,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
       </div>
 
       {showCloseNudge && (
-        <button onClick={onReconcile} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: (daysSinceClose == null || daysSinceClose >= 2) ? '#FDE8EA' : '#FFF3E0', border: `1px solid ${(daysSinceClose == null || daysSinceClose >= 2) ? '#F5B5BC' : '#F5CFA4'}`, borderRadius: 12, padding: '12px 14px', marginBottom: 16, cursor: 'pointer' }}>
+        <button onClick={() => onReconcile(nudgeDate)} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: (daysSinceClose == null || daysSinceClose >= 2) ? '#FDE8EA' : '#FFF3E0', border: `1px solid ${(daysSinceClose == null || daysSinceClose >= 2) ? '#F5B5BC' : '#F5CFA4'}`, borderRadius: 12, padding: '12px 14px', marginBottom: 16, cursor: 'pointer' }}>
           <AlertTriangle size={20} color={(daysSinceClose == null || daysSinceClose >= 2) ? '#C81E1E' : '#B5460B'} />
           <div style={{ flex: 1 }}>
             <div style={{ fontSize: 13.5, fontWeight: 800, color: (daysSinceClose == null || daysSinceClose >= 2) ? '#C81E1E' : '#B5460B' }}>

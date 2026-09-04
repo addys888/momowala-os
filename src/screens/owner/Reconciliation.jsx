@@ -4,14 +4,16 @@ import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOr
 import { TODAY, WARE_TYPES, brand, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, momoOversell, persistInv, wareLedger } from '../../core';
 import { SectionHeader } from '../../components/shared';
 
-function Reconciliation({ state, updateState, cartId, inv, stockTypes = [] }) {
+function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], initialDate }) {
   const shiftDate = (d, n) => { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10); };
   // Business day with a 1 AM grace: between midnight and 1 AM IST the "day to
   // close" is still yesterday, so a late-night close lands on the right date.
   const GRACE_HOUR = 1;
   const businessDate = istNowMinutes() < GRACE_HOUR * 60 ? shiftDate(localDate(), -1) : localDate();
 
-  const [date, setDate] = useState(businessDate);
+  const [date, setDate] = useState(initialDate || businessDate);
+  // Deep-link from the dashboard nudge: jump to the day it asked to reconcile.
+  useEffect(() => { if (initialDate) setDate(initialDate); }, [initialDate]);
   const [physicalCash, setPhysicalCash] = useState('');
   const [phonePeAmount, setPhonePeAmount] = useState('');
   const [remaining, setRemaining] = useState({});
