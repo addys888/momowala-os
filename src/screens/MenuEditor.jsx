@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
 import { adminBtn, brand, colors, editInput, editLabel, fileToBase64, groupByCat, menuFor } from '../core';
+import { printTest } from '../lib/escpos';
 import { EditModalShell, SectionHeader } from '../components/shared';
 
 const newId = (p) => `${p}${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`;
@@ -30,8 +31,15 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   const fileRef = React.useRef();
 
   const dupItems = duplicateIds('items', items), dupLassi = duplicateIds('lassi', lassi), dupAddons = duplicateIds('addons', addons);
+  // Existing categories (first-seen order) so new items pick from them instead of
+  // free-typing a mismatched string that spawns a stray one-item category.
+  const itemCats = [...new Set(items.map(i => (i.cat || '').trim()).filter(Boolean))];
 
-  const setMenu = (next) => updateState({ menus: { ...state.menus, [cartId]: next } });
+  const setMenu = (next) => {
+    const menus = { ...state.menus, [cartId]: next };
+    updateState({ menus });
+    pushMenus(menus, cartId); // menu edits push immediately — never via the recurring sync
+  };
   const dedupe = (section) => {
     const list = menu[section] || [];
     const seen = new Set(), kept = [];
@@ -109,7 +117,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       <MenuSection title="🥟 Momos" hint="Half / full price + pieces" grouped
         rows={items.map(i => ({ id: i.id, dup: dupItems.has(i.id), group: (i.cat || 'Other'), primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: `${i.type} · ₹${i.half}/${i.full} · ${i.pcsHalf}/${i.pcsFull}pc` }))}
         dupCount={dupItems.size} onDedupe={() => dedupe('items')}
-        onAdd={() => setEdit({ section: 'items', item: { type: 'veg', cat: 'Steamed', pcsHalf: 5, pcsFull: 10 } })}
+        onAdd={() => setEdit({ section: 'items', item: { type: 'veg', cat: '', pcsHalf: 5, pcsFull: 10 } })}
         onEdit={(id) => setEdit({ section: 'items', item: items.find(x => x.id === id) })}
         onRemove={(id) => removeItem('items', id)} />
 
@@ -127,7 +135,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
         onEdit={(id) => setEdit({ section: 'addons', item: addons.find(x => x.id === id) })}
         onRemove={(id) => removeItem('addons', id)} />
 
-      {edit?.section === 'items' && <MomoItemModal initial={edit.item} stockTypes={menu.stockTypes || []} onSave={(it) => saveItem('items', it)} onClose={() => setEdit(null)} />}
+      {edit?.section === 'items' && <MomoItemModal initial={edit.item} stockTypes={menu.stockTypes || []} categories={itemCats} onSave={(it) => saveItem('items', it)} onClose={() => setEdit(null)} />}
       {edit && edit.section !== 'items' && <SimpleItemModal initial={edit.item} section={edit.section} onSave={(it) => saveItem(edit.section, it)} onClose={() => setEdit(null)} />}
     </div>
   );
@@ -180,14 +188,18 @@ function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedup
 }
 
 
-function MomoItemModal({ initial, stockTypes = [], onSave, onClose }) {
-  const [f, setF] = useState({ cat: 'Steamed', type: stockTypes[0]?.key || '', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, ...initial });
+function MomoItemModal({ initial, stockTypes = [], categories = [], onSave, onClose }) {
+  const [f, setF] = useState({ cat: '', type: stockTypes[0]?.key || '', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, ...initial });
   const [error, setError] = useState('');
+  // Start in "type a new category" mode when there are none yet, or when editing
+  // an item whose category isn't among the known ones.
+  const [newCat, setNewCat] = useState(categories.length === 0 || (!!(initial?.cat) && !categories.includes(initial.cat)));
   const num = (v) => parseInt(v) || 0;
   const submit = () => {
     if (!f.name?.trim()) { setError('Enter an item name.'); return; }
+    if (!f.cat?.trim()) { setError('Pick or enter a category (e.g. Steamed, Chinese, Snacks).'); return; }
     if (!num(f.half) && !num(f.full)) { setError('Enter at least one price.'); return; }
-    onSave({ ...f, name: f.name.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type || null });
+    onSave({ ...f, name: f.name.trim(), cat: f.cat.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type || null });
   };
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   return (
@@ -195,7 +207,23 @@ function MomoItemModal({ initial, stockTypes = [], onSave, onClose }) {
       <div style={editLabel}>NAME</div>
       <input value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Veg Steam" style={editInput} />
       <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1 }}><div style={editLabel}>CATEGORY</div><input value={f.cat} onChange={e => set('cat', e.target.value)} placeholder="Steamed" style={editInput} /></div>
+        <div style={{ flex: 1 }}>
+          <div style={editLabel}>CATEGORY</div>
+          {newCat ? (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <input autoFocus value={f.cat} onChange={e => set('cat', e.target.value)} placeholder="e.g. Chinese, Snacks" style={{ ...editInput, flex: 1 }} />
+              {categories.length > 0 && (
+                <button type="button" onClick={() => { setNewCat(false); set('cat', ''); }} style={{ border: `1px solid ${colors.border}`, background: '#fff', borderRadius: 8, padding: '0 10px', fontSize: 12, color: colors.muted, cursor: 'pointer' }}>List</button>
+              )}
+            </div>
+          ) : (
+            <select value={categories.includes(f.cat) ? f.cat : ''} onChange={e => { if (e.target.value === '__new__') { setNewCat(true); set('cat', ''); } else set('cat', e.target.value); }} style={editInput}>
+              <option value="" disabled>Select a category</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              <option value="__new__">＋ New category…</option>
+            </select>
+          )}
+        </div>
         <div style={{ flex: 1 }}><div style={editLabel}>STOCK TYPE</div>
           <select value={f.type} onChange={e => set('type', e.target.value)} style={editInput}>
             {stockTypes.map(st => <option key={st.key} value={st.key}>{st.label}</option>)}
@@ -211,6 +239,13 @@ function MomoItemModal({ initial, stockTypes = [], onSave, onClose }) {
         <div style={{ flex: 1 }}><div style={editLabel}>FULL ₹</div><input type="number" value={f.full} onChange={e => set('full', e.target.value)} style={editInput} /></div>
         <div style={{ flex: 1 }}><div style={editLabel}>FULL PCS</div><input type="number" value={f.pcsFull} onChange={e => set('pcsFull', e.target.value)} style={editInput} /></div>
       </div>
+      <div style={editLabel}>THEFT AUDIT — SERVED ON</div>
+      <select value={f.ware || 'plate'} onChange={e => set('ware', e.target.value)} style={editInput}>
+        <option value="plate">6"/7" number plate (by half/full)</option>
+        <option value="glass">Glass</option>
+        <option value="none">No plate/glass (paper tray, packet)</option>
+      </select>
+      <div style={{ fontSize: 11, color: colors.muted, marginTop: -6, marginBottom: 12 }}>Sets which ware this item consumes in the plate/glass theft audit.</div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginBottom: 12, cursor: 'pointer' }}>
         <input type="checkbox" checked={!!f.star} onChange={e => set('star', e.target.checked)} /> Mark as bestseller ⭐
       </label>
@@ -232,6 +267,14 @@ function SimpleItemModal({ initial, section, onSave, onClose }) {
       <input value={f.name} onChange={e => setF(p => ({ ...p, name: e.target.value }))} placeholder={section === 'addons' ? 'e.g. Extra Cheese' : 'e.g. Mango Lassi'} style={editInput} />
       <div style={editLabel}>PRICE ₹ {section === 'addons' && '(0 = free)'}</div>
       <input type="number" value={f.price} onChange={e => setF(p => ({ ...p, price: e.target.value }))} style={editInput} />
+      {section === 'lassi' && (<>
+        <div style={editLabel}>THEFT AUDIT — SERVED IN</div>
+        <select value={f.ware || 'glass'} onChange={e => setF(p => ({ ...p, ware: e.target.value }))} style={editInput}>
+          <option value="glass">350ml glass</option>
+          <option value="none">No glass (bottle / packet, e.g. water)</option>
+        </select>
+        <div style={{ fontSize: 11, color: colors.muted, marginTop: -6 }}>Only glass-served drinks count in the glass theft audit.</div>
+      </>)}
     </EditModalShell>
   );
 }
@@ -239,13 +282,14 @@ function SimpleItemModal({ initial, section, onSave, onClose }) {
 // Owner edits their cart's display + contact details (same fields as onboarding,
 // minus login credentials, which stay admin-managed).
 
-function CartProfileModal({ cart, onSave, onClose }) {
+function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
   const [f, setF] = useState({
     name: cart?.name || '', emoji: cart?.emoji || '🛒', logo: cart?.logo || '', tagline: cart?.tagline || '',
     cuisine: cart?.cuisine || '', location: cart?.location || '', timing: cart?.timing || '',
     phone: cart?.phone || '', instagram: cart?.instagram || '', accent: cart?.accent || brand.teal,
     upiId: cart?.upiId || '', upiQr: cart?.upiQr || '',
     openTime: cart?.openTime || '', closeTime: cart?.closeTime || '',
+    printerEnabled: !!printer.enabled, printerFooter: printer.footer || '',
   });
   const [error, setError] = useState('');
   const logoRef = React.useRef(), qrRef = React.useRef();
@@ -265,6 +309,7 @@ function CartProfileModal({ cart, onSave, onClose }) {
       phone: f.phone.trim(), instagram: f.instagram.trim(), accent: f.accent,
       upiId: f.upiId.trim(), upiQr: f.upiQr || null,
       openTime: f.openTime || null, closeTime: f.closeTime || null,
+      printerEnabled: !!f.printerEnabled, printerFooter: f.printerFooter.trim(),
     });
   };
   return (
@@ -321,6 +366,19 @@ function CartProfileModal({ cart, onSave, onClose }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <input type="color" value={f.accent} onChange={set('accent')} style={{ width: 48, height: 40, border: `1px solid ${colors.border}`, borderRadius: 8, cursor: 'pointer', background: '#fff' }} />
         <span style={{ fontSize: 13, color: colors.muted }}>{f.accent}</span>
+      </div>
+
+      <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 12px', paddingTop: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: brand.navy, marginBottom: 2 }}>🖨️ Receipt printer</div>
+        <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10 }}>Prints a 58mm bill via the RawBT app on this phone (install it + set your printer as default). Shows a Print button to staff.</div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginBottom: 10, cursor: 'pointer' }}>
+          <input type="checkbox" checked={!!f.printerEnabled} onChange={e => setF(p => ({ ...p, printerEnabled: e.target.checked }))} style={{ width: 18, height: 18, accentColor: brand.navy }} /> Enable receipt printing
+        </label>
+        {f.printerEnabled && (<>
+          <div style={editLabel}>RECEIPT FOOTER (optional)</div>
+          <input value={f.printerFooter} onChange={set('printerFooter')} placeholder="Thank you! Visit again" style={editInput} />
+          <button type="button" onClick={() => printTest(cart)} style={{ ...adminBtn, color: brand.navy }}>🖨️ Test print</button>
+        </>)}
       </div>
     </EditModalShell>
   );

@@ -38,6 +38,7 @@ export const storage = {
 const orderToRow = (o) => ({
   id: o.id, cart_id: o.cartId ?? null, token: o.token, date: o.date, time: o.time, items: o.items,
   total: o.total, payment: o.payment, staff: o.staff, source: o.source,
+  split: o.split ?? null,
   settled_at: o.settledAt ?? null, cancel_reason: o.cancelReason ?? null,
   prep_status: o.prepStatus ?? null,
   customer_name: o.customerName ?? null, customer_phone: o.customerPhone ?? null,
@@ -46,6 +47,7 @@ const orderToRow = (o) => ({
 const rowToOrder = (r) => ({
   id: r.id, cartId: r.cart_id ?? undefined, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
+  split: r.split ?? undefined,
   settledAt: r.settled_at ?? undefined, cancelReason: r.cancel_reason ?? undefined,
   prepStatus: r.prep_status ?? undefined,
   customerName: r.customer_name ?? undefined, customerPhone: r.customer_phone ?? undefined,
@@ -71,6 +73,10 @@ const wastageToRow = (w) => ({ id: w.id, cart_id: w.cartId ?? null, date: w.date
 const rowToWastage = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, date: r.date, time: r.time, stockKey: r.stock_key, label: r.label, qty: r.qty, reason: r.reason, staff: r.staff });
 const expenseToRow = (e) => ({ id: e.id, cart_id: e.cartId ?? null, date: e.date, category: e.category, amount: e.amount, note: e.note ?? null, fund: e.fund ?? null });
 const rowToExpense = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, date: r.date, category: r.category, amount: r.amount, note: r.note ?? undefined, fund: r.fund ?? undefined });
+// Owner's per-week Zomato/Swiggy payout validation flags. id = weekStart as
+// YYYYMMDD int so it sorts cleanly; `received` toggles as payouts are matched.
+const payoutMarkToRow = (m) => ({ id: m.id, cart_id: m.cartId ?? null, week_start: m.weekStart, received: !!m.received, updated_at: m.updatedAt });
+const rowToPayoutMark = (r) => ({ id: r.id, cartId: r.cart_id ?? undefined, weekStart: r.week_start, received: !!r.received, updatedAt: r.updated_at });
 
 const cartToRow = (c) => ({
   id: c.id, name: c.name, tagline: c.tagline, cuisine: c.cuisine, location: c.location,
@@ -120,9 +126,10 @@ const dayCloseToRow = (d) => ({
   actual_corn: d.actualCorn,
   corn_diff: d.cornDiff,
   stock: d.stock ?? null,
+  holiday: d.holiday ?? null,
+  unrecorded: d.unrecorded ?? null,
   pieces_sold: d.piecesSold,
   revenue: d.revenue,
-  holiday: d.holiday ?? false,
   closed_at: d.closedAt,
 });
 
@@ -147,9 +154,10 @@ const rowToDayClose = (r) => ({
   actualCorn: r.actual_corn,
   cornDiff: r.corn_diff,
   stock: r.stock ?? undefined,
+  holiday: r.holiday ?? undefined,
+  unrecorded: r.unrecorded ?? undefined,
   piecesSold: r.pieces_sold,
   revenue: r.revenue,
-  holiday: r.holiday ?? false,
   closedAt: r.closed_at,
 });
 
@@ -162,6 +170,18 @@ const unionById = (a = [], b = []) => {
   return [...seen.values()].sort((x, y) => x.id - y.id);
 };
 
+// Like unionById but keeps the copy with the newest updatedAt on id conflict —
+// so un-marking a payout week propagates instead of being resurrected by an
+// older cloud row (unionById would just let cloud win regardless of recency).
+const mergeByNewest = (a = [], b = []) => {
+  const seen = new Map();
+  [...a, ...b].forEach((x) => {
+    const prev = seen.get(x.id);
+    if (!prev || Date.parse(x.updatedAt || 0) >= Date.parse(prev.updatedAt || 0)) seen.set(x.id, x);
+  });
+  return [...seen.values()].sort((x, y) => x.id - y.id);
+};
+
 // Orders move one-way through states: pending → paid (cash/upi) → cancelled.
 // When the same id exists on both sides, keep the copy that is FURTHEST along
 // that chain so a later transition (settle, cancel-after-settle) always wins.
@@ -170,7 +190,7 @@ const unionById = (a = [], b = []) => {
 // cancel/settle never propagated, localStorage kept the stale copy, and
 // devices drifted apart by a stuck order that no reload could fix.
 // Equal-rank conflicts (e.g. cash vs upi) resolve by the later settledAt.
-const PAY_RANK = { pending: 0, cash: 1, upi: 1, zomato: 1, swiggy: 1, cancelled: 2 };
+const PAY_RANK = { pending: 0, cash: 1, upi: 1, split: 1, zomato: 1, swiggy: 1, cancelled: 2 };
 export const mergeOrders = (a = [], b = []) => {
   const seen = new Map();
   [...a, ...b].forEach((o) => {
@@ -199,14 +219,43 @@ export function mergeStates(localState, cloud) {
     dayCloseLogs: unionById(localState.dayCloseLogs, cloud.dayCloseLogs),
     wastageLogs: unionById(localState.wastageLogs, cloud.wastageLogs),
     expenses: unionById(localState.expenses, cloud.expenses),
+    payoutMarks: mergeByNewest(localState.payoutMarks, cloud.payoutMarks),
     // mutable, owner/admin-managed; cloud copy wins on id conflict
     staff: cloud.staff?.length ? unionById(localState.staff, cloud.staff) : localState.staff,
     carts: cloud.carts?.length ? unionById(localState.carts, cloud.carts) : localState.carts,
     platform: cloud.platform ?? localState.platform,
     // inventory is one keyed blob ({ [cartId]: inv }); cloud wins if present
     inventory: cloud.inventory ?? localState.inventory,
-    menus: cloud.menus ?? localState.menus,
+    // menus blob: cloud wins UNLESS this device has a menu edit still waiting
+    // to upload (offline edit) — otherwise the pending edit would be lost.
+    menus: storage.get('menusDirty', false) ? localState.menus : (cloud.menus ?? localState.menus),
   };
+}
+
+// Immediately persist the menus blob. Called ONLY from actual menu-edit flows
+// (menu editor, stock types, ware packs, feature toggles) — never from the
+// recurring sync. Background whole-blob pushes are how a device that failed to
+// load the cloud copy (bad network at open) silently overwrote newer menu
+// items with its stale local blob ("Water / Spring Roll disappeared").
+// If the push fails (offline), a dirty flag makes pushState retry it later and
+// keeps the local copy from being clobbered on the next cloud load.
+export async function pushMenus(menus, cartId) {
+  if (!supabase) return { error: null };
+  storage.set('menusDirty', cartId || true);
+  let r;
+  if (cartId) {
+    // Preferred: SECURITY DEFINER RPC that rewrites ONLY this cart's key.
+    // Once the migration also revokes anon's direct UPDATE on menus, stale
+    // builds physically cannot clobber the blob any more — their writes 403.
+    r = await supabase.rpc('set_cart_menu', { p_cart_id: cartId, p_menu: menus[cartId] });
+    if (r.error && /set_cart_menu|does not exist|404|PGRST202/i.test(`${r.error.message} ${r.error.code}`)) {
+      r = await supabase.from('menus').upsert({ id: 1, data: menus, updated_at: new Date().toISOString() });
+    }
+  } else {
+    r = await supabase.from('menus').upsert({ id: 1, data: menus, updated_at: new Date().toISOString() });
+  }
+  if (!r.error) storage.set('menusDirty', false);
+  return r;
 }
 
 // ─── ATOMIC ORDER TOKEN ───
@@ -315,7 +364,7 @@ export async function loadCloudState() {
       }
       return { data: all, error: null };
     };
-    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses] = await Promise.all([
+    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses, payoutMarks] = await Promise.all([
       fetchAll('orders'),
       fetchAll('stock_logs'),
       fetchAll('cart_loadings'),
@@ -327,6 +376,7 @@ export async function loadCloudState() {
       supabase.from('menus').select('*').eq('id', 1).maybeSingle(),
       fetchAll('wastage_logs'),
       fetchAll('expenses'),
+      fetchAll('payout_marks'),
     ]);
     // platform is intentionally locked from anon once the lockdown is applied,
     // so it's excluded from the hard-fail check (login goes through app_login).
@@ -339,6 +389,7 @@ export async function loadCloudState() {
       dayCloseLogs: dayCloseLogs.data.map((r) => rowToDayClose(r)),
       wastageLogs: (wastage.data || []).map(rowToWastage),
       expenses: (expenses.data || []).map(rowToExpense),
+      payoutMarks: (payoutMarks.data || []).map(rowToPayoutMark),
       inventory: inventory.data?.data ?? null,
       staff: staff.data.map((r) => rowToStaff(r)),
       carts: carts.data.map((r) => rowToCart(r)),
@@ -401,14 +452,22 @@ async function pushState(state) {
     // mutable rows: insert-or-update so edits (settlements) sync
     const merge = (table, rows) =>
       rows.length ? supabase.from(table).upsert(rows, { onConflict: 'id' }) : null;
+    // Same, but swallows its own error so a not-yet-created table (payout_marks
+    // before its migration is run) never fails the whole batch — the data stays
+    // safe in localStorage and syncs once the table exists.
+    const mergeTolerant = async (table, rows) => {
+      if (!rows.length) return { error: null };
+      const r = await supabase.from(table).upsert(rows, { onConflict: 'id' });
+      return r.error ? { error: null } : r; // never surface this table's error to the batch
+    };
     // Orders upsert, resilient to the customer_name/phone columns not existing
     // yet (before the schema migration is run) — retry without them rather than
     // failing the whole orders sync.
     const mergeOrdersResilient = async (rows) => {
       if (!rows.length) return { error: null };
       let r = await supabase.from('orders').upsert(rows, { onConflict: 'id' });
-      if (r.error && /customer_name|customer_phone|prep_status|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
-        const stripped = rows.map(({ customer_name, customer_phone, prep_status, ...rest }) => rest);
+      if (r.error && /customer_name|customer_phone|prep_status|split|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
+        const stripped = rows.map(({ customer_name, customer_phone, prep_status, split, ...rest }) => rest);
         r = await supabase.from('orders').upsert(stripped, { onConflict: 'id' });
       }
       // A single row the DB rejects (e.g. a payment value not yet allowed by the
@@ -422,7 +481,7 @@ async function pushState(state) {
         if (safe.length) {
           const r2 = await supabase.from('orders').upsert(safe, { onConflict: 'id' });
           if (!r2.error) return r2;
-          const stripped = safe.map(({ customer_name, customer_phone, prep_status, ...rest }) => rest);
+          const stripped = safe.map(({ customer_name, customer_phone, prep_status, split, ...rest }) => rest);
           return supabase.from('orders').upsert(stripped, { onConflict: 'id' });
         }
       }
@@ -446,20 +505,19 @@ async function pushState(state) {
       }
       return r;
     };
-    // Day-close append, resilient to newer optional columns (`holiday`, `stock`)
-    // not existing yet — strip them progressively and retry on a missing-column
-    // error so an older DB schema still accepts the core reconciliation fields.
+    // Day-close append, resilient to newer columns not existing yet. Rows are
+    // append-only (ignoreDuplicates), so a stripped row stays stripped forever —
+    // drop the cheap flags first and only sacrifice `stock` if that still fails.
     const appendDayClose = async (rows) => {
       if (!rows.length) return { error: null };
-      const put = (rs) => supabase.from('day_close_logs').upsert(rs, { onConflict: 'id', ignoreDuplicates: true });
-      const missingCol = (r) => r.error && /holiday|stock|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`);
-      let r = await put(rows);
+      const missingCol = (r) => r.error && /stock|holiday|unrecorded|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`);
+      let r = await supabase.from('day_close_logs').upsert(rows, { onConflict: 'id', ignoreDuplicates: true });
       if (missingCol(r)) {
-        const noHoliday = rows.map(({ holiday, ...rest }) => rest);
-        r = await put(noHoliday);
+        const noFlags = rows.map(({ holiday, unrecorded, ...rest }) => rest);
+        r = await supabase.from('day_close_logs').upsert(noFlags, { onConflict: 'id', ignoreDuplicates: true });
         if (missingCol(r)) {
-          const noStock = noHoliday.map(({ stock, ...rest }) => rest);
-          r = await put(noStock);
+          const stripped = noFlags.map(({ stock, ...rest }) => rest);
+          r = await supabase.from('day_close_logs').upsert(stripped, { onConflict: 'id', ignoreDuplicates: true });
         }
       }
       return r;
@@ -472,15 +530,20 @@ async function pushState(state) {
         appendDayClose(state.dayCloseLogs.map(dayCloseToRow)),
         append('wastage_logs', (state.wastageLogs || []).map(wastageToRow)),
         mergeExpensesResilient((state.expenses || []).map(expenseToRow)),
+        mergeTolerant('payout_marks', (state.payoutMarks || []).map(payoutMarkToRow)),
         ...updateRows('staff', state.staff.map(staffToRow)),
         ...updateRows('carts', state.carts.map(cartToRow)),
         // platform + password hashes are never written from the browser — those
         // go through the SECURITY DEFINER auth RPCs (see authLogin/authSetPassword).
         // inventory is NOT written here — it's mutated atomically via the
         // apply_inventory / set_cart_consumables RPCs to avoid blob clobbering.
-        supabase
-          .from('menus')
-          .upsert({ id: 1, data: state.menus, updated_at: new Date().toISOString() }),
+        // menus is NOT written here either (same clobber risk) — it's pushed by
+        // pushMenus() from edit flows only; retry here only if an edit is still
+        // pending from an offline session (dirty holds the edited cartId).
+        (() => {
+          const dirty = storage.get('menusDirty', false);
+          return dirty ? pushMenus(state.menus, typeof dirty === 'string' ? dirty : undefined) : null;
+        })(),
       ].filter(Boolean)
     );
     const failed = results.find((r) => r.error);

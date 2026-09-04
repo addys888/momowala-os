@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../lib/store';
-import { TODAY, adminBtn, brand, colors, editInput, editLabel, fileToBase64, freshInventory, isPaid, persistConsumables, persistInv, slugify } from '../core';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
+import { TODAY, adminBtn, brand, colors, editInput, editLabel, fileToBase64, freshInventory, isPaid, onlineVendorsFor, persistConsumables, persistInv, slugify } from '../core';
 import { MenuEditor } from './MenuEditor';
 import { Reports } from './owner/Reports';
 import { BottomNav, CartIcon, EditModalShell, SectionHeader, TopBar } from '../components/shared';
@@ -59,7 +59,9 @@ function AdminCarts({ state, updateState }) {
       ownerPasswordHash: null, active: true, createdAt: TODAY,
     };
     const freshInv = freshInventory();
-    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInv }, menus: { ...state.menus, [id]: { items: [], lassi: [], addons: [] } } });
+    const newMenus = { ...state.menus, [id]: { items: [], lassi: [], addons: [], onlineVendors: !!form.onlineVendors } };
+    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInv }, menus: newMenus });
+    pushMenus(newMenus, id);
     // New carts can't be created via the recurring PATCH sync — insert explicitly.
     const r = await insertCart(cart);
     if (r.error) alert('Cart saved locally, but cloud insert failed: ' + r.error.message);
@@ -72,6 +74,13 @@ function AdminCarts({ state, updateState }) {
   };
 
   const toggleActive = (id) => updateState({ carts: state.carts.map(c => c.id === id ? { ...c, active: !c.active } : c) });
+  // Flip a cart's Zomato/Swiggy opt-in. Writes an explicit boolean into the
+  // menus blob so it overrides the momowala legacy default either way.
+  const toggleOnlineVendors = (id) => {
+    const menus = { ...state.menus, [id]: { ...(state.menus?.[id] || { items: [], lassi: [], addons: [] }), onlineVendors: !onlineVendorsFor(state, id) } };
+    updateState({ menus });
+    pushMenus(menus, id);
+  };
   const resetOwnerPw = async (cart) => {
     const np = prompt(`New owner password for ${cart.name} (min 4 chars):`);
     if (!np) return;
@@ -115,6 +124,7 @@ function AdminCarts({ state, updateState }) {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button onClick={() => setMenuCartId(c.id)} style={{ ...adminBtn, color: brand.tealDark, borderColor: brand.teal }}>📋 Set up menu</button>
               <button onClick={() => setEditOwnerCart(c)} style={adminBtn}>Edit owner</button>
+              <button onClick={() => toggleOnlineVendors(c.id)} style={{ ...adminBtn, color: onlineVendorsFor(state, c.id) ? '#E23744' : colors.muted }}>🛵 Online: {onlineVendorsFor(state, c.id) ? 'On' : 'Off'}</button>
               <button onClick={() => resetOwnerPw(c)} style={adminBtn}>Reset owner password</button>
               <button onClick={() => toggleActive(c.id)} style={adminBtn}>{c.active ? 'Disable' : 'Enable'}</button>
               <button onClick={() => removeCart(c)} style={{ ...adminBtn, color: colors.red }}>Remove</button>
@@ -128,7 +138,7 @@ function AdminCarts({ state, updateState }) {
 
 
 function AddCartModal({ onAdd, onClose }) {
-  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', logo: '', accent: brand.teal, ownerName: '', ownerMobile: '', ownerPassword: '' });
+  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', logo: '', accent: brand.teal, ownerName: '', ownerMobile: '', ownerPassword: '', onlineVendors: false });
   const [error, setError] = useState('');
   const logoRef = React.useRef();
   const set = (k) => (e) => setF(prev => ({ ...prev, [k]: e.target.value }));
@@ -197,6 +207,17 @@ function AddCartModal({ onAdd, onClose }) {
           <input type="tel" inputMode="numeric" value={f.ownerMobile} onChange={e => setF(p => ({ ...p, ownerMobile: e.target.value.replace(/\D/g, '').slice(0, 10) }))} placeholder="10-digit number" style={{ ...inputStyle, fontWeight: 700, letterSpacing: 1 }} />
           <div style={label}>OWNER PASSWORD (optional — owner can set on first login)</div>
           <input type="text" value={f.ownerPassword} onChange={set('ownerPassword')} placeholder="min 4 characters, or leave blank" style={inputStyle} />
+        </div>
+
+        <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 14px', paddingTop: 14 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: brand.navy, marginBottom: 2 }}>Features</div>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', marginTop: 8 }}>
+            <input type="checkbox" checked={f.onlineVendors} onChange={e => setF(p => ({ ...p, onlineVendors: e.target.checked }))} style={{ width: 18, height: 18, marginTop: 1, accentColor: brand.navy, cursor: 'pointer' }} />
+            <span>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: brand.text }}>🛵 Online vendors (Zomato/Swiggy)</span>
+              <span style={{ display: 'block', fontSize: 11.5, color: colors.muted, marginTop: 2 }}>Adds aggregator order buttons for staff plus weekly-payout tracking in reports. Leave off if the cart only sells offline — can be changed any time.</span>
+            </span>
+          </label>
         </div>
 
         {error && (
