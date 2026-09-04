@@ -4,7 +4,7 @@ import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOr
 import { TODAY, WARE_TYPES, adminBtn, brand, cartOpenState, colors, isOnline, isPaid, istDateLabel, istNowMinutes, menuFor, orderStockDeltas, wareLedger } from '../../core';
 import { CartProfileModal, MenuEditor } from '../MenuEditor';
 import { InventoryView } from './Inventory';
-import { Reconciliation } from './Reconciliation';
+import { Reconciliation, BACKFILL_DAYS } from './Reconciliation';
 import { Reports } from './Reports';
 import { StaffRegistry } from './StaffRegistry';
 import { Alert, BottomNav, CartIcon, MetricCard, OrderRow, SectionHeader, TopBar } from '../../components/shared';
@@ -13,6 +13,11 @@ import { useStore } from '../../store';
 function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
   const [showProfile, setShowProfile] = useState(false);
+  // Deep-link target for the Reconcile tab (set by the dashboard nudge). Cleared
+  // on any normal tab switch so opening Reconcile by hand still starts on Today.
+  const [reconcileDate, setReconcileDate] = useState(null);
+  const goReconcile = (date) => { setReconcileDate(date); setTab('reconcile'); };
+  const navTab = (t) => { setReconcileDate(null); setTab(t); };
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
@@ -51,15 +56,15 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       {showProfile && <CartProfileModal cart={cart} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} />}
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onOpenReconcile={goReconcile} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
-        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} />}
+        {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} todayOrders={todayOrders} cashRevenue={cashRevenue} upiRevenue={upiRevenue} piecesSold={piecesSold} initialDate={reconcileDate} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'reports' && <Reports state={state} updateState={updateState} cartId={cartId} />}
       </div>
 
-      <BottomNav tab={tab} setTab={setTab} tabs={[
+      <BottomNav tab={tab} setTab={navTab} tabs={[
         { id: 'dashboard', icon: <Home size={20}/>, label: 'Home' },
         { id: 'inventory', icon: <Boxes size={20}/>, label: 'Stock' },
         { id: 'menu', icon: <Edit3 size={20}/>, label: 'Menu' },
@@ -72,7 +77,21 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
 }
 
 
-function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders }) {
+function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onOpenReconcile }) {
+  // Un-reconciled days still inside the back-fill window (T-1 … T-BACKFILL_DAYS):
+  // days not yet closed or marked holiday. Nudges the owner to confirm the money
+  // before the window closes. Cleared as soon as each day is closed.
+  const closedDates = new Set((state?.dayCloseLogs || []).filter(d => d.cartId === cartId).map(d => d.date));
+  const [byy, bmm, bdd] = TODAY.split('-').map(Number);
+  const bMs = Date.UTC(byy, bmm - 1, bdd);
+  const pendingRecon = [...Array(BACKFILL_DAYS)].map((_, i) => new Date(bMs - (i + 1) * 86400000).toISOString().split('T')[0])
+    .filter(d => !closedDates.has(d))
+    .map(d => {
+      const dayOrders = (state?.orders || []).filter(o => o.cartId === cartId && o.date === d);
+      const money = dayOrders.filter(o => o.payment === 'cash' || o.payment === 'upi').reduce((s, o) => s + o.total, 0);
+      return { date: d, hadOrders: dayOrders.length > 0, money };
+    });
+
   // "live · updated Xs ago" + manual 🔄 — surfaces how fresh the auto-poll is
   // and lets the owner pull on demand (no extra background traffic).
   const { lastSync, refreshNow } = useStore();
@@ -177,6 +196,26 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
           </button>
         </div>
       </div>
+
+      {/* Reconciliation reminder — un-closed days still inside the back-fill window */}
+      {pendingRecon.length > 0 && (
+        <div style={{ background: '#FFF7E0', border: '1px solid #FFE08A', borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '11px 14px', fontSize: 13, fontWeight: 800, color: '#8A6D00' }}>
+            <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+            {pendingRecon.length} day{pendingRecon.length > 1 ? 's' : ''} still to reconcile
+          </div>
+          {pendingRecon.map(p => (
+            <button key={p.date} onClick={() => onOpenReconcile?.(p.date)}
+              style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '11px 14px', background: 'transparent', border: 'none', borderTop: '1px solid #FFE8A8', cursor: 'pointer', textAlign: 'left' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 13.5, color: colors.ink }}>{istDateLabel(p.date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                <div style={{ fontSize: 11.5, color: colors.muted }}>{p.hadOrders ? `₹${p.money.toLocaleString('en-IN')} to confirm` : 'No orders — confirm or mark holiday'}</div>
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 800, color: '#8A6D00', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4 }}>Reconcile <ArrowRight size={13} /></span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10 }}>
         <SectionHeader title="Today's Snapshot" subtitle={istDateLabel(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })} />

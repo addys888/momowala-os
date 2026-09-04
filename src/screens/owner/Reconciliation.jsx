@@ -34,8 +34,10 @@ function dayChipLabel(date, yesterday) {
   return istDateLabel(date, { day: 'numeric', month: 'short' });
 }
 
-function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold }) {
-  const [selectedDate, setSelectedDate] = useState(TODAY);
+function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], todayOrders, cashRevenue, upiRevenue, piecesSold, initialDate }) {
+  const [selectedDate, setSelectedDate] = useState(initialDate || TODAY);
+  // Deep-link from the dashboard nudge: jump to the day it asked to reconcile.
+  useEffect(() => { if (initialDate) setSelectedDate(initialDate); }, [initialDate]);
 
   // Recent IST calendar dates, newest first (UTC-anchored to avoid TZ drift).
   const [ty, tm, tdd] = TODAY.split('-').map(Number);
@@ -544,4 +546,4 @@ function ReconcileBlock({ title, systemValue, label, value, onChange, diff, unit
 
 // ─── OWNER: STAFF REGISTRY ───
 
-export { Reconciliation, ReconcileBlock };
+export { Reconciliation, ReconcileBlock, BACKFILL_DAYS };
