@@ -189,6 +189,19 @@ const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
 
 const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
 
+// Per-cart label + emoji for the main food section. The platform is momo-first,
+// so momowala (and any cart that hasn't set one) shows "🥟 Momos"; a dosa / chaat /
+// roll cart sets its own at onboarding (stored in the menus blob, so no schema
+// change). This is what stops a non-momo cart's dishes reading as "Momos".
+const menuLabelFor = (state, cartId) => {
+  const m = menuFor(state, cartId);
+  const isMomo = cartId === 'momowala';
+  return {
+    emoji: m.itemEmoji || (isMomo ? '🥟' : '🍽️'),
+    label: m.itemLabel || (isMomo ? 'Momos' : 'Menu'),
+  };
+};
+
 // Per-cart opt-in for aggregator (Zomato/Swiggy) order tracking. Stored in the
 // menus blob (like stockTypes) so enabling a cart needs no schema change.
 // Momowala predates the flag and stays on unless explicitly switched off;
@@ -754,6 +767,8 @@ const TYPE_CHIP = {
   veg: { bg: '#E7F5E7', fg: '#0F7B0F', label: 'Veg' },
   paneer: { bg: '#FFF1E7', fg: '#B5460B', label: 'Paneer' },
   corn: { bg: '#FFF7E0', fg: '#8A6D00', label: 'Corn Cheese' },
+  nonveg: { bg: '#FDE8E8', fg: '#C8102E', label: 'Non-veg' },
+  egg: { bg: '#FFF4E0', fg: '#9A6B00', label: 'Egg' },
 };
 
 const MAX_ADDON_ITEMS = 2;
@@ -762,4 +777,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, momoOversell };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, menuLabelFor, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, momoOversell };

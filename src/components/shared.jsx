@@ -200,12 +200,18 @@ function MenuItemRow({ item, onAdd }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        <button onClick={() => onAdd(item.id, `${item.name} Half`, item.half, 'half')} style={{ flex: 1, padding: '8px 10px', background: '#fff', border: `1.5px solid ${colors.ink}`, borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-          Half · ₹{item.half} <span style={{ fontSize: 10, opacity: 0.6 }}>({item.pcsHalf}pc)</span>
-        </button>
-        <button onClick={() => onAdd(item.id, `${item.name} Full`, item.full, 'full')} style={{ flex: 1, padding: '8px 10px', background: colors.ink, color: colors.primary, border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-          Full · ₹{item.full} <span style={{ fontSize: 10, opacity: 0.7 }}>({item.pcsFull}pc)</span>
-        </button>
+        {item.single ? (
+          <button onClick={() => onAdd(item.id, item.name, item.full, 'full')} style={{ flex: 1, padding: '8px 10px', background: colors.ink, color: colors.primary, border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            Add · ₹{item.full}{item.pcsFull ? <span style={{ fontSize: 10, opacity: 0.7 }}> ({item.pcsFull}pc)</span> : null}
+          </button>
+        ) : (<>
+          <button onClick={() => onAdd(item.id, `${item.name} Half`, item.half, 'half')} style={{ flex: 1, padding: '8px 10px', background: '#fff', border: `1.5px solid ${colors.ink}`, borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            Half · ₹{item.half}{item.pcsHalf ? <span style={{ fontSize: 10, opacity: 0.6 }}> ({item.pcsHalf}pc)</span> : null}
+          </button>
+          <button onClick={() => onAdd(item.id, `${item.name} Full`, item.full, 'full')} style={{ flex: 1, padding: '8px 10px', background: colors.ink, color: colors.primary, border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
+            Full · ₹{item.full}{item.pcsFull ? <span style={{ fontSize: 10, opacity: 0.7 }}> ({item.pcsFull}pc)</span> : null}
+          </button>
+        </>)}
       </div>
     </div>
   );

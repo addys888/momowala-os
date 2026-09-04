@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, createContext, useContext } from 'r
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../lib/store';
-import { CartlyftLogo, CategoryBand, MAX_ADDON_ITEMS, TODAY, TYPE_CHIP, brand, cartOpenState, colors, groupByCat, istTime, localNextToken, menuFor, momowalaLogoUrl } from '../core';
+import { CartlyftLogo, CategoryBand, MAX_ADDON_ITEMS, TODAY, TYPE_CHIP, brand, cartOpenState, colors, groupByCat, istTime, localNextToken, menuFor, menuLabelFor, momowalaLogoUrl } from '../core';
 import { Alert, CartIcon, MenuItemRow, SectionHeader, SimpleItemRow } from '../components/shared';
 
 function CartListing({ carts, onSelect }) {
@@ -78,6 +78,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
   const [liveOrder, setLiveOrder] = useState(null);  // polled status of that order
 
   const menu = menuFor(state, venue.id);
+  const foodLabel = menuLabelFor(state, venue.id);
   const items = menu.items || [], lassi = menu.lassi || [], addons = menu.addons || [];
   const isAddon = (id) => addons.some(a => a.id === id);
   const openState = cartOpenState(venue);
@@ -366,7 +367,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
         )}
 
         {items.length > 0 && <>
-          <SectionHeader title="🥟 Momos" />
+          <SectionHeader title={`${foodLabel.emoji} ${foodLabel.label}`} />
           {momoTypes.length > 1 && (
             <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
               {['all', ...momoTypes].map(t => (
@@ -385,7 +386,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
                 </div>
               </div>
             ))}
-            {filteredItems.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No {TYPE_CHIP[typeFilter]?.label || ''} momos.</div>}
+            {filteredItems.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No {TYPE_CHIP[typeFilter]?.label || ''} items.</div>}
           </div>
         </>}
 

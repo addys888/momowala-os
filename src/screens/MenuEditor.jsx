@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
-import { adminBtn, brand, colors, editInput, editLabel, fileToBase64, groupByCat, menuFor } from '../core';
+import { adminBtn, brand, colors, editInput, editLabel, fileToBase64, groupByCat, menuFor, menuLabelFor, TYPE_CHIP } from '../core';
 import { printTest } from '../lib/escpos';
 import { EditModalShell, SectionHeader } from '../components/shared';
 
@@ -34,6 +34,14 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   // Existing categories (first-seen order) so new items pick from them instead of
   // free-typing a mismatched string that spawns a stray one-item category.
   const itemCats = [...new Set(items.map(i => (i.cat || '').trim()).filter(Boolean))];
+  const label = menuLabelFor(state, cartId);
+  // Row subtitle: single-price items read as one price; half/full show both.
+  const itemSecondary = (i) => {
+    const chip = TYPE_CHIP[i.type]?.label;
+    const price = i.single ? `₹${i.full}${i.pcsFull ? ` · ${i.pcsFull}pc` : ''}`
+      : `₹${i.half}/${i.full}${(i.pcsHalf || i.pcsFull) ? ` · ${i.pcsHalf}/${i.pcsFull}pc` : ''}`;
+    return chip ? `${chip} · ${price}` : price;
+  };
 
   const setMenu = (next) => {
     const menus = { ...state.menus, [cartId]: next };
@@ -76,6 +84,10 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       };
       const count = extracted.items.length + extracted.lassi.length + extracted.addons.length;
       if (count === 0) { setAiNote('No menu items detected in that photo. Try a clearer shot.'); return; }
+      // Auto-name the food section from the photo (e.g. "Dosa") the first time,
+      // only if the admin hasn't already named it. Keeps momo carts as "Momos".
+      const labelPatch = (!menu.itemLabel && data.menuLabel && cartId !== 'momowala')
+        ? { itemLabel: String(data.menuLabel).slice(0, 24), itemEmoji: (data.menuEmoji || '🍽️').slice(0, 2) } : {};
       const hasExisting = items.length + lassi.length + addons.length > 0;
       const merge = hasExisting && confirm(`Found ${count} items. OK = add to the current menu (skipping any already present), Cancel = replace it.`);
       if (merge) {
@@ -90,10 +102,10 @@ function MenuEditor({ state, updateState, cartId, cart }) {
           addons: addUnique('addons', addons, extracted.addons),
         };
         const added = (next.items.length - items.length) + (next.lassi.length - lassi.length) + (next.addons.length - addons.length);
-        setMenu({ ...menu, ...next });
+        setMenu({ ...menu, ...labelPatch, ...next });
         setAiNote(`Added ${added} new item${added !== 1 ? 's' : ''}, skipped ${count - added} already on the menu. Review below.`);
       } else {
-        setMenu({ ...menu, ...extracted });
+        setMenu({ ...menu, ...labelPatch, ...extracted });
         setAiNote(`Imported ${count} items — review and edit below, then they're saved automatically.`);
       }
     } catch (err) {
@@ -114,8 +126,10 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       </button>
       {aiNote && <div style={{ background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: brand.text, marginBottom: 16 }}>{aiNote}</div>}
 
-      <MenuSection title="🥟 Momos" hint="Half / full price + pieces" grouped
-        rows={items.map(i => ({ id: i.id, dup: dupItems.has(i.id), group: (i.cat || 'Other'), primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: `${i.type} · ₹${i.half}/${i.full} · ${i.pcsHalf}/${i.pcsFull}pc` }))}
+      <SectionNameControl emoji={label.emoji} name={label.label} onSave={(emoji, name) => setMenu({ ...menu, itemEmoji: emoji, itemLabel: name })} />
+
+      <MenuSection title={`${label.emoji} ${label.label}`} hint="Prices + optional pieces" grouped
+        rows={items.map(i => ({ id: i.id, dup: dupItems.has(i.id), group: (i.cat || 'Other'), primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: itemSecondary(i) }))}
         dupCount={dupItems.size} onDedupe={() => dedupe('items')}
         onAdd={() => setEdit({ section: 'items', item: { type: 'veg', cat: '', pcsHalf: 5, pcsFull: 10 } })}
         onEdit={(id) => setEdit({ section: 'items', item: items.find(x => x.id === id) })}
@@ -141,6 +155,32 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   );
 }
 
+
+// Lets the admin name the main food section per cart (e.g. "🍽️ Dosa" instead of
+// "🥟 Momos"), so a non-momo cart never shows momo wording to staff or customers.
+function SectionNameControl({ emoji, name, onSave }) {
+  const [open, setOpen] = useState(false);
+  const [e, setE] = useState(emoji);
+  const [n, setN] = useState(name);
+  useEffect(() => { setE(emoji); setN(name); }, [emoji, name]);
+  if (!open) return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: colors.muted, marginBottom: 14 }}>
+      <span>Main section: <b style={{ color: colors.ink }}>{emoji} {name}</b></span>
+      <button onClick={() => setOpen(true)} style={{ ...adminBtn, padding: '4px 10px', fontSize: 11 }}>Rename</button>
+    </div>
+  );
+  return (
+    <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 12, marginBottom: 14 }}>
+      <div style={editLabel}>MAIN SECTION NAME</div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input value={e} onChange={ev => setE(ev.target.value.slice(0, 2))} placeholder="🍽️" style={{ ...editInput, width: 56, textAlign: 'center', marginBottom: 0 }} />
+        <input value={n} onChange={ev => setN(ev.target.value)} placeholder="Dosa" style={{ ...editInput, flex: 1, marginBottom: 0 }} />
+        <button onClick={() => { onSave((e || '🍽️').trim(), (n || 'Menu').trim()); setOpen(false); }} style={{ ...adminBtn, color: brand.navy }}>Save</button>
+      </div>
+      <div style={{ fontSize: 11, color: colors.muted, marginTop: 8 }}>Shown as the food section header on the ordering and customer screens.</div>
+    </div>
+  );
+}
 
 function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedupe, onAdd, onEdit, onRemove }) {
   const rowEl = (r) => (
@@ -189,29 +229,38 @@ function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedup
 
 
 function MomoItemModal({ initial, stockTypes = [], categories = [], onSave, onClose }) {
-  const [f, setF] = useState({ cat: '', type: stockTypes[0]?.key || '', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, ...initial });
+  const hasStock = stockTypes.length > 0;
+  // A cart with no momo stock types (e.g. a dosa cart) defaults to single-price
+  // items served whole; a momo cart keeps the half/full two-portion default.
+  const [f, setF] = useState({ cat: '', type: hasStock ? (stockTypes[0]?.key || '') : 'veg', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, single: !hasStock, ...initial });
   const [error, setError] = useState('');
   // Start in "type a new category" mode when there are none yet, or when editing
   // an item whose category isn't among the known ones.
   const [newCat, setNewCat] = useState(categories.length === 0 || (!!(initial?.cat) && !categories.includes(initial.cat)));
   const num = (v) => parseInt(v) || 0;
+  const single = !!f.single;
   const submit = () => {
     if (!f.name?.trim()) { setError('Enter an item name.'); return; }
-    if (!f.cat?.trim()) { setError('Pick or enter a category (e.g. Steamed, Chinese, Snacks).'); return; }
+    if (!f.cat?.trim()) { setError('Pick or enter a category (e.g. Dosa, Steamed, Snacks).'); return; }
+    if (single) {
+      if (!num(f.full)) { setError('Enter a price.'); return; }
+      onSave({ ...f, single: true, name: f.name.trim(), cat: f.cat.trim(), half: 0, full: num(f.full), pcsHalf: 0, pcsFull: num(f.pcsFull), stockKey: f.type || null });
+      return;
+    }
     if (!num(f.half) && !num(f.full)) { setError('Enter at least one price.'); return; }
-    onSave({ ...f, name: f.name.trim(), cat: f.cat.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type || null });
+    onSave({ ...f, single: false, name: f.name.trim(), cat: f.cat.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type || null });
   };
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   return (
-    <EditModalShell title={initial?.id ? 'Edit momo' : 'Add momo'} onClose={onClose} onSave={submit} error={error}>
+    <EditModalShell title={initial?.id ? 'Edit item' : 'Add item'} onClose={onClose} onSave={submit} error={error}>
       <div style={editLabel}>NAME</div>
-      <input value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Veg Steam" style={editInput} />
+      <input value={f.name} onChange={e => set('name', e.target.value)} placeholder="e.g. Masala Dosa" style={editInput} />
       <div style={{ display: 'flex', gap: 10 }}>
         <div style={{ flex: 1 }}>
           <div style={editLabel}>CATEGORY</div>
           {newCat ? (
             <div style={{ display: 'flex', gap: 6 }}>
-              <input autoFocus value={f.cat} onChange={e => set('cat', e.target.value)} placeholder="e.g. Chinese, Snacks" style={{ ...editInput, flex: 1 }} />
+              <input autoFocus value={f.cat} onChange={e => set('cat', e.target.value)} placeholder="e.g. Dosa, Uttapam" style={{ ...editInput, flex: 1 }} />
               {categories.length > 0 && (
                 <button type="button" onClick={() => { setNewCat(false); set('cat', ''); }} style={{ border: `1px solid ${colors.border}`, background: '#fff', borderRadius: 8, padding: '0 10px', fontSize: 12, color: colors.muted, cursor: 'pointer' }}>List</button>
               )}
@@ -224,21 +273,41 @@ function MomoItemModal({ initial, stockTypes = [], categories = [], onSave, onCl
             </select>
           )}
         </div>
-        <div style={{ flex: 1 }}><div style={editLabel}>STOCK TYPE</div>
-          <select value={f.type} onChange={e => set('type', e.target.value)} style={editInput}>
-            {stockTypes.map(st => <option key={st.key} value={st.key}>{st.label}</option>)}
-            <option value="">No stock tracking</option>
-          </select>
+        <div style={{ flex: 1 }}><div style={editLabel}>{hasStock ? 'STOCK TYPE' : 'VEG / NON-VEG'}</div>
+          {hasStock ? (
+            <select value={f.type} onChange={e => set('type', e.target.value)} style={editInput}>
+              {stockTypes.map(st => <option key={st.key} value={st.key}>{st.label}</option>)}
+              <option value="">No stock tracking</option>
+            </select>
+          ) : (
+            <select value={f.type || ''} onChange={e => set('type', e.target.value)} style={editInput}>
+              <option value="veg">Veg</option>
+              <option value="nonveg">Non-veg</option>
+              <option value="egg">Egg</option>
+              <option value="paneer">Paneer</option>
+              <option value="">— none —</option>
+            </select>
+          )}
         </div>
       </div>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1 }}><div style={editLabel}>HALF ₹</div><input type="number" value={f.half} onChange={e => set('half', e.target.value)} style={editInput} /></div>
-        <div style={{ flex: 1 }}><div style={editLabel}>HALF PCS</div><input type="number" value={f.pcsHalf} onChange={e => set('pcsHalf', e.target.value)} style={editInput} /></div>
-      </div>
-      <div style={{ display: 'flex', gap: 10 }}>
-        <div style={{ flex: 1 }}><div style={editLabel}>FULL ₹</div><input type="number" value={f.full} onChange={e => set('full', e.target.value)} style={editInput} /></div>
-        <div style={{ flex: 1 }}><div style={editLabel}>FULL PCS</div><input type="number" value={f.pcsFull} onChange={e => set('pcsFull', e.target.value)} style={editInput} /></div>
-      </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, margin: '2px 0 12px', cursor: 'pointer' }}>
+        <input type="checkbox" checked={single} onChange={e => set('single', e.target.checked)} /> Single price (no half / full portions)
+      </label>
+      {single ? (
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}><div style={editLabel}>PRICE ₹</div><input type="number" value={f.full} onChange={e => set('full', e.target.value)} style={editInput} /></div>
+          <div style={{ flex: 1 }}><div style={editLabel}>PIECES (optional)</div><input type="number" value={f.pcsFull} onChange={e => set('pcsFull', e.target.value)} placeholder="0" style={editInput} /></div>
+        </div>
+      ) : (<>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}><div style={editLabel}>HALF ₹</div><input type="number" value={f.half} onChange={e => set('half', e.target.value)} style={editInput} /></div>
+          <div style={{ flex: 1 }}><div style={editLabel}>HALF PCS</div><input type="number" value={f.pcsHalf} onChange={e => set('pcsHalf', e.target.value)} style={editInput} /></div>
+        </div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}><div style={editLabel}>FULL ₹</div><input type="number" value={f.full} onChange={e => set('full', e.target.value)} style={editInput} /></div>
+          <div style={{ flex: 1 }}><div style={editLabel}>FULL PCS</div><input type="number" value={f.pcsFull} onChange={e => set('pcsFull', e.target.value)} style={editInput} /></div>
+        </div>
+      </>)}
       <div style={editLabel}>THEFT AUDIT — SERVED ON</div>
       <select value={f.ware || 'plate'} onChange={e => set('ware', e.target.value)} style={editInput}>
         <option value="plate">6"/7" number plate (by half/full)</option>
