@@ -6,6 +6,10 @@ import { SectionHeader } from '../../components/shared';
 
 // How many days back the reconciliation day-picker shows (today + this many prior).
 const RECON_DAYS_BACK = 13;
+// Grace window for back-filling a missed day: the owner can still enter that
+// day's cash/UPI revenue up to this many days later (T-1, T-2). Past that the
+// day is read-only and reports fall back to the system-recorded totals.
+const BACKFILL_DAYS = 2;
 
 // A day's money/pieces summary computed straight from orders — used both to label
 // the day strip and to drive a back-dated (late/forgotten) close.
@@ -86,6 +90,10 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
   };
 
   const status = statusFor(selectedDate);
+  // How many calendar days before today the selected day is (yesterday = 1).
+  const [sy, sm, sd] = selectedDate.split('-').map(Number);
+  const daysAgo = Math.round((baseMs - Date.UTC(sy, sm - 1, sd)) / 86400000);
+  const withinBackfill = daysAgo >= 1 && daysAgo <= BACKFILL_DAYS;
 
   return (
     <div>
@@ -100,11 +108,20 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], toda
           upiRevenue={upiRevenue} piecesSold={piecesSold} />
       ) : status === 'closed' || status === 'holiday' ? (
         <ClosedSummary log={closeByDate[selectedDate]} date={selectedDate} />
+      ) : withinBackfill ? (
+        // Within the grace window: let the owner enter that day's cash/UPI even
+        // if no orders were punched, with "mark holiday" as the no-sales option.
+        <LateReconcile date={selectedDate} daysAgo={daysAgo} backfillDays={BACKFILL_DAYS}
+          stats={dayStatsFor(state, cartId, selectedDate)}
+          onClose={(cash, upi) => closeLate(selectedDate, cash, upi)}
+          onHoliday={() => closeHoliday(selectedDate)} />
       ) : status === 'empty' ? (
         <HolidayEmpty date={selectedDate} onMarkClosed={() => closeHoliday(selectedDate)} />
       ) : (
-        <LateReconcile date={selectedDate} stats={dayStatsFor(state, cartId, selectedDate)}
-          onClose={(cash, upi) => closeLate(selectedDate, cash, upi)} />
+        // Past the grace window with sales on record: read-only, reports use the
+        // system totals for the day.
+        <WindowPassed date={selectedDate} backfillDays={BACKFILL_DAYS}
+          stats={dayStatsFor(state, cartId, selectedDate)} />
       )}
     </div>
   );
@@ -224,20 +241,31 @@ function SummaryRow({ label, system, counted, diff, unit }) {
 }
 
 
-// ─── Past day whose reconciliation was missed → cash/UPI-only late close ───
+// ─── Missed day, still inside the back-fill window → enter cash/UPI late ───
+// Works whether or not orders were punched: if the owner forgot to record sales
+// entirely, they can still key in what was collected. "Mark holiday" is offered
+// as the no-sales option. Stock/plates aren't re-counted, so inventory is
+// untouched.
 
-function LateReconcile({ date, stats, onClose }) {
+function LateReconcile({ date, stats, onClose, onHoliday, daysAgo, backfillDays }) {
   const [physicalCash, setPhysicalCash] = useState('');
   const [phonePeAmount, setPhonePeAmount] = useState('');
   const label = istDateLabel(date, { weekday: 'long', day: 'numeric', month: 'long' });
+  const noOrders = stats.orders.length === 0;
   const cashDiff = physicalCash !== '' ? parseInt(physicalCash) - stats.cash : null;
   const upiDiff = phonePeAmount !== '' ? parseInt(phonePeAmount) - stats.upi : null;
+  const daysLeft = Math.max(0, backfillDays - daysAgo); // more days it can still be edited after today
 
   return (
     <div>
       <div style={{ background: '#FFF7E0', border: '1px solid #FFE08A', borderRadius: 12, padding: '12px 14px', marginBottom: 16, fontSize: 12.5, color: '#8A6D00', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
         <span>⏳</span>
-        <span><strong>{label}</strong> was never closed. Confirm the cash & UPI collected — plates and stock can't be re-counted for a past day, so only the money is reconciled.</span>
+        <span>
+          {noOrders
+            ? <><strong>{label}</strong> has no orders on record. If you made sales but forgot to punch them, enter the cash & UPI you collected — or mark it a holiday if the cart was shut.</>
+            : <><strong>{label}</strong> was never closed. Confirm the cash & UPI collected — plates and stock can't be re-counted for a past day, so only the money is reconciled.</>}
+          {' '}<strong>{daysLeft > 0 ? `You can still edit this for ${daysLeft} more day${daysLeft > 1 ? 's' : ''}.` : 'Last day to enter this.'}</strong>
+        </span>
       </div>
 
       <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 12, marginBottom: 16 }}>
@@ -251,9 +279,9 @@ function LateReconcile({ date, stats, onClose }) {
         )}
       </div>
 
-      <ReconcileBlock title="💰 Cash Box" systemValue={`₹${stats.cash}`} label="Physical cash collected that day"
+      <ReconcileBlock title="💰 Cash Box" systemValue={`₹${stats.cash}`} label={noOrders ? 'Cash you collected that day' : 'Physical cash collected that day'}
         value={physicalCash} onChange={setPhysicalCash} diff={cashDiff} unit="₹" />
-      <ReconcileBlock title="📱 UPI / PhonePe" systemValue={`₹${stats.upi}`} label="Total in PhonePe that day"
+      <ReconcileBlock title="📱 UPI / PhonePe" systemValue={`₹${stats.upi}`} label={noOrders ? 'UPI you collected that day' : 'Total in PhonePe that day'}
         value={phonePeAmount} onChange={setPhonePeAmount} diff={upiDiff} unit="₹" />
 
       <button onClick={() => onClose(physicalCash, phonePeAmount)}
@@ -261,6 +289,46 @@ function LateReconcile({ date, stats, onClose }) {
         style={{ width: '100%', background: (physicalCash === '' || phonePeAmount === '') ? colors.border : colors.ink, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: (physicalCash === '' || phonePeAmount === '') ? 'not-allowed' : 'pointer', marginTop: 6 }}>
         Save Late Close
       </button>
+
+      {noOrders && onHoliday && (
+        <button onClick={onHoliday}
+          style={{ width: '100%', background: 'transparent', color: colors.muted, padding: 14, borderRadius: 12, border: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 13.5, cursor: 'pointer', marginTop: 10 }}>
+          🏖️ No sales — mark it a holiday instead
+        </button>
+      )}
+    </div>
+  );
+}
+
+
+// ─── Past the back-fill window, day had sales → read-only system totals ───
+
+function WindowPassed({ date, stats, backfillDays }) {
+  const label = istDateLabel(date, { weekday: 'long', day: 'numeric', month: 'long' });
+  const money = (n) => `₹${(n || 0).toLocaleString('en-IN')}`;
+  return (
+    <div>
+      <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 16, padding: 22 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 800, fontSize: 16, marginBottom: 4 }}>
+          <Lock size={16} color={colors.muted} /> {label}
+        </div>
+        <div style={{ fontSize: 13, color: colors.muted, lineHeight: 1.5, marginBottom: 16 }}>
+          The {backfillDays}-day window to enter or adjust this day's revenue has passed. Reports use the system-recorded totals below.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div style={{ background: '#FAF8F2', borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 11, color: colors.muted }}>Paid orders</div>
+            <div style={{ fontSize: 22, fontWeight: 800 }}>{stats.paidCount}</div>
+          </div>
+          <div style={{ background: '#FAF8F2', borderRadius: 10, padding: 14 }}>
+            <div style={{ fontSize: 11, color: colors.muted }}>Revenue (cash + UPI)</div>
+            <div style={{ fontSize: 22, fontWeight: 800 }}>{money(stats.cash + stats.upi)}</div>
+          </div>
+        </div>
+        {stats.online > 0 && (
+          <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 10 }}>plus 🛵 {money(stats.online)} Zomato/Swiggy — weekly payout.</div>
+        )}
+      </div>
     </div>
   );
 }
