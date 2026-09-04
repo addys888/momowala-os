@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, authAdminSetRecovery, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
 import { TODAY, adminBtn, brand, colors, editInput, editLabel, fileToBase64, freshInventory, isPaid, onlineVendorsFor, persistConsumables, persistInv, slugify } from '../core';
 import { MenuEditor } from './MenuEditor';
 import { Reports } from './owner/Reports';
@@ -89,6 +89,14 @@ function AdminCarts({ state, updateState }) {
     if (r.status === 'ok') { alert(`Owner password updated for ${cart.name}.`); return; }
     alert(r.message || 'Could not update the password — log in again and retry.');
   };
+  const setRecoveryCode = async () => {
+    const code = prompt('Set an admin recovery code (min 4 chars).\n\nKeep it somewhere safe — you\'ll use it with "Forgot password?" to reset the admin password without any server access.');
+    if (code == null) return;
+    if (code.trim().length < 4) { alert('Recovery code must be at least 4 characters.'); return; }
+    const r = await authAdminSetRecovery(session?.token, code.trim());
+    if (r.status === 'ok') { alert('Recovery code saved. You can now use "Forgot password?" on the admin login.'); return; }
+    alert(r.message || 'Could not save the recovery code — log in again and retry.');
+  };
   const removeCart = (cart) => {
     const orders = state.orders.filter(o => o.cartId === cart.id).length;
     if (!confirm(`Remove ${cart.name}? This hides the cart and removes its staff. ${orders} order(s) stay in records.`)) return;
@@ -131,6 +139,12 @@ function AdminCarts({ state, updateState }) {
             </div>
           </div>
         ))}
+      </div>
+
+      <div style={{ background: '#fff', borderRadius: 14, border: `1px solid ${colors.border}`, padding: 16, marginTop: 16 }}>
+        <div style={{ fontWeight: 800, fontSize: 14, marginBottom: 4 }}>🔐 Admin account security</div>
+        <div style={{ fontSize: 12, color: colors.muted, marginBottom: 12 }}>Set a recovery code so you can reset the admin password yourself — no server access needed — via “Forgot password?” on the login screen.</div>
+        <button onClick={setRecoveryCode} style={adminBtn}>Set / update recovery code</button>
       </div>
     </div>
   );

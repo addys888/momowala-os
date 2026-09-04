@@ -300,6 +300,8 @@ export const authChangeOwnerPassword = (token, password) => callRpc('app_change_
 export const authSetStaffPassword = (token, staffId, password) => callRpc('app_set_staff_password', { p_token: token, p_staff_id: staffId, p_password: password });
 export const authRegisterStaff = (token, id, name, mobile, password) => callRpc('app_register_staff', { p_token: token, p_id: id, p_name: name, p_mobile: mobile, p_password: password });
 export const authAdminResetOwner = (token, cartId, password) => callRpc('app_admin_reset_owner', { p_token: token, p_cart_id: cartId, p_password: password });
+export const authAdminSetRecovery = (token, code) => callRpc('app_admin_set_recovery', { p_token: token, p_code: code });
+export const authAdminRecover = (mobile, code, newPassword) => callRpc('app_admin_recover', { p_mobile: mobile, p_code: code, p_new_password: newPassword });
 
 // ─── ATOMIC INVENTORY (delta-based, race-safe) ───
 // Apply per-stock-key deltas (or absolute fset/cset) to the cart's inventory.

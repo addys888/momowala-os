@@ -502,6 +502,43 @@ begin
 end; $$;
 grant execute on function app_admin_reset_owner(uuid, text, text) to anon;
 
+-- ── Admin self-serve "forgot password" via a recovery code ──
+-- The admin sets a recovery code once (while logged in); if they later forget
+-- their password, entering that code lets them set a new one without any SQL.
+-- The code is stored only as a salted hash (app_hash), and app_admin_recover is
+-- gated by it — an attacker with the public anon key still needs the code.
+alter table platform add column if not exists admin_recovery_hash text;
+
+-- Admin sets/updates their recovery code (authorised by their session token).
+create or replace function app_admin_set_recovery(p_token uuid, p_code text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare s app_sessions;
+begin
+  s := app_session(p_token);
+  if s.role is null or s.role <> 'admin' then return json_build_object('status','error','message','Not authorised'); end if;
+  if length(coalesce(p_code, '')) < 4 then return json_build_object('status','error','message','Recovery code must be at least 4 characters'); end if;
+  update platform set admin_recovery_hash = app_hash(p_code) where id = 1;
+  return json_build_object('status','ok');
+end; $$;
+grant execute on function app_admin_set_recovery(uuid, text) to anon;
+
+-- Forgot-password: reset the admin password using the recovery code. Verifies the
+-- mobile + code, then sets a new password and returns a fresh session token.
+create or replace function app_admin_recover(p_mobile text, p_code text, p_new_password text)
+returns json language plpgsql security definer set search_path = public, extensions as $$
+declare adm record; tok uuid; exp timestamptz := now() + interval '24 hours';
+begin
+  select admin_mobile, admin_recovery_hash into adm from platform where id = 1;
+  if adm.admin_mobile is null or adm.admin_mobile <> p_mobile then return json_build_object('status','not_registered'); end if;
+  if adm.admin_recovery_hash is null then return json_build_object('status','no_recovery'); end if;
+  if adm.admin_recovery_hash <> app_hash(coalesce(p_code, '')) then return json_build_object('status','bad_code'); end if;
+  if length(coalesce(p_new_password, '')) < 4 then return json_build_object('status','error','message','Password must be at least 4 characters'); end if;
+  update platform set admin_password_hash = app_hash(p_new_password) where id = 1;
+  insert into app_sessions(role, expires_at) values ('admin', exp) returning token into tok;
+  return json_build_object('status','ok','role','admin','token',tok,'expiresAt', extract(epoch from exp)*1000);
+end; $$;
+grant execute on function app_admin_recover(text, text, text) to anon;
+
 -- ── Migration: corn cheese stock ──
 -- Safe to run on databases created before corn cheese was added.
 alter table day_close_logs add column if not exists expected_corn integer;
