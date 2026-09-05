@@ -751,7 +751,14 @@ function normalize(state) {
     const stockTypes = m.stockTypes === undefined
       ? (id === 'momowala' ? MOMO_STOCK_TYPES : [])
       : m.stockTypes;
-    menus[id] = { ...m, stockTypes };
+    // 'corn' is the momo-only "Corn Cheese" type. On any non-momo cart it's just
+    // cheese — remap so a cheese dosa/roll reads "Cheese", not "Corn Cheese".
+    const mode = m.stockMode || (id === 'momowala' ? 'momo' : 'simple');
+    let items = m.items;
+    if (mode !== 'momo' && Array.isArray(m.items) && m.items.some(it => it.type === 'corn')) {
+      items = m.items.map(it => it.type === 'corn' ? { ...it, type: 'cheese' } : it);
+    }
+    menus[id] = { ...m, stockTypes, ...(items ? { items } : {}) };
     if (!inventory[id]) inventory[id] = freshInventory(id);
     stockTypes.forEach(st => { if (!inventory[id][st.key]) inventory[id][st.key] = { freezer: 0, cart: 0 }; });
   });
@@ -788,7 +795,8 @@ const editInput = { width: '100%', padding: '11px 14px', border: `2px solid ${co
 const TYPE_CHIP = {
   veg: { bg: '#E7F5E7', fg: '#0F7B0F', label: 'Veg' },
   paneer: { bg: '#FFF1E7', fg: '#B5460B', label: 'Paneer' },
-  corn: { bg: '#FFF7E0', fg: '#8A6D00', label: 'Corn Cheese' },
+  cheese: { bg: '#FFF7E0', fg: '#8A6D00', label: 'Cheese' },
+  corn: { bg: '#FFF7E0', fg: '#8A6D00', label: 'Corn Cheese' }, // momo-specific
   nonveg: { bg: '#FDE8E8', fg: '#C8102E', label: 'Non-veg' },
   egg: { bg: '#FFF4E0', fg: '#9A6B00', label: 'Egg' },
 };

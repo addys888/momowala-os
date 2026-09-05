@@ -293,6 +293,7 @@ function MomoItemModal({ initial, stockTypes = [], categories = [], onSave, onCl
               <option value="nonveg">Non-veg</option>
               <option value="egg">Egg</option>
               <option value="paneer">Paneer</option>
+              <option value="cheese">Cheese</option>
               <option value="">— none —</option>
             </select>
           )}

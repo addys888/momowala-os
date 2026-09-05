@@ -19,7 +19,7 @@ with exactly this shape:
                          // "Chaat", "Chinese"). If unclear, use "Menu".
   "menuEmoji": string,   // one emoji that fits the cuisine (🥟 momos, 🫓 dosa,
                          // 🌯 rolls, 🍜 chinese, 🍧 chaat). Default 🍽️.
-  "items":  [ { "name": string, "cat": string, "type": "veg" | "nonveg" | "egg" | "paneer" | "corn" | "",
+  "items":  [ { "name": string, "cat": string, "type": "veg" | "nonveg" | "egg" | "paneer" | "cheese" | "",
                 "single": boolean, "half": number, "full": number,
                 "pcsHalf": number, "pcsFull": number, "star": boolean } ],
   "lassi":  [ { "name": string, "price": number } ],
@@ -31,9 +31,9 @@ Rules:
   "cat" is the section heading the item sits under ON THIS MENU (e.g. "Plain Dosa",
   "Masala Dosa", "Uttapam", "Steamed", "Tandoori"). Use the menu's own wording — never
   invent momo categories for a non-momo menu.
-  "type" — set "veg" / "nonveg" / "egg" / "paneer" / "corn" only when the menu clearly
-  shows it (a red/green dot, the words, or an obvious paneer/corn/egg/chicken dish).
-  If the menu gives no veg/non-veg signal, use "".
+  "type" — set "veg" / "nonveg" / "egg" / "paneer" / "cheese" only when the menu clearly
+  shows it (a red/green dot, the words, or an obvious paneer/cheese/egg/chicken dish).
+  Use "cheese" for any cheese variant. If the menu gives no veg/non-veg signal, use "".
   PRICING — look carefully at how each dish is priced:
     • If the dish has TWO prices (half & full / small & large / single & double portions),
       set "single": false, put the two prices in "half" and "full", and the piece counts
