@@ -28,6 +28,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   const [edit, setEdit] = useState(null);   // { section, item } — null when closed
   const [busy, setBusy] = useState(false);
   const [aiNote, setAiNote] = useState('');
+  const [scanMsg, setScanMsg] = useState('');
   const fileRef = React.useRef();
 
   const dupItems = duplicateIds('items', items), dupLassi = duplicateIds('lassi', lassi), dupAddons = duplicateIds('addons', addons);
@@ -66,15 +67,18 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   const removeItem = (section, id) => { if (confirm('Remove this item?')) setMenu({ ...menu, [section]: (menu[section] || []).filter(x => x.id !== id) }); };
 
   const onPhoto = async (e) => {
-    const file = e.target.files?.[0];
+    const files = Array.from(e.target.files || []);
     e.target.value = '';
-    if (!file) return;
-    setAiNote(''); setBusy(true);
+    if (!files.length) return;
+    const many = files.length > 1;
+    setAiNote(''); setScanMsg(many ? `Reading ${files.length} menu photos…` : ''); setBusy(true);
     try {
-      const image = await fileToBase64(file);
+      // Downscale every page and send them together in ONE request, so the AI
+      // reads the whole menu at once (categories + section label span all pages).
+      const images = await Promise.all(files.map(f => fileToBase64(f)));
       const res = await fetch('/api/extract-menu', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image, mediaType: 'image/jpeg' }),
+        body: JSON.stringify({ images, mediaType: 'image/jpeg' }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Extraction failed');
@@ -85,7 +89,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
         addons: tag(data.addons, 'a'),
       };
       const count = extracted.items.length + extracted.lassi.length + extracted.addons.length;
-      if (count === 0) { setAiNote('No menu items detected in that photo. Try a clearer shot.'); return; }
+      if (count === 0) { setAiNote(`No menu items detected in ${many ? 'those photos' : 'that photo'}. Try a clearer shot.`); return; }
       // Auto-name the food section from the photo (e.g. "Dosa") the first time,
       // only if the admin hasn't already named it. Keeps momo carts as "Momos".
       const labelPatch = (!menu.itemLabel && data.menuLabel && cartId !== 'momowala')
@@ -113,7 +117,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
     } catch (err) {
       setAiNote(`Couldn't read the menu: ${err.message}. You can still add items manually.`);
     } finally {
-      setBusy(false);
+      setBusy(false); setScanMsg('');
     }
   };
 
@@ -121,11 +125,12 @@ function MenuEditor({ state, updateState, cartId, cart }) {
     <div>
       <SectionHeader title="Menu Setup" subtitle={cart?.name} />
 
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" style={{ display: 'none' }} onChange={onPhoto} />
+      <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={onPhoto} />
       <button onClick={() => fileRef.current?.click()} disabled={busy}
-        style={{ width: '100%', background: brand.teal, color: '#fff', padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', marginBottom: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.7 : 1 }}>
-        {busy ? '📷 Reading menu…' : '📷 Scan menu photo (AI auto-fill)'}
+        style={{ width: '100%', background: brand.teal, color: '#fff', padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.7 : 1 }}>
+        {busy ? `📷 ${scanMsg || 'Reading menu…'}` : '📷 Scan menu photo(s) (AI auto-fill)'}
       </button>
+      <div style={{ fontSize: 11, color: colors.muted, textAlign: 'center', marginBottom: 12 }}>Multi-page menu? Select all the photos at once — they're read together.</div>
       {aiNote && <div style={{ background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: brand.text, marginBottom: 16 }}>{aiNote}</div>}
 
       <SectionNameControl emoji={label.emoji} name={label.label} onSave={(emoji, name) => setMenu({ ...menu, itemEmoji: emoji, itemLabel: name })} />

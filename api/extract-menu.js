@@ -52,8 +52,11 @@ export default async function handler(req, res) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return res.status(500).json({ error: 'Server is missing GEMINI_API_KEY' });
 
-  const { image, mediaType = 'image/jpeg' } = req.body || {};
-  if (!image) return res.status(400).json({ error: 'No image provided' });
+  const { image, images, mediaType = 'image/jpeg' } = req.body || {};
+  // Accept a single `image` (legacy) or an `images` array (multi-page menus).
+  const imgs = (Array.isArray(images) && images.length ? images : (image ? [image] : []))
+    .filter(Boolean).slice(0, 6);
+  if (!imgs.length) return res.status(400).json({ error: 'No image provided' });
 
   try {
     const r = await fetch(`${ENDPOINT}?key=${key}`, {
@@ -62,8 +65,8 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         contents: [{
           parts: [
-            { inline_data: { mime_type: mediaType, data: image } },
-            { text: PROMPT },
+            ...imgs.map(data => ({ inline_data: { mime_type: mediaType, data } })),
+            { text: imgs.length > 1 ? `${PROMPT}\n\nNOTE: The ${imgs.length} images above are pages of ONE menu — merge them into a single result and de-duplicate items that repeat across pages.` : PROMPT },
           ],
         }],
         generationConfig: { responseMimeType: 'application/json', temperature: 0 },
