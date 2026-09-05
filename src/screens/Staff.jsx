@@ -545,7 +545,7 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, foodLabel 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: cart.length > 0 ? 400 : 100 }}>
         {category === 'momos' && groupByCat(items).map(g => (
           <div key={g.cat} style={{ marginBottom: 6 }}>
-            <CategoryBand cat={g.cat} count={g.items.length} />
+            <CategoryBand cat={g.cat} count={g.items.length} styles={menu?.catStyles} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
             </div>

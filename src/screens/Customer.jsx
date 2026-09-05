@@ -380,7 +380,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           <div style={{ marginBottom: 24 }}>
             {groupByCat(filteredItems).map(g => (
               <div key={g.cat} style={{ marginBottom: 14 }}>
-                <CategoryBand cat={g.cat} />
+                <CategoryBand cat={g.cat} styles={menu.catStyles} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {g.items.map(item => <MenuItemRow key={item.id} item={item} onAdd={addToCart} />)}
                 </div>

@@ -441,8 +441,23 @@ const HINDI_FONT = "'Noto Sans Devanagari','Hind','Mangal','Nirmala UI',system-u
 // Distinct, dish-appropriate header band shown above each menu category, used
 // by both the staff order screen and the customer menu.
 
-function CategoryBand({ cat, count }) {
-  const cs = CAT_STYLE[cat] || { icon: '🥟', bg: '#0A0A0A', hi: '' };
+// Deterministic band colour for a category the app has no hardcoded style for
+// (any non-momo cuisine) — hashed to a fixed palette so it's stable and varied
+// instead of every category rendering the same black momo band.
+const CAT_PALETTE = ['#0E7490', '#B45309', '#B91C1C', '#4D7C0F', '#7C3AED', '#0F766E', '#9A3412', '#1D4ED8', '#BE185D', '#4338CA'];
+const catColor = (name = '') => {
+  let h = 0; for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return CAT_PALETTE[h % CAT_PALETTE.length];
+};
+
+// `styles` is the cart's own per-category style map (menu.catStyles), populated by
+// the AI scan: { [catName]: { icon, hi } }. Resolution order: cart's own scanned
+// style → hardcoded momo CAT_STYLE (momowala) → a neutral, coloured fallback.
+function CategoryBand({ cat, count, styles }) {
+  const own = styles?.[cat];
+  const cs = own
+    ? { icon: own.icon || '🍽️', bg: own.bg || catColor(cat), hi: own.hi || '' }
+    : CAT_STYLE[cat] || { icon: '🍽️', bg: catColor(cat), hi: '' };
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: cs.bg, color: '#fff', borderRadius: 8, padding: '9px 13px', marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}>
       <span style={{ fontSize: 16, lineHeight: 1 }}>{cs.icon}</span>

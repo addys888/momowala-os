@@ -19,6 +19,17 @@ with exactly this shape:
                          // "Chaat", "Chinese"). If unclear, use "Menu".
   "menuEmoji": string,   // one emoji that fits the cuisine (🥟 momos, 🫓 dosa,
                          // 🌯 rolls, 🍜 chinese, 🍧 chaat). Default 🍽️.
+  "portionStyle": "single" | "halffull",  // "halffull" ONLY if MOST dishes list two
+                         // portions (half & full). Otherwise "single".
+  "stockMode": "momo" | "simple",  // "momo" ONLY for momo / dumpling carts that sell
+                         // by pieces per plate; every other cuisine is "simple".
+  "stockTypes": [ { "key": string, "label": string } ], // for stockMode "momo" only:
+                         // the raw dumpling types to stock (e.g. Veg Momo, Paneer Momo).
+                         // Empty array [] for "simple".
+  "categories": [ { "name": string, "emoji": string, "hindi": string } ], // one entry per
+                         // distinct "cat" below. "emoji" = a fitting food emoji for that
+                         // category; "hindi" = the category written in Hindi/Devanagari
+                         // (or the local script on the menu), else "".
   "items":  [ { "name": string, "cat": string, "type": "veg" | "nonveg" | "egg" | "paneer" | "cheese" | "",
                 "single": boolean, "half": number, "full": number,
                 "pcsHalf": number, "pcsFull": number, "star": boolean } ],
@@ -31,6 +42,9 @@ Rules:
   "cat" is the section heading the item sits under ON THIS MENU (e.g. "Plain Dosa",
   "Masala Dosa", "Uttapam", "Steamed", "Tandoori"). Use the menu's own wording — never
   invent momo categories for a non-momo menu.
+- "categories" must have exactly one entry per distinct "cat" you used, each with a
+  suitable "emoji" (e.g. Dosa 🫓, Uttapam 🥞, Rolls 🌯, Steamed ♨️, Tandoori 🔥,
+  Fried 🍳, Beverages 🥤) and its "hindi"/local-script name when visible on the menu.
   "type" — set "veg" / "nonveg" / "egg" / "paneer" / "cheese" only when the menu clearly
   shows it (a red/green dot, the words, or an obvious paneer/cheese/egg/chicken dish).
   Use "cheese" for any cheese variant. If the menu gives no veg/non-veg signal, use "".
@@ -104,9 +118,18 @@ export default async function handler(req, res) {
         pcsFull: Number(it.pcsFull) || 0,
       };
     });
+    const categories = (Array.isArray(parsed.categories) ? parsed.categories : [])
+      .filter(c => c && c.name)
+      .map(c => ({ name: String(c.name), emoji: (c.emoji || '').slice(0, 2), hindi: String(c.hindi || '') }));
+    const stockTypes = (Array.isArray(parsed.stockTypes) ? parsed.stockTypes : [])
+      .filter(s => s && (s.label || s.key))
+      .map(s => ({ key: String(s.key || s.label).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''), label: String(s.label || s.key) }));
     return res.status(200).json({
       menuLabel: typeof parsed.menuLabel === 'string' ? parsed.menuLabel : '',
       menuEmoji: typeof parsed.menuEmoji === 'string' ? parsed.menuEmoji : '',
+      stockMode: parsed.stockMode === 'momo' ? 'momo' : 'simple',
+      stockTypes,
+      categories,
       items,
       lassi: Array.isArray(parsed.lassi) ? parsed.lassi : [],
       addons: Array.isArray(parsed.addons) ? parsed.addons : [],

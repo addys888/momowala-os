@@ -90,10 +90,33 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       };
       const count = extracted.items.length + extracted.lassi.length + extracted.addons.length;
       if (count === 0) { setAiNote(`No menu items detected in ${many ? 'those photos' : 'that photo'}. Try a clearer shot.`); return; }
-      // Auto-name the food section from the photo (e.g. "Dosa") the first time,
-      // only if the admin hasn't already named it. Keeps momo carts as "Momos".
-      const labelPatch = (!menu.itemLabel && data.menuLabel && cartId !== 'momowala')
-        ? { itemLabel: String(data.menuLabel).slice(0, 24), itemEmoji: (data.menuEmoji || '🍽️').slice(0, 2) } : {};
+      // Apply everything the scan inferred — section name/emoji, per-category
+      // emoji + local-script labels, and (for carts that haven't been configured)
+      // the stock mode + stock types. Never clobber values the admin already set,
+      // and never touch momowala's curated setup.
+      const labelPatch = {};
+      if (cartId !== 'momowala') {
+        if (!menu.itemLabel && data.menuLabel) {
+          labelPatch.itemLabel = String(data.menuLabel).slice(0, 24);
+          labelPatch.itemEmoji = (data.menuEmoji || '🍽️').slice(0, 2);
+        }
+        if (!menu.stockMode && (data.stockMode === 'momo' || data.stockMode === 'simple')) {
+          labelPatch.stockMode = data.stockMode;
+        }
+        if (data.stockMode === 'momo' && Array.isArray(data.stockTypes) && data.stockTypes.length
+            && !(menu.stockTypes && menu.stockTypes.length)) {
+          labelPatch.stockTypes = data.stockTypes;
+        }
+      }
+      // Category emoji + local-script name — merge in only categories not already
+      // styled, so re-scanning never overwrites the admin's tweaks.
+      if (Array.isArray(data.categories) && data.categories.length) {
+        const merged = { ...(menu.catStyles || {}) };
+        data.categories.forEach(c => {
+          if (c && c.name && !merged[c.name]) merged[c.name] = { icon: c.emoji || '', hi: c.hindi || '' };
+        });
+        labelPatch.catStyles = merged;
+      }
       const hasExisting = items.length + lassi.length + addons.length > 0;
       const merge = hasExisting && confirm(`Found ${count} items. OK = add to the current menu (skipping any already present), Cancel = replace it.`);
       if (merge) {
@@ -140,7 +163,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
         dupCount={dupItems.size} onDedupe={() => dedupe('items')}
         onAdd={() => setEdit({ section: 'items', item: { type: 'veg', cat: '', pcsHalf: 5, pcsFull: 10 } })}
         onEdit={(id) => setEdit({ section: 'items', item: items.find(x => x.id === id) })}
-        onRemove={(id) => removeItem('items', id)} />
+        onRemove={(id) => removeItem('items', id)} catStyles={menu.catStyles || {}} />
 
       <MenuSection title="🥤 Drinks" hint="Single price"
         rows={lassi.map(i => ({ id: i.id, dup: dupLassi.has(i.id), primary: i.name, secondary: `₹${i.price}` }))}
@@ -189,7 +212,7 @@ function SectionNameControl({ emoji, name, onSave }) {
   );
 }
 
-function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedupe, onAdd, onEdit, onRemove }) {
+function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedupe, onAdd, onEdit, onRemove, catStyles = {} }) {
   const rowEl = (r) => (
     <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, background: r.dup ? '#FFF7E0' : '#fff' }}>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -220,7 +243,7 @@ function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedup
       {grouped && rows.length > 0 ? (
         groups.map(g => (
           <div key={g.cat} style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '0 2px 6px' }}>{g.cat}</div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '0 2px 6px' }}>{catStyles[g.cat]?.icon ? `${catStyles[g.cat].icon} ` : ''}{g.cat}</div>
             <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>{g.items.map(rowEl)}</div>
           </div>
         ))
