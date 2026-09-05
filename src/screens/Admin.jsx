@@ -58,8 +58,8 @@ function AdminCarts({ state, updateState }) {
       accent: form.accent || brand.teal, ownerName: form.ownerName.trim(), ownerMobile: form.ownerMobile,
       ownerPasswordHash: null, active: true, createdAt: TODAY,
     };
-    const freshInv = freshInventory();
-    const newMenus = { ...state.menus, [id]: { items: [], lassi: [], addons: [], onlineVendors: !!form.onlineVendors } };
+    const freshInv = freshInventory(id);
+    const newMenus = { ...state.menus, [id]: { items: [], lassi: [], addons: [], stockTypes: [], onlineVendors: !!form.onlineVendors, stockMode: form.stockMode || 'simple' } };
     updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInv }, menus: newMenus });
     pushMenus(newMenus, id);
     // New carts can't be created via the recurring PATCH sync — insert explicitly.
@@ -152,7 +152,7 @@ function AdminCarts({ state, updateState }) {
 
 
 function AddCartModal({ onAdd, onClose }) {
-  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', logo: '', accent: brand.teal, ownerName: '', ownerMobile: '', ownerPassword: '', onlineVendors: false });
+  const [f, setF] = useState({ name: '', tagline: '', cuisine: '', location: '', timing: 'Daily 4 PM – 11 PM', emoji: '🛒', logo: '', accent: brand.teal, ownerName: '', ownerMobile: '', ownerPassword: '', onlineVendors: false, stockMode: 'simple' });
   const [error, setError] = useState('');
   const logoRef = React.useRef();
   const set = (k) => (e) => setF(prev => ({ ...prev, [k]: e.target.value }));
@@ -211,6 +211,23 @@ function AddCartModal({ onAdd, onClose }) {
         <input value={f.location} onChange={set('location')} placeholder="Area, city" style={inputStyle} />
         <div style={label}>TIMING</div>
         <input value={f.timing} onChange={set('timing')} style={inputStyle} />
+
+        <div style={label}>STOCK TRACKING</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+          {[
+            { v: 'simple', t: 'Simple', d: 'Consumables by unit (kg, litre, pcs). Fits dosa, chaat, rolls, most carts.' },
+            { v: 'momo', t: 'Staged + plates', d: 'Freezer → cart loading in pieces + plate/glass theft audit. For momo-style carts.' },
+          ].map(o => (
+            <button key={o.v} type="button" onClick={() => setF(p => ({ ...p, stockMode: o.v }))}
+              style={{ flex: 1, textAlign: 'left', padding: '10px 12px', borderRadius: 10, cursor: 'pointer',
+                border: `2px solid ${f.stockMode === o.v ? brand.navy : colors.border}`,
+                background: f.stockMode === o.v ? '#F0F5FB' : '#fff' }}>
+              <div style={{ fontWeight: 800, fontSize: 13, color: brand.navy }}>{o.t}</div>
+              <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 2, lineHeight: 1.3 }}>{o.d}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ fontSize: 11, color: colors.muted, marginBottom: 12 }}>Can be changed later in the owner's Inventory screen.</div>
 
         <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 14px', paddingTop: 14 }}>
           <div style={{ fontSize: 13, fontWeight: 800, color: brand.navy, marginBottom: 2 }}>Cart owner</div>

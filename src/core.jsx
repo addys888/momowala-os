@@ -189,6 +189,16 @@ const menuFor = (state, cartId) => state.menus?.[cartId] || EMPTY_MENU;
 
 const stockTypesFor = (state, cartId) => menuFor(state, cartId).stockTypes || [];
 
+// Per-cart stock behaviour, chosen at onboarding (stored in the menus blob):
+//   'momo'   — staged pieces (freezer → cart loading) + plate/glass theft audit.
+//   'simple' — generic consumables only (name / unit / stock), no plate audit.
+// Momowala (and anything set before this existed) defaults to 'momo'; every new
+// cart defaults to 'simple' so a dosa/chaat cart never inherits the momo flow.
+const stockModeFor = (state, cartId) => {
+  const m = menuFor(state, cartId).stockMode;
+  return m || (cartId === 'momowala' ? 'momo' : 'simple');
+};
+
 // Per-cart label + emoji for the main food section. The platform is momo-first,
 // so momowala (and any cart that hasn't set one) shows "🥟 Momos"; a dosa / chaat /
 // roll cart sets its own at onboarding (stored in the menus blob, so no schema
@@ -629,7 +639,10 @@ const DEFAULT_INVENTORY = {
 };
 
 
-const freshInventory = () => JSON.parse(JSON.stringify(DEFAULT_INVENTORY));
+// Only momowala seeds the momo piece/consumable defaults; every other cart starts
+// with an empty inventory and grows buckets from its own stock types / consumables.
+// This is what stops a non-momo cart inheriting phantom veg/paneer/corn stock.
+const freshInventory = (cartId) => cartId === 'momowala' ? JSON.parse(JSON.stringify(DEFAULT_INVENTORY)) : {};
 
 // Bump this to force every device to drop its local transactional data (orders,
 // logs, inventory) on next open and adopt the clean cloud — used for the Momo
@@ -662,11 +675,11 @@ const getInitialState = () => {
   // ── inventory, keyed by cartId ──
   let inventory = storage.get('inventoryByCart', null);
   if (!inventory) {
-    const base = (legacyInv && legacyInv.veg) ? legacyInv : freshInventory();
+    const base = (legacyInv && legacyInv.veg) ? legacyInv : freshInventory('momowala');
     if (!base.corn) base.corn = { ...DEFAULT_INVENTORY.corn };
     inventory = { momowala: base };
   }
-  carts.forEach(c => { if (!inventory[c.id]) inventory[c.id] = freshInventory(); });
+  carts.forEach(c => { if (!inventory[c.id]) inventory[c.id] = freshInventory(c.id); });
 
   // ── staff, each tied to a cartId ──
   let staff = storage.get('staffV2', null);
@@ -691,7 +704,7 @@ const getInitialState = () => {
   });
   // make sure every tracked stock type has an inventory bucket
   Object.entries(menus).forEach(([id, m]) => {
-    if (!inventory[id]) inventory[id] = freshInventory();
+    if (!inventory[id]) inventory[id] = freshInventory(id);
     (m.stockTypes || []).forEach(st => {
       if (!inventory[id][st.key]) inventory[id][st.key] = { freezer: 0, cart: 0 };
     });
@@ -730,7 +743,7 @@ function normalize(state) {
       ? (id === 'momowala' ? MOMO_STOCK_TYPES : [])
       : m.stockTypes;
     menus[id] = { ...m, stockTypes };
-    if (!inventory[id]) inventory[id] = freshInventory();
+    if (!inventory[id]) inventory[id] = freshInventory(id);
     stockTypes.forEach(st => { if (!inventory[id][st.key]) inventory[id][st.key] = { freezer: 0, cart: 0 }; });
   });
   return { ...state, menus, inventory };
@@ -777,4 +790,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, menuLabelFor, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, momoOversell };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, stockModeFor, menuLabelFor, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, momoOversell };

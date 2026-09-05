@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
-import { TODAY, WARE_TYPES, PAY_BADGE, adminBtn, brand, cartOpenState, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, istTime, menuFor, onlineVendorsFor, printerCfgFor, vendorEnabledFor, wareLedger, orderStockDeltas } from '../../core';
+import { TODAY, WARE_TYPES, PAY_BADGE, adminBtn, brand, cartOpenState, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorEnabledFor, wareLedger, orderStockDeltas } from '../../core';
 import { CartProfileModal, MenuEditor } from '../MenuEditor';
 import { InventoryView } from './Inventory';
 import { Reconciliation } from './Reconciliation';
@@ -298,10 +298,10 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
 
   const shareToday = async () => {
     const text =
-      `🥟 ${cart?.name || 'Cart'} — ${istDateLabel(new Date(), { weekday: 'short', day: 'numeric', month: 'short' })}\n` +
+      `${menuLabelFor(state, cartId).emoji} ${cart?.name || 'Cart'} — ${istDateLabel(new Date(), { weekday: 'short', day: 'numeric', month: 'short' })}\n` +
       `In-hand: ₹${todayRevenue.toLocaleString('en-IN')}  (💵 ₹${cashRevenue} · 📱 ₹${upiRevenue})\n` +
       (onlineRevenue > 0 ? `🛵 Zomato/Swiggy: ₹${onlineRevenue.toLocaleString('en-IN')}  (weekly payout)\n` : '') +
-      `Orders: ${todayOrders.filter(isPaid).length} · Pieces sold: ${piecesSold}\n` +
+      `Orders: ${todayOrders.filter(isPaid).length}${stockTypes.length > 0 ? ` · Pieces sold: ${piecesSold}` : ''}\n` +
       `Expenses: ₹${todayExpenses.toLocaleString('en-IN')} · Net: ₹${todayNet.toLocaleString('en-IN')}`;
     try { if (navigator.share) { await navigator.share({ title: `${cart?.name} — today`, text }); return; } } catch { /* cancelled */ }
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
@@ -369,7 +369,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
         </div>
         <div style={{ fontSize: 42, fontWeight: 900, lineHeight: 1 }}>₹{todayRevenue.toLocaleString('en-IN')}</div>
         <div style={{ fontSize: 13, marginTop: 8, opacity: 0.8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span>{todayOrders.filter(isPaid).length} orders · {piecesSold} pieces sold</span>
+          <span>{todayOrders.filter(isPaid).length} orders{stockTypes.length > 0 ? ` · ${piecesSold} pieces sold` : ''}</span>
           <button onClick={onSeeOrders} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 20, padding: '3px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>See live orders →</button>
         </div>
         <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,214,10,0.2)', fontSize: 13 }}>

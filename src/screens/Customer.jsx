@@ -271,7 +271,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
           {cancelled ? (
             <div style={{ background: 'rgba(200,30,30,0.18)', color: '#FF8A8A', borderRadius: 12, padding: 12, fontWeight: 800, fontSize: 14, marginBottom: 16 }}>This order was cancelled. Please ask the staff.</div>
           ) : collected ? (
-            <div style={{ background: 'rgba(124,227,139,0.18)', color: '#7CE38B', borderRadius: 12, padding: 12, fontWeight: 800, fontSize: 14, marginBottom: 16 }}>✅ Collected & paid — enjoy! 🥟</div>
+            <div style={{ background: 'rgba(124,227,139,0.18)', color: '#7CE38B', borderRadius: 12, padding: 12, fontWeight: 800, fontSize: 14, marginBottom: 16 }}>✅ Collected & paid — enjoy! {foodLabel.emoji}</div>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 18 }}>
               {trackSteps.map((s, i) => (

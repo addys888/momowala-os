@@ -472,7 +472,7 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, foodLabel 
       {/* Live momos left on cart — updates as items are added and after each order */}
       {stockLeft.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: colors.muted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>🥟 MOMOS LEFT ON CART {cart.length > 0 && <span style={{ color: colors.accent }}>· after this order</span>}</div>
+          <div style={{ fontSize: 10, color: colors.muted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>{foodLabel.emoji} {foodLabel.label.toUpperCase()} LEFT ON CART {cart.length > 0 && <span style={{ color: colors.accent }}>· after this order</span>}</div>
           <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
             {stockLeft.map(s => {
               const state = s.left <= 0 ? 'out' : s.left <= 10 ? 'low' : 'ok';
@@ -759,7 +759,7 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
 
   return (
     <div>
-      <SectionHeader title="Wastage" subtitle="Damaged / spoiled momos" />
+      <SectionHeader title="Wastage" subtitle="Damaged / spoiled stock" />
       {stockTypes.length === 0 ? (
         <div style={{ background: '#fff', borderRadius: 12, padding: 32, textAlign: 'center', border: `1px solid ${colors.border}`, color: colors.muted }}>No stock types set up for this cart.</div>
       ) : (

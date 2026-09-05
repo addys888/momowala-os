@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
-import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, warePacksFor, wareLedger, slugify } from '../../core';
+import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, stockModeFor, warePacksFor, wareLedger, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
 function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
@@ -15,6 +15,13 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
   const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
   const labelFor = (key) => stockTypes.find(st => st.key === key)?.label || key;
+  const mode = stockModeFor(state, cartId);
+  const setStockMode = (m) => {
+    const menu = menuFor(state, cartId);
+    const newMenus = { ...state.menus, [cartId]: { ...menu, stockMode: m } };
+    updateState({ menus: newMenus });
+    pushMenus(newMenus, cartId);
+  };
 
   const setStockTypes = (next) => {
     const menu = menuFor(state, cartId);
@@ -174,8 +181,22 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
 
   return (
     <div>
-      <SectionHeader title="Inventory Control" subtitle="Stock In · Cart Loading · Consumables" />
+      <SectionHeader title="Inventory Control" subtitle={mode === 'momo' ? 'Stock In · Cart Loading · Consumables' : 'Consumables & supplies'} />
 
+      {/* Stock-tracking mode — controls whether the staged freezer/cart + plate
+          audit flow shows, or just the generic consumables model. */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {[{ v: 'simple', t: 'Simple' }, { v: 'momo', t: 'Staged + plates' }].map(o => (
+          <button key={o.v} onClick={() => mode !== o.v && setStockMode(o.v)}
+            style={{ flex: 1, padding: '8px 10px', borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
+              border: `2px solid ${mode === o.v ? brand.navy : colors.border}`,
+              background: mode === o.v ? '#F0F5FB' : '#fff', color: mode === o.v ? brand.navy : colors.muted }}>
+            {o.t}
+          </button>
+        ))}
+      </div>
+
+      {mode === 'momo' && (<>
       {/* Stock In Action */}
       <button onClick={() => stockTypes.length > 0 && setShowAddStock(true)}
         disabled={stockTypes.length === 0}
@@ -240,6 +261,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
         })}
         {stockTypes.length === 0 && <div style={{ padding: 16, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No stock types yet. Tap "Edit stock types" to add the items this cart freezes.</div>}
       </div>
+      </>)}
 
       {/* Consumables & supplies — owner-managed */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
