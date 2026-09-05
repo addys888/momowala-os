@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { CartlyftLogo, CartlyftMark, PAY_BADGE, TYPE_CHIP, brand, colors, momowalaLogoUrl } from '../core';
+import { CartlyftLogo, CartlyftMark, PAY_BADGE, TYPE_CHIP, brand, colors, isSingleItem, itemPieces, momowalaLogoUrl } from '../core';
 
 function LoginShell({ title, subtitle, children, footer }) {
   return (
@@ -200,16 +200,16 @@ function MenuItemRow({ item, onAdd }) {
         </div>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
-        {item.single ? (
+        {isSingleItem(item) ? (
           <button onClick={() => onAdd(item.id, item.name, item.full, 'full')} style={{ flex: 1, padding: '8px 10px', background: colors.ink, color: colors.primary, border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Add · ₹{item.full}{item.pcsFull ? <span style={{ fontSize: 10, opacity: 0.7 }}> ({item.pcsFull}pc)</span> : null}
+            Add · ₹{item.full}{itemPieces(item, 'full') ? <span style={{ fontSize: 10, opacity: 0.7 }}> ({itemPieces(item, 'full')}pc)</span> : null}
           </button>
         ) : (<>
           <button onClick={() => onAdd(item.id, `${item.name} Half`, item.half, 'half')} style={{ flex: 1, padding: '8px 10px', background: '#fff', border: `1.5px solid ${colors.ink}`, borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Half · ₹{item.half}{item.pcsHalf ? <span style={{ fontSize: 10, opacity: 0.6 }}> ({item.pcsHalf}pc)</span> : null}
+            Half · ₹{item.half}{itemPieces(item, 'half') ? <span style={{ fontSize: 10, opacity: 0.6 }}> ({itemPieces(item, 'half')}pc)</span> : null}
           </button>
           <button onClick={() => onAdd(item.id, `${item.name} Full`, item.full, 'full')} style={{ flex: 1, padding: '8px 10px', background: colors.ink, color: colors.primary, border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer' }}>
-            Full · ₹{item.full}{item.pcsFull ? <span style={{ fontSize: 10, opacity: 0.7 }}> ({item.pcsFull}pc)</span> : null}
+            Full · ₹{item.full}{itemPieces(item, 'full') ? <span style={{ fontSize: 10, opacity: 0.7 }}> ({itemPieces(item, 'full')}pc)</span> : null}
           </button>
         </>)}
       </div>

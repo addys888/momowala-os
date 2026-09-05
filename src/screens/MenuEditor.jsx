@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
-import { adminBtn, brand, colors, editInput, editLabel, fileToBase64, groupByCat, menuFor, menuLabelFor, TYPE_CHIP } from '../core';
+import { adminBtn, brand, colors, editInput, editLabel, fileToBase64, groupByCat, menuFor, menuLabelFor, isSingleItem, itemPieces, TYPE_CHIP } from '../core';
 import { printTest } from '../lib/escpos';
 import { EditModalShell, SectionHeader } from '../components/shared';
 
@@ -38,8 +38,10 @@ function MenuEditor({ state, updateState, cartId, cart }) {
   // Row subtitle: single-price items read as one price; half/full show both.
   const itemSecondary = (i) => {
     const chip = TYPE_CHIP[i.type]?.label;
-    const price = i.single ? `₹${i.full}${i.pcsFull ? ` · ${i.pcsFull}pc` : ''}`
-      : `₹${i.half}/${i.full}${(i.pcsHalf || i.pcsFull) ? ` · ${i.pcsHalf}/${i.pcsFull}pc` : ''}`;
+    const ph = itemPieces(i, 'half'), pf = itemPieces(i, 'full');
+    const price = isSingleItem(i)
+      ? `₹${i.full}${pf ? ` · ${pf}pc` : ''}`
+      : `₹${i.half}/${i.full}${(ph || pf) ? ` · ${ph}/${pf}pc` : ''}`;
     return chip ? `${chip} · ${price}` : price;
   };
 
@@ -232,7 +234,13 @@ function MomoItemModal({ initial, stockTypes = [], categories = [], onSave, onCl
   const hasStock = stockTypes.length > 0;
   // A cart with no momo stock types (e.g. a dosa cart) defaults to single-price
   // items served whole; a momo cart keeps the half/full two-portion default.
-  const [f, setF] = useState({ cat: '', type: hasStock ? (stockTypes[0]?.key || '') : 'veg', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, single: !hasStock, ...initial });
+  const [f, setF] = useState(() => {
+    const base = { cat: '', type: hasStock ? (stockTypes[0]?.key || '') : 'veg', pcsHalf: 5, pcsFull: 10, half: '', full: '', name: '', star: false, ...initial };
+    // Infer single vs half/full from the item itself when editing; new items follow
+    // the cart default (staged/momo carts → half/full, simple carts → single).
+    base.single = initial?.id ? isSingleItem(initial) : !hasStock;
+    return base;
+  });
   const [error, setError] = useState('');
   // Start in "type a new category" mode when there are none yet, or when editing
   // an item whose category isn't among the known ones.
