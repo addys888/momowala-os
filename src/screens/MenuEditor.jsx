@@ -179,7 +179,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
         onEdit={(id) => setEdit({ section: 'addons', item: addons.find(x => x.id === id) })}
         onRemove={(id) => removeItem('addons', id)} />
 
-      {edit?.section === 'items' && <MomoItemModal initial={edit.item} stockTypes={menu.stockTypes || []} categories={itemCats} onSave={(it) => saveItem('items', it)} onClose={() => setEdit(null)} />}
+      {edit?.section === 'items' && <ItemModal initial={edit.item} stockTypes={menu.stockTypes || []} categories={itemCats} onSave={(it) => saveItem('items', it)} onClose={() => setEdit(null)} />}
       {edit && edit.section !== 'items' && <SimpleItemModal initial={edit.item} section={edit.section} onSave={(it) => saveItem(edit.section, it)} onClose={() => setEdit(null)} />}
     </div>
   );
@@ -258,7 +258,7 @@ function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedup
 }
 
 
-function MomoItemModal({ initial, stockTypes = [], categories = [], onSave, onClose }) {
+function ItemModal({ initial, stockTypes = [], categories = [], onSave, onClose }) {
   const hasStock = stockTypes.length > 0;
   // A cart with no momo stock types (e.g. a dosa cart) defaults to single-price
   // items served whole; a momo cart keeps the half/full two-portion default.
@@ -492,4 +492,4 @@ function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
 
 // Small reusable cart icon — uploaded logo if present, else emoji.
 
-export { newId, menuKeyOf, duplicateIds, MenuEditor, MenuSection, MomoItemModal, SimpleItemModal, CartProfileModal };
+export { newId, menuKeyOf, duplicateIds, MenuEditor, MenuSection, ItemModal, SimpleItemModal, CartProfileModal };

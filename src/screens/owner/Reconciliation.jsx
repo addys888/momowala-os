@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, brand, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, momoOversell, persistInv, wareLedger } from '../../core';
+import { TODAY, WARE_TYPES, brand, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, stockOversell, persistInv, wareLedger } from '../../core';
 import { SectionHeader } from '../../components/shared';
 
 function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], initialDate }) {
@@ -81,7 +81,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
     return { ...st, expected, val, diff };
   }) : [];
   const allStockFilled = stockRows.every(r => r.val !== '');
-  const oversell = isCurrentDay ? momoOversell(state, cartId, date) : {};
+  const oversell = isCurrentDay ? stockOversell(state, cartId, date) : {};
 
   // Countdown to reconcile the CURRENT day on time (by 1 AM the next day).
   const deadline = isCurrentDay ? Date.parse(shiftDate(businessDate, 1) + 'T01:00:00+05:30') : null;

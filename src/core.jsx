@@ -387,7 +387,7 @@ const dayCloseWare = (d) => Array.isArray(d?.stock) ? d.stock.filter(r => String
 // left the cart than was ever put on it. Returns { stockKey: overPcs } for
 // negatives only (empty = clean). Purely a read-only signal; it never changes
 // the counter, so it can't regress normal stock behaviour.
-function momoOversell(state, cartId, date) {
+function stockOversell(state, cartId, date) {
   const lastClose = (state.dayCloseLogs || [])
     .filter(d => d.cartId === cartId && d.date <= date)
     .map(d => d.date).sort().pop() || null;
@@ -822,4 +822,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, stockModeFor, menuLabelFor, isSingleItem, itemPieces, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, momoOversell };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, stockModeFor, menuLabelFor, isSingleItem, itemPieces, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, stockOversell };
