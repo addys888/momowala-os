@@ -264,7 +264,7 @@ const prepChecklistFor = (state, cartId) => {
 // so the print buttons only appear for carts that actually have a printer.
 const printerCfgFor = (state, cartId) => {
   const p = menuFor(state, cartId).printer || {};
-  return { enabled: !!p.enabled, footer: p.footer || '' };
+  return { enabled: !!p.enabled, footer: p.footer || '', autoPrint: !!p.autoPrint };
 };
 
 // ─── SERVING-WARE AUDIT (theft validation) ───

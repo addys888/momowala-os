@@ -64,10 +64,59 @@ const toBase64 = (bytes) => {
   return btoa(s);
 };
 
+// Internal KITCHEN / COUNTER ticket: big token + item list with quantities, NO
+// prices. This is what auto-prints on order placement — the counter uses it to
+// prep; the priced customer bill is only printed on request (reprint in My Orders).
+function kitchenTicketBytes(order, cart = {}) {
+  const b = [];
+  const raw = (...x) => x.forEach((v) => b.push(v & 0xFF));
+  const put = (s) => { for (const ch of ascii(s)) b.push(ch.charCodeAt(0) & 0xFF); };
+  const line = (s = '') => { put(s); b.push(0x0A); };
+  const align = (n) => raw(ESC, 0x61, n);
+  const bold = (on) => raw(ESC, 0x45, on ? 1 : 0);
+  const dbl = (on) => raw(GS, 0x21, on ? 0x11 : 0x00);
+  const rule = () => line('-'.repeat(COLS));
+
+  raw(ESC, 0x40); // init
+  align(1); bold(true); line('*** KITCHEN COPY ***');
+  if (cart.name) line(cart.name);
+  bold(false); rule();
+
+  align(1); bold(true); dbl(true); line('TOKEN #' + (order.token || '')); dbl(false); bold(false);
+  align(0);
+  line((order.time || '') + (order.staff ? '   ' + order.staff : ''));
+  rule();
+
+  // Items with quantity, emphasised; type in brackets; no money.
+  bold(true);
+  (order.items || []).forEach((it) => {
+    line(it.qty + ' x ' + it.name + (it.type && it.type !== '' ? ' (' + it.type + ')' : ''));
+  });
+  bold(false);
+  rule();
+
+  const totalQty = (order.items || []).reduce((s, it) => s + (it.qty || 0), 0);
+  const pay = order.payment === 'split' ? 'SPLIT (cash + UPI)'
+    : order.payment === 'pending' || order.payment === 'unpaid' ? '** UNPAID — COLLECT **'
+    : ('Paid: ' + String(order.payment || '').toUpperCase());
+  line('Items: ' + totalQty + '    ' + pay);
+  raw(0x0A, 0x0A, 0x0A);
+  raw(GS, 0x56, 0x00); // cut (ignored if no cutter)
+  return b;
+}
+
 // Build + send a receipt to RawBT. Returns false if not in a browser.
 export function printReceipt(order, cart = {}, opts = {}) {
   if (typeof window === 'undefined') return false;
   const b64 = toBase64(receiptBytes(order, cart, opts));
+  window.location.href = 'rawbt:base64,' + b64;
+  return true;
+}
+
+// Send the internal kitchen ticket to RawBT.
+export function printKitchenTicket(order, cart = {}) {
+  if (typeof window === 'undefined') return false;
+  const b64 = toBase64(kitchenTicketBytes(order, cart));
   window.location.href = 'rawbt:base64,' + b64;
   return true;
 }

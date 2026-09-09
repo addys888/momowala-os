@@ -26,9 +26,9 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   const saveProfile = (fields) => {
     // Printer config lives in the menus blob (synced via pushMenus, clobber-safe)
     // — split it out from the cart-table fields.
-    const { printerEnabled, printerFooter, ...cartFields } = fields;
+    const { printerEnabled, printerFooter, printerAutoPrint, ...cartFields } = fields;
     const updated = { ...cart, ...cartFields };
-    const newMenus = { ...state.menus, [cartId]: { ...menuFor(state, cartId), printer: { enabled: !!printerEnabled, footer: (printerFooter || '').trim() } } };
+    const newMenus = { ...state.menus, [cartId]: { ...menuFor(state, cartId), printer: { enabled: !!printerEnabled, footer: (printerFooter || '').trim(), autoPrint: !!printerAutoPrint } } };
     updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c), menus: newMenus });
     saveCartProfile(updated); // persist immediately so it survives a refresh
     pushMenus(newMenus, cartId);

@@ -395,7 +395,7 @@ function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
     phone: cart?.phone || '', instagram: cart?.instagram || '', accent: cart?.accent || brand.teal,
     upiId: cart?.upiId || '', upiQr: cart?.upiQr || '',
     openTime: cart?.openTime || '', closeTime: cart?.closeTime || '',
-    printerEnabled: !!printer.enabled, printerFooter: printer.footer || '',
+    printerEnabled: !!printer.enabled, printerFooter: printer.footer || '', printerAutoPrint: !!printer.autoPrint,
   });
   const [error, setError] = useState('');
   const logoRef = React.useRef(), qrRef = React.useRef();
@@ -415,7 +415,7 @@ function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
       phone: f.phone.trim(), instagram: f.instagram.trim(), accent: f.accent,
       upiId: f.upiId.trim(), upiQr: f.upiQr || null,
       openTime: f.openTime || null, closeTime: f.closeTime || null,
-      printerEnabled: !!f.printerEnabled, printerFooter: f.printerFooter.trim(),
+      printerEnabled: !!f.printerEnabled, printerFooter: f.printerFooter.trim(), printerAutoPrint: !!f.printerAutoPrint,
     });
   };
   return (
@@ -481,6 +481,10 @@ function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
           <input type="checkbox" checked={!!f.printerEnabled} onChange={e => setF(p => ({ ...p, printerEnabled: e.target.checked }))} style={{ width: 18, height: 18, accentColor: brand.navy }} /> Enable receipt printing
         </label>
         {f.printerEnabled && (<>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginBottom: 4, cursor: 'pointer' }}>
+            <input type="checkbox" checked={!!f.printerAutoPrint} onChange={e => setF(p => ({ ...p, printerAutoPrint: e.target.checked }))} style={{ width: 18, height: 18, accentColor: brand.navy }} /> Auto-print kitchen ticket on each order
+          </label>
+          <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10 }}>Prints an internal token slip (items only, no prices) the moment an order is placed. The priced customer bill is still one tap away — reprint it from My Orders.</div>
           <div style={editLabel}>RECEIPT FOOTER (optional)</div>
           <input value={f.printerFooter} onChange={set('printerFooter')} placeholder="Thank you! Visit again" style={editInput} />
           <button type="button" onClick={() => printTest(cart)} style={{ ...adminBtn, color: brand.navy }}>🖨️ Test print</button>

@@ -4,7 +4,7 @@ import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOr
 import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, persistInv, playOrderAlert, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 import { RemindersButton } from '../components/RemindersButton';
-import { printReceipt } from '../lib/escpos';
+import { printReceipt, printKitchenTicket } from '../lib/escpos';
 
 function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [tab, setTab] = useState('order');
@@ -277,6 +277,9 @@ function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
   // Printing needs a deliberate tap (and navigates to RawBT), so don't auto-close
   // when the printer is on — otherwise keep the quick 2.6s dismiss.
   useEffect(() => { if (printer.enabled) return; const t = setTimeout(onClose, 2600); return () => clearTimeout(t); }, [info]);
+  // Auto-print the internal kitchen ticket (no prices) once, the moment the order
+  // is placed. The customer bill stays a manual tap (button below / My Orders).
+  useEffect(() => { if (printer.enabled && printer.autoPrint && info?.order) printKitchenTicket(info.order, cart); }, [info]);
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: colors.ink, color: colors.primary, borderRadius: 20, padding: '32px 28px', textAlign: 'center', maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)' }}>
