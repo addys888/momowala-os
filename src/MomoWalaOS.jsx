@@ -73,37 +73,48 @@ export default function App() {
   const pollRef = useRef(null);
   useEffect(() => {
     if (!session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) { pollRef.current = null; return; }
-    let alive = true;
-    const tick = async () => {
-      const fresh = await loadCartOrders(session.cartId, TODAY);
-      if (!alive || !fresh) return;
-      setLastSync(Date.now());
-      setState(prev => {
-        const prevById = new Map(prev.orders.map(o => [o.id, o]));
-        const changed = fresh.some(o => { const p = prevById.get(o.id); return !p || p.payment !== o.payment; });
-        return changed ? { ...prev, orders: mergeOrders(prev.orders, fresh) } : prev;
-      });
+    let alive = true, inFlight = false;
+    const tick = async (force = false) => {
+      // Never stack requests: on slow 4G a poll can outlast the 12s interval, and
+      // firing another on top of it piles up in-flight calls and hangs the app.
+      // Also skip background polling when the tab isn't visible (the manual 🔄
+      // button passes force=true so the owner can always pull on demand).
+      if (inFlight || (!force && document.hidden)) return;
+      inFlight = true;
+      try {
+        const fresh = await loadCartOrders(session.cartId, TODAY);
+        if (!alive || !fresh) return;
+        setLastSync(Date.now());
+        setState(prev => {
+          const prevById = new Map(prev.orders.map(o => [o.id, o]));
+          const changed = fresh.some(o => { const p = prevById.get(o.id); return !p || p.payment !== o.payment; });
+          return changed ? { ...prev, orders: mergeOrders(prev.orders, fresh) } : prev;
+        });
+      } finally { inFlight = false; }
     };
-    pollRef.current = tick;
+    pollRef.current = () => tick(true);
     const t = setInterval(tick, 12000);
     tick();
     return () => { alive = false; clearInterval(t); pollRef.current = null; };
   }, [session]);
   const refreshNow = async () => { if (pollRef.current) await pollRef.current(); };
 
+  // Persist to localStorage, but ONLY the slices whose reference actually changed.
+  // State is updated immutably, so an unchanged slice keeps its reference and is
+  // skipped — this avoids re-serialising the entire orders/logs dataset (which
+  // grows daily) on every single state update, the main cause of the UI getting
+  // sluggish as data accumulates.
+  const persistedRef = useRef({});
   useEffect(() => {
-    storage.set('platform', state.platform);
-    storage.set('carts', state.carts);
-    storage.set('inventoryByCart', state.inventory);
-    storage.set('menus', state.menus);
-    storage.set('staffV2', state.staff);
-    storage.set('orders', state.orders);
-    storage.set('stockLogs', state.stockLogs);
-    storage.set('cartLoadings', state.cartLoadings);
-    storage.set('dayCloseLogs', state.dayCloseLogs);
-    storage.set('wastageLogs', state.wastageLogs);
-    storage.set('expenses', state.expenses);
-    storage.set('payoutMarks', state.payoutMarks);
+    const slices = {
+      platform: state.platform, carts: state.carts, inventoryByCart: state.inventory,
+      menus: state.menus, staffV2: state.staff, orders: state.orders, stockLogs: state.stockLogs,
+      cartLoadings: state.cartLoadings, dayCloseLogs: state.dayCloseLogs, wastageLogs: state.wastageLogs,
+      expenses: state.expenses, payoutMarks: state.payoutMarks,
+    };
+    for (const k in slices) {
+      if (persistedRef.current[k] !== slices[k]) { storage.set(k, slices[k]); persistedRef.current[k] = slices[k]; }
+    }
     syncToCloud(state);
   }, [state]);
 

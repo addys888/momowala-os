@@ -279,7 +279,7 @@ function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
   useEffect(() => { if (printer.enabled) return; const t = setTimeout(onClose, 2600); return () => clearTimeout(t); }, [info]);
   // Auto-print the internal kitchen ticket (no prices) once, the moment the order
   // is placed. The customer bill stays a manual tap (button below / My Orders).
-  useEffect(() => { if (printer.enabled && printer.autoPrint && info?.order) printKitchenTicket(info.order, cart); }, [info]);
+  useEffect(() => { try { if (printer.enabled && printer.autoPrint && info?.order) printKitchenTicket(info.order, cart); } catch { /* never block order flow */ } }, [info]);
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: colors.ink, color: colors.primary, borderRadius: 20, padding: '32px 28px', textAlign: 'center', maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)' }}>
@@ -287,10 +287,16 @@ function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
         <div style={{ fontSize: 18, fontWeight: 800 }}>Order registered!</div>
         <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div>
         <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : info.payment === 'zomato' ? '🛵 Zomato — weekly payout' : info.payment === 'swiggy' ? '🛵 Swiggy — weekly payout' : info.payment === 'split' ? '🔀 Split — cash + UPI' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
-        {printer.enabled && info.order && (
-          <button onClick={() => printReceipt(info.order, cart, { footer: printer.footer })} style={{ marginTop: 16, background: '#fff', color: colors.ink, border: 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>🖨️ Print bill</button>
-        )}
-        <button onClick={onClose} style={{ marginTop: 10, background: printer.enabled ? 'transparent' : colors.primary, color: printer.enabled ? colors.primary : colors.ink, border: printer.enabled ? `1.5px solid ${colors.primary}` : 'none', padding: '12px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>Next order</button>
+        {/* Single button: prints the customer bill (only when the printer is on and
+            NOT already auto-printing) AND always advances. Printing is best-effort —
+            any printer/RawBT failure can never block moving to the next order. */}
+        <button onClick={() => {
+          try { if (printer.enabled && !printer.autoPrint && info.order) printReceipt(info.order, cart, { footer: printer.footer }); }
+          catch { /* printer glitch must not block the flow */ }
+          finally { onClose(); }
+        }} style={{ marginTop: 16, background: colors.primary, color: colors.ink, border: 'none', padding: '14px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>
+          {printer.enabled && !printer.autoPrint ? '🖨️ Print bill & Next order' : 'Next order →'}
+        </button>
       </div>
     </div>
   );

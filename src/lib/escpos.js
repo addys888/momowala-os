@@ -18,6 +18,7 @@ function receiptBytes(order, cart = {}, opts = {}) {
   const align = (n) => raw(ESC, 0x61, n);        // 0 left · 1 center · 2 right
   const bold = (on) => raw(ESC, 0x45, on ? 1 : 0);
   const dbl = (on) => raw(GS, 0x21, on ? 0x11 : 0x00); // double width+height
+  const reverse = (on) => raw(GS, 0x42, on ? 1 : 0);   // white-on-black highlight
   const rule = () => line('-'.repeat(COLS));
   // Left text + right text padded to the full width (amounts flush-right).
   const row = (l, r) => { l = ascii(l); r = ascii(r); const gap = COLS - l.length - r.length; line(l + (gap > 0 ? ' '.repeat(gap) : ' ') + r); };
@@ -30,8 +31,13 @@ function receiptBytes(order, cart = {}, opts = {}) {
   bold(false);
   rule();
 
+  // Highlighted token — reverse (white-on-black), double size, centred, padded so
+  // it reads as a solid block (the closest a text-mode thermal gets to a "badge").
+  align(1); reverse(true); bold(true); dbl(true);
+  line('  TOKEN #' + (order.token || '') + '  ');
+  dbl(false); bold(false); reverse(false);
   align(0);
-  line('Token #' + (order.token || '') + '   ' + (order.date || ''));
+  if (order.date) line('Date: ' + order.date);
   if (order.time) line('Time: ' + order.time + (order.staff ? '   ' + order.staff : ''));
   rule();
 
@@ -75,6 +81,7 @@ function kitchenTicketBytes(order, cart = {}) {
   const align = (n) => raw(ESC, 0x61, n);
   const bold = (on) => raw(ESC, 0x45, on ? 1 : 0);
   const dbl = (on) => raw(GS, 0x21, on ? 0x11 : 0x00);
+  const reverse = (on) => raw(GS, 0x42, on ? 1 : 0);
   const rule = () => line('-'.repeat(COLS));
 
   raw(ESC, 0x40); // init
@@ -82,7 +89,7 @@ function kitchenTicketBytes(order, cart = {}) {
   if (cart.name) line(cart.name);
   bold(false); rule();
 
-  align(1); bold(true); dbl(true); line('TOKEN #' + (order.token || '')); dbl(false); bold(false);
+  align(1); reverse(true); bold(true); dbl(true); line('  TOKEN #' + (order.token || '') + '  '); dbl(false); bold(false); reverse(false);
   align(0);
   line((order.time || '') + (order.staff ? '   ' + order.staff : ''));
   rule();
