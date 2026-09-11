@@ -8,7 +8,7 @@ import { Reconciliation } from './Reconciliation';
 import { Reports } from './Reports';
 import { StaffRegistry } from './StaffRegistry';
 import { Alert, BottomNav, CartIcon, MetricCard, OrderRow, SectionHeader, TopBar } from '../../components/shared';
-import { RemindersButton } from '../../components/RemindersButton';
+import { RemindersButton, OrderAlertsPrompt } from '../../components/RemindersButton';
 import { PrepChecklist } from '../../components/PrepChecklist';
 import { useStore } from '../../store';
 
@@ -99,6 +99,9 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       {showProfile && <CartProfileModal cart={cart} printer={printerCfgFor(state, cartId)} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
+        {/* Nags until this device has push on — otherwise the owner's phone stays
+            silent for incoming customer orders and daily reminders. */}
+        <OrderAlertsPrompt cartId={cartId} role="owner" />
         {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onResetWare={resetWare} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
