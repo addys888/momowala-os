@@ -564,6 +564,12 @@ alter table orders add column if not exists customer_phone text;
 alter table orders add column if not exists prep_status text;
 -- Split (part-cash / part-UPI) payments: the breakdown rides in a jsonb column.
 alter table orders add column if not exists split jsonb;
+-- Set when staff Accepts or Rejects an incoming customer (QR) order. While it is
+-- null on a pending qr-order, the phones keep ringing (api/cron/pending-alerts).
+alter table orders add column if not exists acknowledged_at timestamptz;
+-- The repeat-alert cron scans today's unacknowledged pending QR orders.
+create index if not exists orders_pending_ack_idx
+  on orders (date, payment, acknowledged_at);
 alter table orders drop constraint if exists orders_payment_check;
 alter table orders add constraint orders_payment_check check (payment in ('cash', 'upi', 'split', 'pending', 'cancelled', 'zomato', 'swiggy'));
 

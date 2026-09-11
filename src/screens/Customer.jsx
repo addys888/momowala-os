@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { Navigate, useNavigate, useParams, Link } from 'react-router-dom';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../lib/store';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, insertOrderNow, notifyNewOrder } from '../lib/store';
 import { CartlyftLogo, CategoryBand, MAX_ADDON_ITEMS, TODAY, TYPE_CHIP, brand, cartOpenState, colors, groupByCat, istTime, localNextToken, menuFor, menuLabelFor, momowalaLogoUrl } from '../core';
 import { Alert, CartIcon, MenuItemRow, SectionHeader, SimpleItemRow } from '../components/shared';
 
@@ -199,6 +199,10 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     setStep('success');
     setCart([]);
     setPlacing(false);
+    // Land the order server-side immediately (ahead of the debounced batch sync),
+    // then ring the cart's staff/owner phones. Both are best-effort and kept off
+    // the UI path — the customer already has their token either way.
+    insertOrderNow(order).then(() => notifyNewOrder(order)).catch(() => { /* offline: cron still rings */ });
   };
 
   const total = cart.reduce((s, item) => s + item.price * item.qty, 0);

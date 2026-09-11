@@ -41,6 +41,7 @@ const orderToRow = (o) => ({
   split: o.split ?? null,
   settled_at: o.settledAt ?? null, cancel_reason: o.cancelReason ?? null,
   prep_status: o.prepStatus ?? null,
+  acknowledged_at: o.acknowledgedAt ?? null,
   customer_name: o.customerName ?? null, customer_phone: o.customerPhone ?? null,
   outlet: o.outlet ?? null, outlet_name: o.outletName ?? null,
 });
@@ -50,6 +51,7 @@ const rowToOrder = (r) => ({
   split: r.split ?? undefined,
   settledAt: r.settled_at ?? undefined, cancelReason: r.cancel_reason ?? undefined,
   prepStatus: r.prep_status ?? undefined,
+  acknowledgedAt: r.acknowledged_at ?? undefined,
   customerName: r.customer_name ?? undefined, customerPhone: r.customer_phone ?? undefined,
   outlet: r.outlet ?? undefined, outletName: r.outlet_name ?? undefined,
 });
@@ -411,6 +413,47 @@ export async function insertCart(cart) {
   return supabase.from('carts').insert({ ...cartToRow(cart), created_at: cart.createdAt });
 }
 
+// Push a single just-placed order to the cloud IMMEDIATELY, ahead of the 1.5s
+// debounced batch sync. A QR order must exist server-side before we ask the API
+// to ring the staff phone (the notify endpoint verifies it), and it also means
+// the staff poll sees the order a beat sooner.
+export async function insertOrderNow(order) {
+  if (!supabase) return { error: null };
+  const row = orderToRow(order);
+  let r = await supabase.from('orders').upsert([row], { onConflict: 'id' });
+  if (r.error) {
+    const { customer_name, customer_phone, prep_status, acknowledged_at, split, ...rest } = row;
+    r = await supabase.from('orders').upsert([rest], { onConflict: 'id' });
+  }
+  return r;
+}
+
+// Mark a customer order as seen by staff (accepted or rejected), IMMEDIATELY —
+// not via the debounced sync. The repeat-alert cron reads acknowledged_at to
+// decide whether to keep ringing, so this must land the moment staff taps.
+export async function ackOrder(id) {
+  if (!supabase) return { error: null };
+  const r = await supabase.from('orders').update({ acknowledged_at: new Date().toISOString() }).eq('id', id);
+  if (r.error) console.warn('ack failed (migration pending?)', r.error.message);
+  return r;
+}
+
+// Fire the "new order!" push to the cart's staff/owner devices right away, so a
+// phone that's locked or has the app in the background rings within a second or
+// two instead of waiting for the next cron tick. Best-effort: never block or
+// fail the customer's order placement.
+export async function notifyNewOrder(order) {
+  try {
+    await fetch('/api/notify-order', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        cartId: order.cartId, orderId: order.id, token: order.token,
+        total: order.total, itemCount: (order.items || []).reduce((s, i) => s + (i.qty || 0), 0),
+      }),
+    });
+  } catch { /* offline — the repeat cron will still catch it */ }
+}
+
 // Hard-delete a stock log row (e.g. undoing an accidental plate handover).
 // Must hit the cloud too: the sync is append-only union, so a local-only
 // delete would be resurrected from the cloud on the next load.
@@ -468,8 +511,8 @@ async function pushState(state) {
     const mergeOrdersResilient = async (rows) => {
       if (!rows.length) return { error: null };
       let r = await supabase.from('orders').upsert(rows, { onConflict: 'id' });
-      if (r.error && /customer_name|customer_phone|prep_status|split|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
-        const stripped = rows.map(({ customer_name, customer_phone, prep_status, split, ...rest }) => rest);
+      if (r.error && /customer_name|customer_phone|prep_status|acknowledged_at|split|column .* does not exist|PGRST204/i.test(`${r.error.message} ${r.error.code}`)) {
+        const stripped = rows.map(({ customer_name, customer_phone, prep_status, acknowledged_at, split, ...rest }) => rest);
         r = await supabase.from('orders').upsert(stripped, { onConflict: 'id' });
       }
       // A single row the DB rejects (e.g. a payment value not yet allowed by the
@@ -483,7 +526,7 @@ async function pushState(state) {
         if (safe.length) {
           const r2 = await supabase.from('orders').upsert(safe, { onConflict: 'id' });
           if (!r2.error) return r2;
-          const stripped = safe.map(({ customer_name, customer_phone, prep_status, split, ...rest }) => rest);
+          const stripped = safe.map(({ customer_name, customer_phone, prep_status, acknowledged_at, split, ...rest }) => rest);
           return supabase.from('orders').upsert(stripped, { onConflict: 'id' });
         }
       }

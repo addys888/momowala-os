@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../lib/store';
-import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, persistInv, playOrderAlert, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
+import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, ackOrder } from '../lib/store';
+import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, persistInv, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 import { RemindersButton } from '../components/RemindersButton';
 import { printReceipt, printKitchenTicket } from '../lib/escpos';
@@ -43,8 +43,24 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     if (prevPendingRef.current === null) { prevPendingRef.current = new Set(ids); return; } // skip first load
     const fresh = pend.find(o => !prevPendingRef.current.has(o.id));
     prevPendingRef.current = new Set(ids);
-    if (fresh) { if (soundOnRef.current) playOrderAlert(); setOrderAlert(fresh); }
+    // Ring HARD until staff accepts or rejects — the alarm loops (chime +
+    // vibration) rather than beeping once, so an order can't be missed at a busy
+    // cart. Muting only silences the sound; the card still demands a decision.
+    if (fresh) { if (soundOnRef.current) startOrderAlarm(); setOrderAlert(fresh); }
   }, [state.orders, cartId]);
+
+  // Never leave the alarm ringing if the screen unmounts (logout, tab change).
+  useEffect(() => () => stopOrderAlarm(), []);
+
+  // Staff has seen the order — stop the ringing and record it so the repeat-push
+  // cron stops too. Written immediately (not via the debounced sync) so the
+  // phone stops buzzing within a second.
+  const acknowledgeOrder = (orderId) => {
+    stopOrderAlarm();
+    setOrderAlert(null);
+    updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, acknowledgedAt: new Date().toISOString() } : o) });
+    ackOrder(orderId);
+  };
 
   const cartInfo = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
@@ -256,15 +272,37 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 
       {justPlaced && <OrderPlacedToast info={justPlaced} printer={printerCfgFor(state, cartId)} cart={cartInfo} onClose={() => setJustPlaced(null)} />}
 
+      {/* Incoming customer order — full-screen and undismissable: the alarm keeps
+          ringing until staff explicitly Accepts or Rejects, like the delivery
+          partner apps. No backdrop-tap close, no X: a decision is required. */}
       {orderAlert && (
-        <div style={{ position: 'fixed', left: 12, right: 12, bottom: 84, zIndex: 70, background: colors.ink, color: '#fff', borderRadius: 14, padding: '14px 16px', boxShadow: '0 12px 40px rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', gap: 12, animation: 'none' }}>
-          <div style={{ width: 40, height: 40, borderRadius: 10, background: colors.primary, color: colors.ink, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 20 }}>🔔</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 14 }}>New order #{orderAlert.token} received!</div>
-            <div style={{ fontSize: 12, opacity: 0.85, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{orderAlert.items.map(i => `${i.qty}× ${i.name}`).join(', ')} · ₹{orderAlert.total}</div>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(10,10,10,0.78)', backdropFilter: 'blur(5px)', WebkitBackdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: '#fff', borderRadius: 22, padding: '24px 22px', width: '100%', maxWidth: 380, textAlign: 'center', boxShadow: '0 24px 70px rgba(0,0,0,0.55)' }}>
+            <div style={{ fontSize: 38, lineHeight: 1 }}>🔔</div>
+            <div style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 1.2, color: colors.muted, marginTop: 8 }}>NEW CUSTOMER ORDER</div>
+            <div style={{ fontSize: 46, fontWeight: 900, lineHeight: 1.05, margin: '2px 0 12px' }}>#{orderAlert.token}</div>
+
+            <div style={{ textAlign: 'left', background: colors.paper, border: `1px solid ${colors.border}`, borderRadius: 12, padding: '10px 12px', marginBottom: 12 }}>
+              {(orderAlert.items || []).map((i, n) => (
+                <div key={n} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontSize: 13.5, padding: '3px 0' }}>
+                  <span style={{ fontWeight: 700 }}>{i.qty}× {i.name}</span>
+                  <span style={{ color: colors.muted, flexShrink: 0 }}>₹{i.price * i.qty}</span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 22, fontWeight: 900 }}>₹{orderAlert.total}</div>
+            <div style={{ fontSize: 12, color: colors.muted, marginBottom: 18 }}>
+              {[orderAlert.customerName, orderAlert.customerPhone].filter(Boolean).join(' · ') || 'QR order'} · to collect at cart
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => { acknowledgeOrder(orderAlert.id); setCancelTarget(orderAlert.id); }}
+                style={{ flex: 1, background: '#fff', color: colors.red, border: `2px solid ${colors.red}`, padding: '14px 10px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>✕ Reject</button>
+              <button onClick={() => { acknowledgeOrder(orderAlert.id); setTab('pending'); }}
+                style={{ flex: 1.4, background: colors.green, color: '#fff', border: 'none', padding: '14px 10px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer' }}>✓ Accept</button>
+            </div>
           </div>
-          <button onClick={() => { setTab('pending'); setOrderAlert(null); }} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '8px 14px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: 'pointer', flexShrink: 0 }}>View</button>
-          <button onClick={() => setOrderAlert(null)} style={{ background: 'transparent', color: '#fff', border: 'none', cursor: 'pointer', flexShrink: 0, display: 'flex' }}><X size={18} /></button>
         </div>
       )}
     </div>

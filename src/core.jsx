@@ -585,7 +585,8 @@ function unlockAudio() {
   } catch { /* audio not available */ }
 }
 
-function playOrderAlert() {
+// One two-tone chime + a vibration burst. Loud and short so it can repeat.
+function orderChime() {
   try {
     unlockAudio();
     const ctx = _audioCtx;
@@ -599,15 +600,40 @@ function playOrderAlert() {
         g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + dur);
         o.start(ctx.currentTime + start); o.stop(ctx.currentTime + start + dur);
       };
-      beep(880, 0, 0.2); beep(1175, 0.22, 0.28); // two-tone chime
+      // Four rising tones — an alarm, not a notification blip.
+      beep(880, 0, 0.18); beep(1175, 0.2, 0.18); beep(880, 0.4, 0.18); beep(1175, 0.6, 0.3);
     }
   } catch { /* ignore */ }
+  try { navigator.vibrate?.([500, 200, 500, 200, 700]); } catch { /* no vibrator */ }
+}
+
+function playOrderAlert() {
+  orderChime();
   try {
     const u = new SpeechSynthesisUtterance('New order received');
     u.rate = 1; u.volume = 1;
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(u);
   } catch { /* speech not available */ }
+}
+
+// ─── RINGING ALARM (Zomato-partner style) ───
+// Keeps chiming + vibrating until staff explicitly accepts or rejects the order.
+// Speech plays once (repeating it every cycle would overlap into noise); the
+// chime + vibration repeat every 2.5s, which is what actually gets attention in
+// a noisy street-food environment.
+let _alarmTimer = null;
+
+function startOrderAlarm() {
+  stopOrderAlarm();
+  playOrderAlert();                       // first ring: chime + vibrate + voice
+  _alarmTimer = setInterval(orderChime, 2500);
+}
+
+function stopOrderAlarm() {
+  if (_alarmTimer) { clearInterval(_alarmTimer); _alarmTimer = null; }
+  try { navigator.vibrate?.(0); } catch { /* ignore */ }
+  try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
 }
 
 // An order counts as real revenue once paid. Counter payments (cash/UPI) land
@@ -822,4 +848,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, stockModeFor, menuLabelFor, isSingleItem, itemPieces, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, stockOversell };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, stockModeFor, menuLabelFor, isSingleItem, itemPieces, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, startOrderAlarm, stopOrderAlarm, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, stockOversell };
