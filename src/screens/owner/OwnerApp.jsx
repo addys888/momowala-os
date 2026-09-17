@@ -19,6 +19,11 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   // on any normal tab switch so opening Reconcile by hand still starts on today.
   const [reconcileDate, setReconcileDate] = useState(null);
   const goReconcile = (date) => { setReconcileDate(date || null); setTab('reconcile'); };
+  // Deep-link the orders feed to a specific day — the Uncollected card uses it to
+  // land straight on the OLDEST unsettled day, not today (where the stale orders
+  // wouldn't be visible at all, since the feed shows one date at a time).
+  const [ordersDate, setOrdersDate] = useState(null);
+  const goOrders = (date) => { setOrdersDate(date || TODAY); setTab('orders'); };
   const navTab = (t) => { setReconcileDate(null); setTab(t); };
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
@@ -102,8 +107,8 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         {/* Nags until this device has push on — otherwise the owner's phone stays
             silent for incoming customer orders and daily reminders. */}
         <OrderAlertsPrompt cartId={cartId} role="owner" />
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onResetWare={resetWare} updateState={updateState} />}
-        {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} />}
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onSeeUncollected={goOrders} onResetWare={resetWare} updateState={updateState} />}
+        {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} initialDate={ordersDate} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} initialDate={reconcileDate} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
@@ -130,9 +135,10 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
 // every order newest-first. Defaults to today (live via the dashboard poll) but
 // the date navigator lets the owner scroll back to validate any past day; all
 // history is already in state.orders (the initial cloud load pages through it).
-function OrdersFeed({ state, cartId, onlineVendors = false }) {
+function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
   const { lastSync, refreshNow } = useStore();
-  const [date, setDate] = useState(TODAY);
+  const [date, setDate] = useState(initialDate || TODAY);
+  useEffect(() => { if (initialDate) setDate(initialDate); }, [initialDate]);
   const [, tick] = useState(0);
   useEffect(() => { const t = setInterval(() => tick(n => n + 1), 5000); return () => clearInterval(t); }, []);
   const [refreshing, setRefreshing] = useState(false);
@@ -219,7 +225,7 @@ function OrdersFeed({ state, cartId, onlineVendors = false }) {
   );
 }
 
-function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onToggleVendor, onReconcile, onSeeOrders, onResetWare, updateState }) {
+function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onToggleVendor, onReconcile, onSeeOrders, onSeeUncollected, onResetWare, updateState }) {
   // Day-close nudge: the plate/cash/stock theft audit only runs at day-close, so
   // a stretch of un-closed days means the audit is producing nothing. Warn when
   // today has sales but isn't closed, and count how long the streak has run.
@@ -407,6 +413,39 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
         {showOnline && <MetricCard label="🛵 Online" value={`₹${onlineRevenue}`} icon={<Smartphone size={16}/>} color={colors.accent} />}
       </div>
       ); })()}
+
+      {/* UNCOLLECTED — money punched but never settled, across ALL days. Kept
+          deliberately OUT of today's revenue (which only counts paid orders
+          dated today); this is a separate "owed to the cart" figure so parked
+          orders can't quietly rot. Anything not from today is flagged red. */}
+      {(() => {
+        const pend = (state?.orders || []).filter(o => o.cartId === cartId && o.payment === 'pending');
+        if (!pend.length) return null;
+        const total = pend.reduce((s, o) => s + (o.total || 0), 0);
+        const stale = pend.filter(o => o.date !== TODAY);
+        const staleTotal = stale.reduce((s, o) => s + (o.total || 0), 0);
+        // Land on the OLDEST unsettled day — the feed shows one date at a time,
+        // so opening "today" would hide exactly the orders being warned about.
+        const oldest = pend.reduce((a, o) => (o.date < a ? o.date : a), pend[0].date);
+        return (
+          <button onClick={() => (onSeeUncollected ? onSeeUncollected(oldest) : onSeeOrders?.())}
+            style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: stale.length ? '#FFF1F1' : '#FFF8E1', border: `1.5px solid ${stale.length ? '#E4A0A0' : '#E0B100'}`, borderRadius: 14, padding: '12px 14px', marginBottom: 12, cursor: 'pointer' }}>
+            <span style={{ fontSize: 20 }}>{stale.length ? '⚠️' : '⏳'}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: colors.muted }}>UNCOLLECTED · NOT IN TODAY'S REVENUE</div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: colors.ink }}>
+                ₹{total.toLocaleString('en-IN')} <span style={{ fontSize: 12, fontWeight: 700, color: colors.muted }}>· {pend.length} order{pend.length > 1 ? 's' : ''}</span>
+              </div>
+              {stale.length > 0 && (
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.red, marginTop: 2 }}>
+                  ₹{staleTotal.toLocaleString('en-IN')} from {stale.length} order{stale.length > 1 ? 's' : ''} older than today — settle or cancel
+                </div>
+              )}
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 800, color: brand.navy, flexShrink: 0 }}>View →</span>
+          </button>
+        );
+      })()}
 
       {/* Per-vendor switches — owner turns Zomato/Swiggy on or off for their
           cart (staff buttons + report cards follow). Admin's opt-in gates the
