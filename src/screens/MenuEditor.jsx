@@ -388,7 +388,7 @@ function SimpleItemModal({ initial, section, onSave, onClose }) {
 // Owner edits their cart's display + contact details (same fields as onboarding,
 // minus login credentials, which stay admin-managed).
 
-function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
+function CartProfileModal({ cart, printer = {}, vendorLinks = {}, onSave, onClose }) {
   const [f, setF] = useState({
     name: cart?.name || '', emoji: cart?.emoji || '🛒', logo: cart?.logo || '', tagline: cart?.tagline || '',
     cuisine: cart?.cuisine || '', location: cart?.location || '', timing: cart?.timing || '',
@@ -396,6 +396,7 @@ function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
     upiId: cart?.upiId || '', upiQr: cart?.upiQr || '',
     openTime: cart?.openTime || '', closeTime: cart?.closeTime || '',
     printerEnabled: !!printer.enabled, printerFooter: printer.footer || '', printerAutoPrint: !!printer.autoPrint,
+    zomatoUrl: vendorLinks.zomato || '', swiggyUrl: vendorLinks.swiggy || '',
   });
   const [error, setError] = useState('');
   const logoRef = React.useRef(), qrRef = React.useRef();
@@ -416,6 +417,7 @@ function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
       upiId: f.upiId.trim(), upiQr: f.upiQr || null,
       openTime: f.openTime || null, closeTime: f.closeTime || null,
       printerEnabled: !!f.printerEnabled, printerFooter: f.printerFooter.trim(), printerAutoPrint: !!f.printerAutoPrint,
+      zomatoUrl: f.zomatoUrl.trim(), swiggyUrl: f.swiggyUrl.trim(),
     });
   };
   return (
@@ -472,6 +474,17 @@ function CartProfileModal({ cart, printer = {}, onSave, onClose }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
         <input type="color" value={f.accent} onChange={set('accent')} style={{ width: 48, height: 40, border: `1px solid ${colors.border}`, borderRadius: 8, cursor: 'pointer', background: '#fff' }} />
         <span style={{ fontSize: 13, color: colors.muted }}>{f.accent}</span>
+      </div>
+
+      <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 12px', paddingTop: 12 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: brand.navy, marginBottom: 2 }}>🛵 Also listed on</div>
+        <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10 }}>
+          Paste your listing links. Customers see an “Order on Zomato” button on your menu page, and you can print a QR board from the dashboard.
+        </div>
+        <div style={editLabel}>ZOMATO LINK</div>
+        <input value={f.zomatoUrl} onChange={set('zomatoUrl')} placeholder="https://zomato.onelink.me/..." style={editInput} />
+        <div style={editLabel}>SWIGGY LINK (optional)</div>
+        <input value={f.swiggyUrl} onChange={set('swiggyUrl')} placeholder="https://swiggy.com/..." style={editInput} />
       </div>
 
       <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 12px', paddingTop: 12 }}>

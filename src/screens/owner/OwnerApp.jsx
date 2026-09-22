@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
-import { TODAY, WARE_TYPES, PAY_BADGE, adminBtn, brand, cartOpenState, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorEnabledFor, wareLedger, orderStockDeltas } from '../../core';
+import { TODAY, WARE_TYPES, PAY_BADGE, adminBtn, brand, cartOpenState, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorLinksFor, vendorEnabledFor, wareLedger, orderStockDeltas } from '../../core';
 import { CartProfileModal, MenuEditor } from '../MenuEditor';
 import { InventoryView } from './Inventory';
 import { Reconciliation } from './Reconciliation';
@@ -10,6 +10,7 @@ import { StaffRegistry } from './StaffRegistry';
 import { Alert, BottomNav, CartIcon, MetricCard, OrderRow, SectionHeader, TopBar } from '../../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../../components/RemindersButton';
 import { PrepChecklist } from '../../components/PrepChecklist';
+import { printVendorBoard } from '../../lib/vendorBoard';
 import { useStore } from '../../store';
 
 function OwnerApp({ state, updateState, onExit, cartId }) {
@@ -31,9 +32,12 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   const saveProfile = (fields) => {
     // Printer config lives in the menus blob (synced via pushMenus, clobber-safe)
     // — split it out from the cart-table fields.
-    const { printerEnabled, printerFooter, printerAutoPrint, ...cartFields } = fields;
+    const { printerEnabled, printerFooter, printerAutoPrint, zomatoUrl, swiggyUrl, ...cartFields } = fields;
     const updated = { ...cart, ...cartFields };
-    const newMenus = { ...state.menus, [cartId]: { ...menuFor(state, cartId), printer: { enabled: !!printerEnabled, footer: (printerFooter || '').trim(), autoPrint: !!printerAutoPrint } } };
+    const newMenus = { ...state.menus, [cartId]: { ...menuFor(state, cartId),
+      printer: { enabled: !!printerEnabled, footer: (printerFooter || '').trim(), autoPrint: !!printerAutoPrint },
+      vendorLinks: { zomato: (zomatoUrl || '').trim(), swiggy: (swiggyUrl || '').trim() },
+    } };
     updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c), menus: newMenus });
     saveCartProfile(updated); // persist immediately so it survives a refresh
     pushMenus(newMenus, cartId);
@@ -101,7 +105,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
       <TopBar title={`${cart?.name ?? 'Cart'} · Owner`} onExit={onExit} />
 
-      {showProfile && <CartProfileModal cart={cart} printer={printerCfgFor(state, cartId)} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
+      {showProfile && <CartProfileModal cart={cart} printer={printerCfgFor(state, cartId)} vendorLinks={vendorLinksFor(state, cartId)} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {/* Nags until this device has push on — otherwise the owner's phone stays
@@ -464,6 +468,30 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
           })}
         </div>
       )}
+
+      {/* Printable "we're on Zomato/Swiggy" QR board. Only offered once a listing
+          link is saved (Edit cart → Also listed on). */}
+      {(() => {
+        const vl = vendorLinksFor(state, cartId);
+        const avail = [['zomato', 'Zomato', '#E23744'], ['swiggy', 'Swiggy', '#FC8019']].filter(([k]) => vl[k]);
+        if (!avail.length || !cart) return null;
+        return (
+          <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '10px 12px', marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 8 }}>🪧 PRINT QR BOARD FOR THE CART</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {avail.map(([key, lab, col]) => (
+                <button key={key} onClick={() => printVendorBoard(cart, key)}
+                  style={{ flex: 1, border: `1.5px solid ${col}`, background: '#fff', color: col, borderRadius: 10, padding: '9px 10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
+                  🖨️ {lab} board
+                </button>
+              ))}
+            </div>
+            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.4 }}>
+              The QR points at your own link, so if {avail[0][1]} ever changes the listing URL you just update it here — printed boards keep working.
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Share today's summary */}
       <button onClick={shareToday} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#fff', border: `1px solid ${colors.border}`, color: brand.navy, padding: 12, borderRadius: 12, fontWeight: 700, fontSize: 13.5, cursor: 'pointer', marginBottom: 16 }}>

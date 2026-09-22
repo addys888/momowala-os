@@ -1,6 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
+    { "source": "/z/:cartId", "destination": "/api/z?c=:cartId" },
+    { "source": "/s/:cartId", "destination": "/api/z?c=:cartId&v=swiggy" },
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
   ]
 }

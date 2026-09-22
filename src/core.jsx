@@ -262,6 +262,15 @@ const prepChecklistFor = (state, cartId) => {
 };
 // Per-cart thermal-printer config (menus blob). Off until the owner enables it,
 // so the print buttons only appear for carts that actually have a printer.
+// Public aggregator listing links (Zomato / Swiggy), per cart. Lives in the menus
+// blob like the printer config, so no schema change is needed. These are the
+// PUBLIC customer-facing links (the "order from us on Zomato" ones) — separate
+// from the vendorEnabledFor toggles, which only control internal order tracking.
+const vendorLinksFor = (state, cartId) => {
+  const v = menuFor(state, cartId).vendorLinks || {};
+  return { zomato: v.zomato || '', swiggy: v.swiggy || '' };
+};
+
 const printerCfgFor = (state, cartId) => {
   const p = menuFor(state, cartId).printer || {};
   return { enabled: !!p.enabled, footer: p.footer || '', autoPrint: !!p.autoPrint };
@@ -848,4 +857,4 @@ const MAX_ADDON_ITEMS = 2;
 // ─── CUSTOMER: CART MARKETPLACE LISTING ───
 // Reads the live, admin-managed carts from app state.
 
-export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, stockModeFor, menuLabelFor, isSingleItem, itemPieces, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, startOrderAlarm, stopOrderAlarm, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, stockOversell };
+export { colors, brand, CartlyftMark, CartlyftLogo, MENU_ITEMS, LASSI, ADDONS, PLATFORM_ADMIN_MOBILE, SEED_CARTS, PAY_BADGE, MOMO_STOCK_TYPES, SEED_MENUS, EMPTY_MENU, menuFor, stockTypesFor, stockModeFor, menuLabelFor, isSingleItem, itemPieces, onlineVendorsFor, vendorEnabledFor, DEFAULT_PREP_CHECKLIST, prepChecklistFor, printerCfgFor, vendorLinksFor, groupByCat, CAT_STYLE, HINDI_FONT, CategoryBand, cartOpenState, deductInventory, restoreInventory, orderStockDeltas, persistInv, persistConsumables, IST_TZ, localDate, istTime, istNowMinutes, istDateLabel, TODAY, unlockAudio, playOrderAlert, startOrderAlarm, stopOrderAlarm, isPaid, isOnline, cashPart, upiPart, CANCEL_REASONS, CANCEL_WINDOW_MS, withinCancelWindow, staffCancellable, localNextToken, DEFAULT_INVENTORY, freshInventory, DATA_EPOCH, getInitialState, normalize, slugify, adminBtn, fileToBase64, editLabel, editInput, TYPE_CHIP, MAX_ADDON_ITEMS, momowalaLogoUrl, WARE_PER_PACKET_DEFAULT, WARE_TYPES, warePacksFor, wareForOrder, usesPlates, wareLedger, dayCloseWare, stockOversell };

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, createContext, useContext } from 'r
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { Navigate, useNavigate, useParams, Link } from 'react-router-dom';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, insertOrderNow, notifyNewOrder } from '../lib/store';
-import { CartlyftLogo, CategoryBand, MAX_ADDON_ITEMS, TODAY, TYPE_CHIP, brand, cartOpenState, colors, groupByCat, istTime, localNextToken, menuFor, menuLabelFor, momowalaLogoUrl } from '../core';
+import { CartlyftLogo, CategoryBand, MAX_ADDON_ITEMS, TODAY, TYPE_CHIP, brand, cartOpenState, colors, groupByCat, istTime, localNextToken, menuFor, menuLabelFor, vendorLinksFor, momowalaLogoUrl } from '../core';
 import { Alert, CartIcon, MenuItemRow, SectionHeader, SimpleItemRow } from '../components/shared';
 
 function CartListing({ carts, onSelect }) {
@@ -369,6 +369,29 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
             <span style={{ fontSize: 12, fontWeight: 800, color: brand.navy }}>Add →</span>
           </button>
         )}
+
+        {/* Also listed on the aggregators — shown only when the owner has saved a
+            link. Ordering at the cart stays the primary action; this is for
+            customers who'd rather have it delivered. */}
+        {(() => {
+          const vl = vendorLinksFor(state, venue.id);
+          if (!vl.zomato && !vl.swiggy) return null;
+          const pill = (href, bg, label) => (
+            <a key={label} href={href} target="_blank" rel="noopener noreferrer"
+              style={{ flex: 1, textAlign: 'center', background: bg, color: '#fff', borderRadius: 10, padding: '10px 12px', fontSize: 13, fontWeight: 800, textDecoration: 'none' }}>
+              {label}
+            </a>
+          );
+          return (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 6 }}>PREFER DELIVERY? WE'RE ALSO ON</div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {vl.zomato && pill(vl.zomato, '#E23744', '🛵 Order on Zomato')}
+                {vl.swiggy && pill(vl.swiggy, '#FC8019', '🛵 Order on Swiggy')}
+              </div>
+            </div>
+          );
+        })()}
 
         {items.length > 0 && <>
           <SectionHeader title={`${foodLabel.emoji} ${foodLabel.label}`} />
