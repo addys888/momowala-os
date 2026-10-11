@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, ackOrder } from '../lib/store';
-import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, localNextToken, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, persistInv, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
+import React, { useState, useEffect } from 'react';
+import { Plus, Minus, X, Clock, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
+import { storage, nextOrderToken, ackOrder } from '../lib/store';
+import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, persistInv, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../components/RemindersButton';
 import { printReceipt, printKitchenTicket } from '../lib/escpos';
@@ -26,6 +26,15 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     setSoundOn(v); soundOnRef.current = v; storage.set('alertSound', v);
     if (v) { unlockAudio(); playOrderAlert(); } // give an audible confirmation when turning on
   };
+
+  useEffect(() => {
+    const committed = e => {
+      const o = e.detail.order;
+      if (o) setJustPlaced(previous => previous?.order?.id === o.id ? { ...previous, token: o.token, order: { ...previous.order, token: o.token } } : previous);
+    };
+    window.addEventListener('mw:committed', committed);
+    return () => window.removeEventListener('mw:committed', committed);
+  }, []);
 
   // Unlock the audio context on the first tap so the alert beep can play later.
   useEffect(() => {
@@ -93,7 +102,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       // Shared per-cart/day counter (same RPC the customer QR flow uses) so staff
       // and customer tokens never collide; local count is the offline fallback.
       const serverNum = await nextOrderToken(cartId, TODAY);
-      const token = String(serverNum ?? localNextToken(state.orders, cartId)).padStart(3, '0');
+      const token = 'Waiting to sync';
       const order = {
         id: Date.now(),
         cartId,
@@ -117,7 +126,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       // never a stale closure snapshot.
       updateState(s => ({ inventory: { ...s.inventory, [cartId]: newInv }, orders: [...s.orders, order] }));
       const deltas = orderStockDeltas(cart, menu.items);
-      persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+
       setCart([]);
       setJustPlaced({ token, total, payment, order });
     } finally {
@@ -143,7 +152,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       orders: s.orders.map(o => o.id === target.id ? { ...o, items: newItems, total: newTotal } : o),
     }));
     const deltas = orderStockDeltas(extraItems, menu.items);
-    persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+
     reset();
   };
 
@@ -167,7 +176,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       });
       if (!alreadyDeducted) {
         const deltas = orderStockDeltas(order.items, menu.items);
-        persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: -p }])), { ...state.inventory, [cartId]: newInv });
+
       }
     } finally {
       settlingRef.current.delete(orderId);
@@ -202,7 +211,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     });
     if (wasDeducted) {
       const deltas = orderStockDeltas(order.items, menu.items);
-      persistInv(cartId, Object.fromEntries(Object.entries(deltas).map(([k, p]) => [k, { dc: p }])), { ...state.inventory, [cartId]: newInv });
+
     }
     setCancelTarget(null);
   };

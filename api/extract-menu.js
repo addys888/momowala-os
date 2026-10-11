@@ -1,3 +1,4 @@
+import { identity } from '../server/auth.js';
 // Vercel serverless function: extract a QSR menu from a photo using
 // Google Gemini 2.5 Flash (free tier). The API key stays server-side
 // (GEMINI_API_KEY) — never shipped to the browser.
@@ -63,6 +64,8 @@ Return valid JSON only — no markdown, no commentary.`;
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  const user = await identity(req);
+  if (!user || !['owner', 'admin'].includes(user.role)) return res.status(403).json({ error: 'Sign in as an owner or admin' });
   const key = process.env.GEMINI_API_KEY;
   if (!key) return res.status(500).json({ error: 'Server is missing GEMINI_API_KEY' });
 

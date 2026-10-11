@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, authAdminSetRecovery, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
+import React, { useState } from 'react';
+import { Plus, X, AlertCircle, BarChart3, Boxes } from 'lucide-react';
+import { authAdminResetOwner, authAdminSetRecovery, insertCart, pushMenus } from '../lib/store';
 import { TODAY, adminBtn, brand, colors, editInput, editLabel, fileToBase64, freshInventory, isPaid, onlineVendorsFor, persistConsumables, persistInv, slugify } from '../core';
 import { MenuEditor } from './MenuEditor';
-import { Reports } from './owner/Reports';
+
 import { BottomNav, CartIcon, EditModalShell, SectionHeader, TopBar } from '../components/shared';
 import { useStore } from '../store';
 
@@ -47,10 +47,12 @@ function AdminCarts({ state, updateState }) {
   }
 
   const addCart = async (form) => {
+    const initialPassword = form.ownerPassword;
+    if (!initialPassword) return;
+    if (initialPassword.length < 8) { alert('Use at least 8 characters.'); return; }
     let id = slugify(form.name) || `cart-${Date.now()}`;
     if (state.carts.some(c => c.id === id)) id = `${id}-${Date.now().toString().slice(-4)}`;
-    // The owner sets their own password on first login (needs_setup flow) — the
-    // admin never sets or sees it, and no hash is written from the browser.
+    // Initial access is provisioned by the authenticated platform admin.
     const cart = {
       id, name: form.name.trim(), tagline: form.tagline.trim(), cuisine: form.cuisine.trim(),
       location: form.location.trim(), timing: form.timing.trim(), emoji: form.emoji || '🛒',
@@ -64,7 +66,9 @@ function AdminCarts({ state, updateState }) {
     pushMenus(newMenus, id);
     // New carts can't be created via the recurring PATCH sync — insert explicitly.
     const r = await insertCart(cart);
-    if (r.error) alert('Cart saved locally, but cloud insert failed: ' + r.error.message);
+    if (r.error) { alert('Cart saved locally, but cloud insert failed: ' + r.error.message); return; }
+    const passwordResult = await authAdminResetOwner(session?.token, id, initialPassword);
+    if (passwordResult.status !== 'ok') alert('Cart queued. Set its owner password with Reset Password after it syncs.');
     // Seed the new cart's inventory in the cloud (scoped to this cart_id only).
     const seedOps = {};
     Object.entries(freshInv).forEach(([k, v]) => { if (v && (v.freezer != null || v.cart != null)) seedOps[k] = { fset: v.freezer || 0, cset: v.cart || 0 }; });
@@ -126,7 +130,7 @@ function AdminCarts({ state, updateState }) {
                 <div style={{ fontWeight: 800, fontSize: 16 }}>{c.name} {!c.active && <span style={{ fontSize: 11, color: colors.red, fontWeight: 600 }}>· disabled</span>}</div>
                 <div style={{ fontSize: 12, color: colors.muted }}>{c.location}</div>
                 <div style={{ fontSize: 12, color: colors.muted }}>Owner: {c.ownerName ? `${c.ownerName} · ` : ''}{c.ownerMobile}</div>
-                <div style={{ fontSize: 11, color: colors.muted, fontWeight: 600, marginTop: 2 }}>Owner sets/changes password at login</div>
+                <div style={{ fontSize: 11, color: colors.muted, fontWeight: 600, marginTop: 2 }}>Use Reset owner password to set or change access</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -169,7 +173,7 @@ function AddCartModal({ onAdd, onClose }) {
     if (!f.cuisine.trim()) { setError('Describe the food served.'); return; }
     if (!f.ownerName.trim()) { setError('Enter the owner\'s name.'); return; }
     if (!/^\d{10}$/.test(f.ownerMobile)) { setError('Enter the owner\'s 10-digit mobile number.'); return; }
-    if (f.ownerPassword && f.ownerPassword.length < 4) { setError('Owner password must be at least 4 characters (or leave blank for owner to set).'); return; }
+    if (f.ownerPassword.length < 8) { setError('Set an initial owner password of at least 8 characters.'); return; }
     onAdd(f);
   };
 
@@ -236,8 +240,8 @@ function AddCartModal({ onAdd, onClose }) {
           <input value={f.ownerName} onChange={set('ownerName')} placeholder="e.g. Ramesh Kumar" style={inputStyle} />
           <div style={label}>OWNER MOBILE</div>
           <input type="tel" inputMode="numeric" value={f.ownerMobile} onChange={e => setF(p => ({ ...p, ownerMobile: e.target.value.replace(/\D/g, '').slice(0, 10) }))} placeholder="10-digit number" style={{ ...inputStyle, fontWeight: 700, letterSpacing: 1 }} />
-          <div style={label}>OWNER PASSWORD (optional — owner can set on first login)</div>
-          <input type="text" value={f.ownerPassword} onChange={set('ownerPassword')} placeholder="min 4 characters, or leave blank" style={inputStyle} />
+          <div style={label}>INITIAL OWNER PASSWORD</div>
+          <input type="password" value={f.ownerPassword} onChange={set('ownerPassword')} placeholder="At least 8 characters" style={inputStyle} />
         </div>
 
         <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 14px', paddingTop: 14 }}>

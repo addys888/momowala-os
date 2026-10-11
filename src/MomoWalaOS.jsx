@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, Link } from 'react-router-dom';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from './lib/store';
+import { useState, useEffect, useRef } from 'react';
+
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { loadInventory, committedOrder, trackChanges, pendingOperations, discardFailedOperations, outbox, validateSession, revokeSession, storage, loadCloudState, mergeStates, loadCartOrders, mergeOrders } from './lib/store';
 import { AdminApp } from './screens/Admin';
 import { TODAY, localDate, getInitialState, normalize } from './core';
 import { CartListing, CartMenu } from './screens/Customer';
@@ -10,21 +10,69 @@ import { OwnerApp } from './screens/owner/OwnerApp';
 import { StaffApp } from './screens/Staff';
 import { StoreContext, useStore } from './store';
 
-const SESSION_MS = 24 * 60 * 60 * 1000; // stay logged in for a 24-hour cycle
-
-const liveSession = (s) => (s && (!s.expiresAt || s.expiresAt > Date.now())) ? s : null;
+const liveSession = (s) => (s?.token && s.expiresAt > Date.now()) ? s : null;
 
 
 export default function App() {
-  const [state, setState] = useState(() => normalize(getInitialState()));
-  // session: null | { role, cartId?, name?, expiresAt } — persisted, 8h lifetime
+  const [state, reactSetState] = useState(() => normalize(getInitialState()));
+  const stateRef = useRef(state);
+  const setState = (value) => {
+    const next = typeof value === 'function' ? value(stateRef.current) : value;
+    stateRef.current = next;
+    reactSetState(next);
+  };
+  const [hydrated, setHydrated] = useState(false);
+  const [syncOps, setSyncOps] = useState(() => pendingOperations());
+  // session: null | { role, cartId?, name?, expiresAt } — persisted with the server expiry
   const [session, setSession] = useState(() => liveSession(storage.get('session', null)));
 
-  // Hydrate from Supabase once on load (no-op when env keys are missing)
   useEffect(() => {
-    loadCloudState().then(cloud => {
+    let active = true;
+    setHydrated(false);
+    (async () => {
+      if (session?.token) {
+        const checked = await validateSession();
+        if (!active) return;
+        if (checked && !checked.error) {
+          if (!checked.data?.role) { storage.set('session', null); setSession(null); return; }
+          const verified = { ...session, ...checked.data };
+          storage.set('session', verified); setSession(verified);
+        }
+      }
+      const cloud = await loadCloudState();
+      if (!active) return;
       if (cloud) setState(prev => normalize(mergeStates(prev, cloud)));
-    });
+      setHydrated(true);
+      void outbox.flush();
+    })();
+    return () => { active = false; };
+  }, [session?.token]);
+
+  useEffect(() => {
+    const status = () => setSyncOps(pendingOperations());
+    const committed = (e) => {
+      const r = e.detail;
+      if (r.order && !pendingOperations().some(o => o.kind === 'order' && o.payload.after?.id === r.order.id)) {
+        setState(prev => ({ ...prev, orders: mergeOrders(prev.orders, [committedOrder(r.order)]) }));
+      }
+      status();
+    };
+    const refresh = async () => {
+      await outbox.flush();
+      const cloud = await loadCloudState();
+      if (cloud) setState(prev => normalize(mergeStates(prev, cloud)));
+    };
+    const retry = () => { void refresh(); };
+    const timer = setInterval(() => { void outbox.flush(); }, 12000);
+    window.addEventListener('online', retry);
+    window.addEventListener('mw:sync', status);
+    window.addEventListener('mw:committed', committed);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('online', retry);
+      window.removeEventListener('mw:sync', status);
+      window.removeEventListener('mw:committed', committed);
+    };
   }, []);
 
   // Roll over the business day. TODAY is fixed at page load, so a device left
@@ -82,13 +130,17 @@ export default function App() {
       if (inFlight || (!force && document.hidden)) return;
       inFlight = true;
       try {
-        const fresh = await loadCartOrders(session.cartId, TODAY);
+        const [fresh, inventory] = await Promise.all([loadCartOrders(session.cartId, TODAY), loadInventory()]);
         if (!alive || !fresh) return;
         setLastSync(Date.now());
         setState(prev => {
           const prevById = new Map(prev.orders.map(o => [o.id, o]));
-          const changed = fresh.some(o => { const p = prevById.get(o.id); return !p || p.payment !== o.payment; });
-          return changed ? { ...prev, orders: mergeOrders(prev.orders, fresh) } : prev;
+          const changed = fresh.some(o => { const p = prevById.get(o.id); return !p || p.revision !== o.revision; });
+          const ops = pendingOperations();
+          return { ...prev,
+            orders: changed && !ops.some(o => o.kind === 'order') ? mergeOrders(prev.orders, fresh) : prev.orders,
+            inventory: inventory && !ops.some(o => ['order', 'inventory', 'consumables'].includes(o.kind)) ? { ...prev.inventory, ...inventory } : prev.inventory,
+          };
         });
       } finally { inFlight = false; }
     };
@@ -115,12 +167,12 @@ export default function App() {
     for (const k in slices) {
       if (persistedRef.current[k] !== slices[k]) { storage.set(k, slices[k]); persistedRef.current[k] = slices[k]; }
     }
-    syncToCloud(state);
+    // Cloud writes are captured only by explicit local edits, never hydration.
   }, [state]);
 
   useEffect(() => { storage.set('session', session); }, [session]);
 
-  // expire the session 8h after login (no idle logout in between)
+  // Respect the expiry issued by the database.
   useEffect(() => {
     if (!session?.expiresAt) return;
     const ms = session.expiresAt - Date.now();
@@ -132,16 +184,30 @@ export default function App() {
   // Accepts a plain object of fields to merge, OR a function (prev) => fields
   // when the merge must be computed from the freshest state (avoids stale-closure
   // clobbers under rapid/concurrent updates).
-  const updateState = (updates) => setState(prev => ({ ...prev, ...(typeof updates === 'function' ? updates(prev) : updates) }));
-  // sess may carry a server-issued token (used for privileged RPCs). The session
-  // LIFETIME is client-authoritative — a fixed 24h window from login — so owner/
-  // staff aren't bounced mid-day by the shorter server token TTL. (The token may
-  // expire server-side sooner; that only affects password-change RPCs, not daily use.)
-  const login = (sess) => setSession({ ...sess, expiresAt: Date.now() + SESSION_MS });
-  const logout = () => setSession(null);
+  const updateState = (updates) => {
+    const prev = stateRef.current;
+    const next = { ...prev, ...(typeof updates === 'function' ? updates(prev) : updates) };
+    try { trackChanges(prev, next); }
+    catch { alert('This device could not save the change. Free storage space and retry.'); return; }
+    setState(next);
+  };
+  const login = (sess) => { setHydrated(false); storage.set('session', sess); setSession(sess); };
+  const logout = () => {
+    if (pendingOperations().length && !confirm('Some changes are waiting to sync. They remain saved on this device. Log out?')) return;
+    void revokeSession();
+    storage.set('session', null);
+    setHydrated(false); setSession(null);
+  };
 
+  if (!hydrated) return <div style={{ padding: 32 }}>Loading your cart…</div>;
   return (
     <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow }}>
+      {syncOps.length > 0 && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
+        {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} change(s) saved on this device, waiting to sync.`}
+        {syncOps.some(o => o.error) && <button onClick={() => {
+          if (confirm('Keep a recovery copy of rejected changes and reload the latest saved data?')) { discardFailedOperations(); window.location.reload(); }
+        }}>Reload saved data</button>}
+      </div>}
       <BrowserRouter>
         <Routes>
           {/* Public — customer */}

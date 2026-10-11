@@ -1,3 +1,4 @@
+import { backendHeaders, cronAuthorized } from '../../server/auth.js';
 // Reminder cron. Runs every ~15 min (see vercel.json crons). For each active
 // cart it checks IST time against openTime/closeTime and sends a web-push to the
 // cart's subscribers (owner + on-duty staff):
@@ -13,7 +14,7 @@ const WINDOW_MIN = 20; // must be >= the cron interval so a slot is never missed
 
 const sb = (path, init = {}) => fetch(`${SB_URL}/rest/v1/${path}`, {
   ...init,
-  headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+  headers: { ...backendHeaders(), ...(init.headers || {}) },
 });
 
 const parseMin = (t) => { if (!t) return null; const [h, m] = String(t).split(':').map(Number); return (h || 0) * 60 + (m || 0); };
@@ -21,11 +22,7 @@ const parseMin = (t) => { if (!t) return null; const [h, m] = String(t).split(':
 export default async function handler(req, res) {
   // Auth: Vercel Cron sends `Authorization: Bearer <CRON_SECRET>`. Also allow
   // `?key=<CRON_SECRET>` so an external scheduler can trigger it if needed.
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const ok = req.headers.authorization === `Bearer ${secret}` || req.query?.key === secret;
-    if (!ok) return res.status(401).json({ error: 'unauthorized' });
-  }
+  if (!cronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   if (!SB_URL || !SB_KEY) return res.status(500).json({ error: 'missing Supabase env' });
   if (!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) return res.status(500).json({ error: 'missing VAPID env' });
 

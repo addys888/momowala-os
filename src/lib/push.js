@@ -1,3 +1,4 @@
+import { requestHeaders } from './supabase';
 // Web-push client helpers. Subscribes the browser to push and registers the
 // subscription (keyed by cart + role) with /api/push-subscribe. The cron job
 // then sends the load-stock and reconcile reminders to it.
@@ -46,7 +47,7 @@ export async function ensureSubscribed(cartId, role) {
       sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC) });
     }
     await fetch('/api/push-subscribe', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...requestHeaders() },
       body: JSON.stringify({ subscription: sub.toJSON(), cartId, role: role || 'owner' }),
     });
   } catch { /* offline / transient — retried on the next load */ }
@@ -66,7 +67,7 @@ export async function enableReminders(cartId, role) {
       });
     }
     const res = await fetch('/api/push-subscribe', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...requestHeaders() },
       body: JSON.stringify({ subscription: sub.toJSON(), cartId, role: role || 'owner' }),
     });
     if (!res.ok) return { ok: false, reason: 'save-failed' };

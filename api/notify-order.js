@@ -1,3 +1,4 @@
+import { backendHeaders, dbHeaders } from '../server/auth.js';
 // Instant "new customer order" push. Called by the customer's browser the moment
 // a QR order is placed, so the cart's staff/owner phones ring within a second or
 // two instead of waiting for a cron tick.
@@ -14,7 +15,7 @@ const SB_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_K
 
 const sb = (path, init = {}) => fetch(`${SB_URL}/rest/v1/${path}`, {
   ...init,
-  headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+  headers: { ...backendHeaders(), ...(init.headers || {}) },
 });
 
 // Shared with the repeat cron so both rings look identical on the phone.
@@ -65,21 +66,15 @@ export default async function handler(req, res) {
     process.env.VAPID_PRIVATE_KEY,
   );
 
-  // Verify the order — retry briefly to absorb write lag from the client.
-  let order = null;
-  for (let i = 0; i < 3 && !order; i++) {
-    if (i) await new Promise((r) => setTimeout(r, 600));
-    const rows = await sb(
-      `orders?id=eq.${encodeURIComponent(orderId)}&cart_id=eq.${encodeURIComponent(cartId)}` +
-      `&select=id,token,total,payment,source,acknowledged_at`,
-    ).then((r) => r.json()).catch(() => null);
-    if (Array.isArray(rows) && rows[0]) order = rows[0];
-  }
-  if (!order) return res.status(404).json({ error: 'order not found' });
-  if (order.payment !== 'pending' || order.acknowledged_at) {
-    return res.status(200).json({ skipped: true, reason: 'already settled or acknowledged' });
-  }
-
+  const claimed = await fetch(`${SB_URL}/rest/v1/rpc/app_claim_notification`, {
+    method: 'POST',
+    headers: dbHeaders({ 'x-customer-key': req.headers['x-customer-key'] || '', 'x-app-session': req.headers['x-app-session'] || '' }),
+    body: JSON.stringify({ p_order: orderId }),
+  });
+  if (!claimed.ok) return res.status(403).json({ error: 'Not authorised' });
+  const order = await claimed.json();
+  if (!order) return res.status(200).json({ skipped: true });
+  if (order.cart_id !== cartId) return res.status(400).json({ error: 'Cart mismatch' });
   const result = await sendOrderPush(cartId, order, Number(itemCount ?? 0));
   return res.status(200).json({ ok: true, orderId: order.id, ...result });
 }

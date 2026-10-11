@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../lib/store';
+import { requestHeaders } from '../lib/supabase';
+import React, { useState, useEffect } from 'react';
+import { Plus, Trash2, Edit3, AlertTriangle } from 'lucide-react';
+import { pushMenus } from '../lib/store';
 import { adminBtn, brand, colors, editInput, editLabel, fileToBase64, groupByCat, menuFor, menuLabelFor, isSingleItem, itemPieces, TYPE_CHIP } from '../core';
 import { printTest } from '../lib/escpos';
 import { EditModalShell, SectionHeader } from '../components/shared';
@@ -77,7 +78,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       // reads the whole menu at once (categories + section label span all pages).
       const images = await Promise.all(files.map(f => fileToBase64(f)));
       const res = await fetch('/api/extract-menu', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...requestHeaders() },
         body: JSON.stringify({ images, mediaType: 'image/jpeg' }),
       });
       const data = await res.json();

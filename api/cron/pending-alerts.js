@@ -1,3 +1,4 @@
+import { backendHeaders, cronAuthorized } from '../../server/auth.js';
 // Repeat "you have an unaccepted order!" pushes until staff acts.
 //
 // The instant push (api/notify-order) fires once when the customer places the
@@ -20,15 +21,11 @@ const MIN_AGE_SEC = 15; // don't double-ring the instant push
 
 const sb = (path, init = {}) => fetch(`${SB_URL}/rest/v1/${path}`, {
   ...init,
-  headers: { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, 'Content-Type': 'application/json', ...(init.headers || {}) },
+  headers: { ...backendHeaders(), ...(init.headers || {}) },
 });
 
 export default async function handler(req, res) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const ok = req.headers.authorization === `Bearer ${secret}` || req.query?.key === secret;
-    if (!ok) return res.status(401).json({ error: 'unauthorized' });
-  }
+  if (!cronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   if (!SB_URL || !SB_KEY) return res.status(500).json({ error: 'missing Supabase env' });
   if (!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) {
     return res.status(500).json({ error: 'missing VAPID env' });

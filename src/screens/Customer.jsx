@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { Navigate, useNavigate, useParams, Link } from 'react-router-dom';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, insertOrderNow, notifyNewOrder } from '../lib/store';
+import React, { useState, useEffect } from 'react';
+import { AlertCircle, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { storage, nextOrderToken, loadCartOrders, insertOrderNow, notifyNewOrder } from '../lib/store';
 import { CartlyftLogo, CategoryBand, MAX_ADDON_ITEMS, TODAY, TYPE_CHIP, brand, cartOpenState, colors, groupByCat, istTime, localNextToken, menuFor, menuLabelFor, vendorLinksFor, momowalaLogoUrl } from '../core';
 import { Alert, CartIcon, MenuItemRow, SectionHeader, SimpleItemRow } from '../components/shared';
 
@@ -149,6 +149,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     });
   };
 
+  const submissionRef = React.useRef(null);
   const placeOrder = async () => {
     if (!openState.open) { setStep('menu'); return; }
     if (cart.length === 0 || placing) return;
@@ -171,7 +172,7 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     const serverNum = await nextOrderToken(venue.id, TODAY);
     const token = String(serverNum ?? localNextToken(state.orders, venue.id)).padStart(3, '0');
     const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
-    const order = {
+    let order = {
       id: Date.now(),
       cartId: venue.id,
       token,
@@ -189,20 +190,27 @@ function CartMenu({ state, updateState, venue, onBack, onDone }) {
     };
     // Stock is NOT deducted here — only when staff marks the order paid,
     // so fake/abandoned QR orders never touch inventory or revenue.
-    updateState({ orders: [...state.orders, order] });
+    if (!submissionRef.current) submissionRef.current = { id: crypto.randomUUID(), order };
+    try {
+      const r = await insertOrderNow(submissionRef.current.order, submissionRef.current.id);
+      if (r.error) { setCustErr(r.error.message || 'Could not send order. Check your connection and retry.'); setPlacing(false); return; }
+      order = r.data;
+      submissionRef.current = null;
+    } catch { setCustErr('Connection interrupted. Tap again to safely retry.'); setPlacing(false); return; }
+    updateState({ orders: [...state.orders.filter(o => o.id !== order.id), order] });
     storage.set('custName', name); storage.set('custPhone', phone); storage.set('lastOrderAt', Date.now());
     storage.set('lastOrder', cart.map(c => ({ id: c.id, type: c.type, qty: c.qty }))); // for "Order again"
     setLastTotal(total);
     setPlacedId(order.id);
     setLiveOrder(order);
-    setOrderToken(token);
+    setOrderToken(order.token);
     setStep('success');
     setCart([]);
     setPlacing(false);
     // Land the order server-side immediately (ahead of the debounced batch sync),
     // then ring the cart's staff/owner phones. Both are best-effort and kept off
     // the UI path — the customer already has their token either way.
-    insertOrderNow(order).then(() => notifyNewOrder(order)).catch(() => { /* offline: cron still rings */ });
+    void notifyNewOrder(order);
   };
 
   const total = cart.reduce((s, item) => s + item.price * item.qty, 0);

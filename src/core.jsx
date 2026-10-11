@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from './lib/store';
+
+import { storage, applyInventory, setCartConsumables } from './lib/store';
 import momowalaLogoUrl from './assets/momowala-logo.png';
 
 const colors = {
@@ -547,13 +547,11 @@ function orderStockDeltas(items, menuItems = MENU_ITEMS) {
 // upsert only if the RPC isn't deployed yet (pre-migration).
 
 async function persistInv(cartId, ops, fullInventory) {
-  const r = await applyInventory(cartId, ops);
-  if (r.status === 'rpc_missing') await pushInventoryBlob(fullInventory);
+  return applyInventory(cartId, ops);
 }
 
 async function persistConsumables(cartId, cons, fullInventory) {
-  const r = await setCartConsumables(cartId, cons);
-  if (r.status === 'rpc_missing') await pushInventoryBlob(fullInventory);
+  return setCartConsumables(cartId, cons);
 }
 
 // ─── STORAGE ───

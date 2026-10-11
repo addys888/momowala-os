@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/outbox.test.js tests/api.test.js",
+    "test:db": "node --test tests/database.test.js",
+    "test:db:setup": "node scripts/setup-test-db.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
@@ -15,7 +18,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "react-router-dom": "^7.17.0",
+    "react-router-dom": "^7.18.4",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
