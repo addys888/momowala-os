@@ -1,6 +1,6 @@
 # Cartlyft Android application
 
-Signed, universal APK for Android 7.0 (API 24) and newer. Package: `com.cartlyft.momowala`. Version 1.0.0 / code 1. The application uses the existing Supabase database and Vercel APIs. It bundles the React screens with compatibility bundles for Chrome/WebView 51 and newer, so installation does not depend on PWA shortcut support.
+Signed, universal APK for Android 7.0 (API 24) and newer. Package: `com.cartlyft.momowala`. Version 1.1.0 / code 2. The application uses the existing Supabase database and Vercel APIs. It bundles the React screens with compatibility bundles for Chrome/WebView 51 and newer, so installation does not depend on PWA shortcut support.
 
 ## Install
 
@@ -30,7 +30,7 @@ npm run build:android
 
 Outputs:
 
-- `public/downloads/cartlyft-1.0.0.apk` and `.apk.sha256`
+- `public/downloads/cartlyft-1.1.0.apk` and `.apk.sha256`
 - `android/app/build/outputs/bundle/release/app-release.aab` (for future Play Console work)
 - `android/app/build/reports/lint-results-release.html`
 
@@ -49,3 +49,9 @@ For the next release, increase `versionCode` and `versionName` in `android/app/b
 Version 1.0.0 was installed and launched on an Android 7.0/API 24 ARM64 emulator using its stock Google WebView 53.0.2785.124. Checked login-screen rendering, live marketplace/menu reads, Android back navigation, and cold startup with mobile data/Wi-Fi disabled. No real customer orders were created. An old-WebView `Intl.formatToParts` failure discovered during this test was removed from business-time calculations and covered with a midnight/year-boundary regression test.
 
 All 13 API/outbox/compatibility tests passed. APK/AAB release builds passed; Android lint reported zero errors and three warnings (JavaScript enablement required by the bundled React app, icon silhouette, and untranslated native strings). Signature verification passed using Android 7's v2 signature scheme. The published APK checksum matches the signed local artifact. Full npm audit reports zero vulnerabilities. Newer Android OS versions and a physical cart phone were not device-tested in this run; file chooser and printer hardware still need a device check.
+
+## Version 1.1.0
+
+Adds Owner → Staff → Attendance & leave: onboarding date, optional monthly off allowance, employment notes, and full/half-day weekly offs, holidays, personal leave, sick leave and absences. Monthly totals distinguish recorded days through today from future planned days. Requires internet to save. Records are restricted to the cart owner and platform admin, with conflict detection for concurrent edits. No payroll deduction or inferred attendance. Install this update over version 1.0.0 to receive the new bundled screens.
+
+Validation: 15 unit/API/compatibility tests and 13 isolated PostgreSQL tests, including attendance privacy, validation, concurrent edits and retry safety. The browser flow was checked against the isolated database; production staff records were not modified for testing.

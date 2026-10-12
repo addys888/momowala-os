@@ -1,3 +1,4 @@
+import { StaffAttendance } from './StaffAttendance';
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
@@ -7,6 +8,7 @@ import { useStore } from '../../store';
 
 function StaffRegistry({ state, updateState, cartId, cart }) {
   const { session } = useStore();
+  const [subtab, setSubtab] = useState('registry');
   const [showAdd, setShowAdd] = useState(false);
   const [editStaff, setEditStaff] = useState(null); // staff being edited
   const [viewStaff, setViewStaff] = useState(null); // drill into one staff's day
@@ -45,7 +47,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
     updateState({ staff: state.staff.map(s => s.id === id ? { ...s, name: name.trim(), mobile } : s) });
     setEditStaff(null);
   };
-  const removeStaff = (id) => { if (confirm('Remove this staff member? They will no longer be able to log in.')) updateState({ staff: state.staff.filter(s => s.id !== id) }); };
+  const removeStaff = (id) => { if (confirm('Remove this staff member and their attendance records? Disable login instead if you want to keep their history.')) updateState({ staff: state.staff.filter(s => s.id !== id) }); };
   const resetPassword = async (id) => {
     const np = prompt('Enter a new password for this staff member (min 4 characters):');
     if (!np) return;
@@ -95,6 +97,10 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
     <div>
       <SectionHeader title="Staff Registry" subtitle={`${cart?.name} · only registered staff can log in`} />
 
+      <div role="tablist" aria-label="Staff sections" style={{ display: 'flex', marginBottom: 18 }}>
+        {[['registry','Registry & activity'],['attendance','Attendance & leave']].map(([id,label]) => <button key={id} role="tab" aria-selected={subtab === id} onClick={() => setSubtab(id)} style={{ flex: 1, padding: 12, minHeight: 48, border: `1px solid ${colors.border}`, background: subtab === id ? brand.navy : '#fff', color: subtab === id ? '#fff' : brand.navy, fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}
+      </div>
+      {subtab === 'attendance' ? <StaffAttendance key={cartId} staff={staff} cartId={cartId} /> : <>
       {/* Today summary across the cart */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
         <MetricCard label="Orders today" value={cartStats.paid} icon={<FileText size={16}/>} color={colors.green} />
@@ -142,6 +148,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
         })}
         {staff.length === 0 && <div style={{ padding: 32, textAlign: 'center', color: colors.muted, fontSize: 14 }}>No staff registered yet. Add your chef and helper above.</div>}
       </div>
+      </>}
     </div>
   );
 }

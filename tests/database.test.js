@@ -96,3 +96,39 @@ test('disabled staff session loses access immediately', async () => {
   assert.equal(await request('select count(*) from orders',staff),'0');
   await assert.rejects(mutate('inventory',{cartId:'test-a',ops:{veg:{dc:-5}}}),/Not authorised|Sign in required/);
 });
+
+async function saveStaff(field,value,before=null,date=null,token=owner) {
+ return JSON.parse(await request(`select app_save_staff_detail(101,'${field}',${date ? `'${date}'` : 'null'},${quote(before)},${quote(value)})`,token));
+}
+test('staff HR records are owner-only and tenant-scoped',async()=>{
+ await sql('delete from staff_hr where staff_id=101; update staff set active=true where id=101');
+ assert.equal((await saveStaff('onboardingDate','2026-10-01')).status,'ok');
+ assert.equal(await request('select count(*) from staff_hr',owner),'1');
+ for(const token of [null,staff,other]) {
+  assert.equal(await request('select count(*) from staff_hr',token),'0');
+  await assert.rejects(saveStaff('notes','Blocked',null,null,token),/Not authorised/);
+ }
+ await assert.rejects(request("update staff_hr set details='{}'",owner),/permission denied/);
+});
+test('concurrent days preserve each other; retry cannot duplicate a day',async()=>{
+ const a={type:'weekly_off',duration:1,note:'Rest'},b={type:'leave',duration:0.5,note:'Personal'};
+ const results=await Promise.all([saveStaff('day',a,null,'2026-10-05'),saveStaff('day',b,null,'2026-10-06')]);
+ assert(results.every(r=>r.status==='ok'));
+ assert.equal((await saveStaff('day',a,null,'2026-10-05')).status,'ok');
+ const details=JSON.parse(await sql('select details from staff_hr where staff_id=101'));
+ assert.equal(Object.keys(details.daysOff).length,2);
+});
+test('same-day stale changes conflict and owner can remove a saved entry',async()=>{
+ const a={type:'weekly_off',duration:1,note:'Rest'};
+ assert.equal((await saveStaff('day',{...a,note:'Stale'},null,'2026-10-05')).status,'conflict');
+ assert.equal((await saveStaff('day',null,a,'2026-10-05')).status,'ok');
+ assert.equal((await saveStaff('day',null,a,'2026-10-05')).status,'ok');
+});
+test('staff attendance rejects invalid dates, durations and employment ranges',async()=>{
+ const a={type:'holiday',duration:1,note:''};
+ await assert.rejects(saveStaff('day',a,null,'2026-09-30'),/before the onboarding/);
+ await assert.rejects(saveStaff('day',{...a,duration:3},null,'2026-10-07'),/Invalid day-off/);
+ await assert.rejects(saveStaff('day',a,null,'2026-02-30'),/out of range/);
+ await assert.rejects(saveStaff('monthlyOffAllowance',32),/Allowance/);
+ await assert.rejects(saveStaff('onboardingDate','2026-10-20','2026-10-01'),/after an existing/);
+});

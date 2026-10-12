@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportMultipleWindows(true); s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.0.0");
+        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.1.0");
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, false);
         view.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
@@ -170,7 +170,7 @@ public class MainActivity extends Activity {
                 case "Print screen": if (web != null) ((PrintManager)getSystemService(PRINT_SERVICE)).print("Cartlyft",web.createPrintDocumentAdapter("Cartlyft"),null); break;
                 case "Open website": external(Uri.parse(ORIGIN+"/login")); break;
                 case "Download updates": external(Uri.parse(ORIGIN+"/install.html")); break;
-                default: new AlertDialog.Builder(this).setTitle("Cartlyft 1.0.0").setMessage("For Android 7 and newer.\n\nKeep the app open for order alerts. Background push notifications are not available in this APK.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
+                default: new AlertDialog.Builder(this).setTitle("Cartlyft 1.1.0").setMessage("For Android 7 and newer.\n\nKeep the app open for order alerts. Background push notifications are not available in this APK.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
             } return true;
         }); menu.show();
     }
