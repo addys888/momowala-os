@@ -1,3 +1,4 @@
+import { OpeningInventory } from '../../components/OpeningInventory';
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
@@ -5,6 +6,7 @@ import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTi
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
 function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
+  const [openingReady,setOpeningReady] = useState(false);
   const [showAddStock, setShowAddStock] = useState(false);
   const [showPlates, setShowPlates] = useState(false);
   const [showTypes, setShowTypes] = useState(false);
@@ -109,6 +111,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   };
 
   const loadToCart = (type, qty) => {
+    if (!openingReady) { alert('Use Load opening stock above to save all opening quantities together.'); return; }
     const newInv = { ...inv };
     if (newInv[type].freezer < qty) { alert('Not enough stock in freezer!'); return; }
     newInv[type] = { freezer: newInv[type].freezer - qty, cart: newInv[type].cart + qty };
@@ -181,6 +184,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
 
   return (
     <div>
+      <OpeningInventory key={cartId} cartId={cartId} cart={state.carts.find(c=>c.id===cartId)} stockTypes={stockTypes} inventory={inv} onReady={setOpeningReady} />
       <SectionHeader title="Inventory Control" subtitle={mode === 'momo' ? 'Stock In · Cart Loading · Consumables' : 'Consumables & supplies'} />
 
       {/* Stock-tracking mode — controls whether the staged freezer/cart + plate

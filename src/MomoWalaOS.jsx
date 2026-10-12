@@ -9,6 +9,8 @@ import { AdminLogin, TeamLogin } from './screens/Login';
 import { OwnerApp } from './screens/owner/OwnerApp';
 import { StaffApp } from './screens/Staff';
 import { StoreContext, useStore } from './store';
+import { nativeCommand } from './lib/nativeApp';
+import { AppLaunch } from './components/AppLaunch';
 
 const liveSession = (s) => (s?.token && s.expiresAt > Date.now()) ? s : null;
 
@@ -171,7 +173,7 @@ export default function App() {
     // Cloud writes are captured only by explicit local edits, never hydration.
   }, [state]);
 
-  useEffect(() => { storage.set('session', session); }, [session]);
+  useEffect(() => { storage.set('session', session); if(session?.role !== 'staff') nativeCommand('clearInventory'); }, [session]);
 
   // Respect the expiry issued by the database.
   useEffect(() => {
@@ -195,12 +197,13 @@ export default function App() {
   const login = (sess) => { setHydrated(false); storage.set('session', sess); setSession(sess); };
   const logout = () => {
     if (pendingOperations().length && !confirm('Some changes are waiting to sync. They remain saved on this device. Log out?')) return;
+    nativeCommand('clearInventory');
     void revokeSession();
     storage.set('session', null);
     setHydrated(false); setSession(null);
   };
 
-  if (!hydrated) return <div style={{ padding: 32 }}>Loading your cart…</div>;
+  if (!hydrated) return <AppLaunch />;
   return (
     <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow }}>
       {syncOps.length > 0 && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>

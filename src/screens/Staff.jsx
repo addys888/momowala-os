@@ -1,3 +1,4 @@
+import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, X, Clock, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
 import { storage, nextOrderToken, ackOrder } from '../lib/store';
@@ -238,7 +239,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 
   return (
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
-      <TopBar title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
+      <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders on this phone will stop until you sign in again." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will stop on this phone."} title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
@@ -250,6 +251,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         {/* Shown on EVERY tab until this phone actually has push enabled — a
             staff phone without it stays silent for customer orders. */}
         <OrderAlertsPrompt cartId={cartId} role="staff" />
+        <OpeningInventory key={cartId} cartId={cartId} cart={cartInfo} stockTypes={menu.stockTypes || []} inventory={inv || {}} />
         {tab === 'order' && <RemindersButton cartId={cartId} role="staff" />}
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} foodLabel={menuLabelFor(state, cartId)} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} vendors={{ zomato: vendorEnabledFor(state, cartId, 'zomato'), swiggy: vendorEnabledFor(state, cartId, 'swiggy') }} addTarget={addTarget} onAddToOrder={(items) => addToOrder(addTarget, items)} onCancelAdd={() => { setAddTarget(null); setCart([]); }} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} onAddItems={(o) => { setCart([]); setAddTarget(o); setTab('order'); }} />}

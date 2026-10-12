@@ -132,3 +132,34 @@ test('staff attendance rejects invalid dates, durations and employment ranges',a
  await assert.rejects(saveStaff('monthlyOffAllowance',32),/Allowance/);
  await assert.rejects(saveStaff('onboardingDate','2026-10-20','2026-10-01'),/after an existing/);
 });
+
+test('opening load is scoped, atomic, idempotent and cannot overdraft freezer', async () => {
+  await sql("delete from opening_loads where cart_id in ('test-a','test-b'); update carts set open_time='16:00' where id='test-a'; update inventory set data=jsonb_set(data,'{test-a,veg}','{\"freezer\":100,\"cart\":0}') where id=1");
+  const id=crypto.randomUUID();
+  const load=(qty,token=staff,operation=id)=>request(`select app_load_opening_inventory('test-a',(now() at time zone 'Asia/Kolkata')::date,'${operation}',${quote(qty)})`,token);
+  await assert.rejects(load({veg:20},other),/Not authorised/);
+  await assert.rejects(load({veg:20},null),/Not authorised/);
+  await assert.rejects(load({veg:101}),/Not enough freezer stock/);
+  await assert.rejects(load({veg:0.5}),/whole-piece/);
+  assert.equal(await request('select count(*) from opening_loads',staff),'0');
+  const saved=JSON.parse(await load({veg:40}));assert.equal(saved.status,'ok');
+  assert.equal(JSON.parse(await load({veg:40})).status,'ok');
+  assert.equal(JSON.parse(await load({veg:50},staff,crypto.randomUUID())).status,'conflict');
+  const inv=JSON.parse(await request('select app_inventory()',staff));assert.deepEqual(inv['test-a'].veg,{freezer:60,cart:40});
+  assert.equal(await request('select count(*) from opening_loads',other),'0');
+  await assert.rejects(request("delete from opening_loads",staff),/permission denied/);
+});
+
+test('concurrent opening submissions transfer once and failed batches leave no partial logs', async () => {
+  await sql("delete from opening_loads where cart_id='test-a'; delete from cart_loadings where cart_id='test-a' and note='Opening stock transfer'; update inventory set data=jsonb_set(data,'{test-a,veg}','{\"freezer\":100,\"cart\":0}') where id=1");
+  const load=qty=>request(`select app_load_opening_inventory('test-a',(now() at time zone 'Asia/Kolkata')::date,'${crypto.randomUUID()}',${quote(qty)})`,staff).then(JSON.parse);
+  await assert.rejects(load({veg:10,zz_unknown:1}),/Unknown stock item/);
+  assert.equal(await request("select count(*) from cart_loadings where note='Opening stock transfer'",staff),'0');
+  const results=await Promise.all([load({veg:10}),load({veg:20})]);
+  assert.equal(results.filter(r=>r.status==='ok').length,1);
+  assert.equal(results.filter(r=>r.status==='conflict').length,1);
+  const qty=results.find(r=>r.status==='ok').record.quantities.veg;
+  const inv=JSON.parse(await request('select app_inventory()',staff));
+  assert.deepEqual(inv['test-a'].veg,{freezer:100-qty,cart:qty});
+  assert.equal(await request("select count(*) from cart_loadings where note='Opening stock transfer'",staff),'1');
+});

@@ -8,10 +8,11 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test tests/outbox.test.js tests/api.test.js tests/compat.test.js tests/staffAttendance.test.js",
+    "test": "node --test tests/outbox.test.js tests/api.test.js tests/compat.test.js tests/staffAttendance.test.js tests/openingInventory.test.js",
     "test:db": "node --test tests/database.test.js",
     "test:db:setup": "node scripts/setup-test-db.mjs",
-    "build:android": "node scripts/build-android.mjs"
+    "build:android": "node scripts/build-android.mjs",
+    "check:android": "node scripts/check-android.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
