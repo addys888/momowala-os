@@ -1,6 +1,6 @@
 # Cartlyft Android application
 
-Signed, universal APK for Android 7.0 (API 24) and newer. Package: `com.cartlyft.momowala`. Version 1.1.0 / code 2. The application uses the existing Supabase database and Vercel APIs. It bundles the React screens with compatibility bundles for Chrome/WebView 51 and newer, so installation does not depend on PWA shortcut support.
+Signed, universal APK for Android 7.0 (API 24) and newer. Package: `com.cartlyft.momowala`. Version 1.1.1 / code 3. The application uses the existing Supabase database and Vercel APIs. It bundles the React screens with compatibility bundles for Chrome/WebView 51 and newer, so installation does not depend on PWA shortcut support.
 
 ## Install
 
@@ -30,7 +30,7 @@ npm run build:android
 
 Outputs:
 
-- `public/downloads/cartlyft-1.1.0.apk` and `.apk.sha256`
+- `public/downloads/cartlyft-1.1.1.apk` and `.apk.sha256`
 - `android/app/build/outputs/bundle/release/app-release.aab` (for future Play Console work)
 - `android/app/build/reports/lint-results-release.html`
 
@@ -55,3 +55,19 @@ All 13 API/outbox/compatibility tests passed. APK/AAB release builds passed; And
 Adds Owner → Staff → Attendance & leave: onboarding date, optional monthly off allowance, employment notes, and full/half-day weekly offs, holidays, personal leave, sick leave and absences. Monthly totals distinguish recorded days through today from future planned days. Requires internet to save. Records are restricted to the cart owner and platform admin, with conflict detection for concurrent edits. No payroll deduction or inferred attendance. Install this update over version 1.0.0 to receive the new bundled screens.
 
 Validation: 15 unit/API/compatibility tests and 13 isolated PostgreSQL tests, including attendance privacy, validation, concurrent edits and retry safety. The browser flow was checked against the isolated database; production staff records were not modified for testing.
+
+## Version 1.1.1 — receipt printing fix
+
+The native external-link allowlist previously omitted the `rawbt:` scheme used by both customer bills and kitchen tickets. The WebView consumed these links without opening RawBT, while Chrome opened the printer app correctly. The APK now dispatches them using ACTION_VIEW with the exact original payload. If no handler is available, a message asks the user to install/enable RawBT and select a printer. No Bluetooth permission is needed in Cartlyft; RawBT owns the printer connection.
+
+Android 7/API 24 instrumentation dry run passed: outgoing RawBT intent, unchanged receipt bytes, subframe suppression, unsafe-scheme blocking, and existing HTTPS routing. The test intercepts the handoff without actually printing. Receipt and kitchen-ticket JavaScript payload checks and all 15 existing unit tests passed. Signed release APK/AAB and lint builds passed. Physical printer output still requires a test on the user's phone.
+
+Run the native regression test on an isolated Android emulator with the debug APK and Android test APK installed:
+
+```sh
+cd android
+./gradlew assembleDebug assembleDebugAndroidTest
+adb shell am instrument -w com.cartlyft.momowala.test/com.cartlyft.momowala.PrintRoutingTest
+```
+
+The expected instrumentation output starts with PASS. Use an isolated emulator: debug signing differs from the distributed release. Users must install the signed 1.1.1 APK over their existing release, keeping app data.

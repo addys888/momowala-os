@@ -78,7 +78,7 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportMultipleWindows(true); s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.1.0");
+        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.1.1");
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, false);
         view.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
@@ -157,9 +157,14 @@ public class MainActivity extends Activity {
     }
     private void external(Uri uri) {
         String scheme = uri.getScheme();
-        if (!Arrays.asList("https","http","tel","mailto","upi","whatsapp").contains(scheme)) return;
+        if (!Arrays.asList("https","http","tel","mailto","upi","whatsapp","rawbt").contains(scheme)) return;
         try { startActivity(new Intent(Intent.ACTION_VIEW,uri).addCategory(Intent.CATEGORY_BROWSABLE)); }
-        catch (ActivityNotFoundException e) { Toast.makeText(this,"No app is installed to open this link.",Toast.LENGTH_LONG).show(); }
+        catch (ActivityNotFoundException | SecurityException e) {
+            String message = "rawbt".equals(scheme)
+                ? "Could not open RawBT. Install or enable RawBT, select your printer there, then tap Print again."
+                : "No app is available to open this link.";
+            Toast.makeText(this,message,Toast.LENGTH_LONG).show();
+        }
     }
     private void showMenu(View anchor) {
         PopupMenu menu = new PopupMenu(this, anchor);
@@ -170,7 +175,7 @@ public class MainActivity extends Activity {
                 case "Print screen": if (web != null) ((PrintManager)getSystemService(PRINT_SERVICE)).print("Cartlyft",web.createPrintDocumentAdapter("Cartlyft"),null); break;
                 case "Open website": external(Uri.parse(ORIGIN+"/login")); break;
                 case "Download updates": external(Uri.parse(ORIGIN+"/install.html")); break;
-                default: new AlertDialog.Builder(this).setTitle("Cartlyft 1.1.0").setMessage("For Android 7 and newer.\n\nKeep the app open for order alerts. Background push notifications are not available in this APK.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
+                default: new AlertDialog.Builder(this).setTitle("Cartlyft 1.1.1").setMessage("For Android 7 and newer.\n\nKeep the app open for order alerts. Background push notifications are not available in this APK.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
             } return true;
         }); menu.show();
     }
