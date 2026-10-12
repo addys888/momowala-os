@@ -1,0 +1,13 @@
+import { spawnSync } from 'node:child_process';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+const run = (cmd,args,options={}) => { const r=spawnSync(cmd,args,{stdio:'inherit',...options}); if(r.error)throw r.error; if(r.status!==0)process.exit(r.status||1); };
+run('npm',['run','build'],{env:{...process.env,BUILD_ANDROID:'1'}});
+run('node',['scripts/prepare-android.mjs']);
+run(process.platform==='win32'?'gradlew.bat':'./gradlew',['assembleRelease','bundleRelease','lintRelease','--no-daemon'],{cwd:'android'});
+const apk='public/downloads/cartlyft-1.0.0.apk';
+mkdirSync('public/downloads',{recursive:true});
+cpSync('android/app/build/outputs/apk/release/app-release.apk',apk);
+const data=readFileSync(apk);
+writeFileSync(apk+'.sha256',createHash('sha256').update(data).digest('hex')+'  cartlyft-1.0.0.apk\n');
+console.log(`Signed APK: ${apk} (${(data.length/1024/1024).toFixed(2)} MB)`);

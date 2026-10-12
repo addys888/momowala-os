@@ -1,8 +1,45 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
-    { "source": "/z/:cartId", "destination": "/api/z?c=:cartId" },
-    { "source": "/s/:cartId", "destination": "/api/z?c=:cartId&v=swiggy" },
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+    {
+      "source": "/z/:cartId",
+      "destination": "/api/z?c=:cartId"
+    },
+    {
+      "source": "/s/:cartId",
+      "destination": "/api/z?c=:cartId&v=swiggy"
+    },
+    {
+      "source": "/((?!assets/).*)",
+      "destination": "/index.html"
+    }
+  ],
+  "headers": [
+    {
+      "source": "/downloads/:file*.apk",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "application/vnd.android.package-archive"
+        },
+        {
+          "key": "Content-Disposition",
+          "value": "attachment"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    },
+    {
+      "source": "/install.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache"
+        }
+      ]
+    }
   ]
 }

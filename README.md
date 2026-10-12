@@ -42,3 +42,7 @@ The database must contain the SHA-256 hash of the same `CRON_SECRET` in `app_pri
 For coordinated security updates, build a production candidate with `vercel deploy --prod --skip-domain --yes`, apply the tested database migration, then promote the ready candidate with `vercel promote <deployment-url> --yes`. Refresh already-open phones after rollout. Old clients cannot write through the removed permissive table endpoints.
 
 Check production catalog loading, denied unauthenticated private reads/API access, authenticated cart flows, database security advisors, and retained record counts after deployment. Run purchase/stock-changing tests against the isolated local database, not real customer accounts.
+
+## Android app
+
+A signed APK for Android 7+ is available at [the install page](https://momowala-os.vercel.app/install.html). See [Android build, signing, and update instructions](docs/android-app.md). Use `npm run build:android` to produce a signed release and Android App Bundle. Background push notifications require a future native Firebase integration; in-app order alerts work while the app is open.

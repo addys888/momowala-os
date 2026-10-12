@@ -1,3 +1,4 @@
+import { IST_TZ, localDate, istTime, istNowMinutes, istDateLabel } from './lib/time';
 
 import { storage, applyInventory, setCartConsumables } from './lib/store';
 import momowalaLogoUrl from './assets/momowala-logo.png';
@@ -561,23 +562,6 @@ async function persistConsumables(cartId, cons, fullInventory) {
 // The whole business (orders, day boundaries, open/close hours, timestamps) is
 // pinned to Asia/Kolkata so a staff/owner phone set to another zone still sees
 // the correct Indian business day and clock.
-
-const IST_TZ = 'Asia/Kolkata';
-// IST calendar date as YYYY-MM-DD (en-CA gives that exact format).
-
-const localDate = (d = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: IST_TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-// IST wall-clock time like "02:09 pm" — used for the `time` field on records.
-
-const istTime = (d = new Date()) => new Intl.DateTimeFormat('en-IN', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit', hour12: true }).format(d).toLowerCase();
-// Current minutes-since-midnight in IST (for the open/close window check).
-
-const istNowMinutes = () => {
-  const p = new Intl.DateTimeFormat('en-GB', { timeZone: IST_TZ, hour: '2-digit', minute: '2-digit', hour12: false }).formatToParts(new Date());
-  return (+p.find(x => x.type === 'hour').value) * 60 + (+p.find(x => x.type === 'minute').value);
-};
-// Format a date (or YYYY-MM-DD string) for display in IST.
-
-const istDateLabel = (d, opts) => new Intl.DateTimeFormat('en-IN', { timeZone: IST_TZ, ...opts }).format(typeof d === 'string' ? new Date(d + 'T12:00:00Z') : d);
 
 const TODAY = localDate();
 

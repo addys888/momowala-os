@@ -1,0 +1,11 @@
+.git/
+.vercel/
+node_modules/
+dist/
+dist-android/
+.env*
+# Native source/build tools and signing files are not web deployment inputs.
+android/
+*.jks
+*.keystore
+# The signed APK is deliberately served from public/downloads/.

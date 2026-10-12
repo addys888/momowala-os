@@ -29,3 +29,13 @@ dist-ssr
 
 # Supabase CLI local metadata
 supabase/.temp/
+
+# Android generated files and signing secrets
+dist-android/
+android/.gradle/
+android/**/build/
+android/local.properties
+android/app/src/main/assets/web/
+*.jks
+*.keystore
+android/signing.properties

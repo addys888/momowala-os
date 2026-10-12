@@ -52,6 +52,8 @@ function CartListing({ carts, onSelect }) {
           </div>
         </div>
 
+        {!__ANDROID_APP__ && <div style={{ marginTop: 24, textAlign: 'center' }}><a href="/install.html" style={{ color: brand.tealDark, fontSize: 14, fontWeight: 700 }}>Download Android app (Android 7+)</a></div>}
+
         <div style={{ marginTop: 24, textAlign: 'center', fontSize: 11 }}>
           <Link to="/admin/login" style={{ color: brand.muted, textDecoration: 'none' }}>Powered by Cartlyft QSR OS</Link>
         </div>

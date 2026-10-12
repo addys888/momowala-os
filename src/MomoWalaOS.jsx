@@ -97,6 +97,7 @@ export default function App() {
   // never on the background timer. Data is already in localStorage, so a reload
   // at a visible moment is safe.
   useEffect(() => {
+    if (__ANDROID_APP__) return; // Bundled APK screens update through a signed APK release.
     const checkVersion = async () => {
       if (document.visibilityState !== 'visible') return;
       try {

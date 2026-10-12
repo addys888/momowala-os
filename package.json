@@ -8,12 +8,15 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test tests/outbox.test.js tests/api.test.js",
+    "test": "node --test tests/outbox.test.js tests/api.test.js tests/compat.test.js",
     "test:db": "node --test tests/database.test.js",
-    "test:db:setup": "node scripts/setup-test-db.mjs"
+    "test:db:setup": "node scripts/setup-test-db.mjs",
+    "build:android": "node scripts/build-android.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",
+    "abortcontroller-polyfill": "^1.7.8",
+    "core-js": "^3.50.0",
     "lucide-react": "^1.17.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",
@@ -25,11 +28,13 @@
     "@eslint/js": "^10.0.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-legacy": "^8.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
+    "terser": "^5.51.2",
     "vite": "^8.0.12"
   }
 }

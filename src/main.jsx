@@ -1,3 +1,4 @@
+import './lib/compat'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
@@ -11,6 +12,6 @@ createRoot(document.getElementById('root')).render(
 
 // Register the push service worker (enables reminder notifications). Harmless
 // where unsupported; the app runs identically without it.
-if ('serviceWorker' in navigator) {
+if (!__ANDROID_APP__ && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => {}); });
 }
