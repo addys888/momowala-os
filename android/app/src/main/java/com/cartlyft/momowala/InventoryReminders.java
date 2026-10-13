@@ -28,15 +28,16 @@ public final class InventoryReminders {
     static JSONObject status(Context c) throws Exception {
         channel(c); boolean notifications=manager(c).areNotificationsEnabled();
         if(Build.VERSION.SDK_INT>=26) notifications &= manager(c).getNotificationChannel(CHANNEL).getImportance()!=NotificationManager.IMPORTANCE_NONE;
-        return new JSONObject().put("enabled",prefs(c).getBoolean("enabled",false)).put("notifications",notifications)
+        return new JSONObject().put("enabled",prefs(c).getBoolean("enabled",false)).put("cartId",prefs(c).getString("cartId","" )).put("notifications",notifications)
             .put("exact",Build.VERSION.SDK_INT<31 || alarms(c).canScheduleExactAlarms());
     }
     static void configure(Context c,JSONObject data) throws Exception {
         String cart=data.getString("cartId"), time=data.getString("openTime"); long expires=data.getLong("expiresAt");
         if(cart.length()>100 || !time.matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]") || expires<=System.currentTimeMillis()) throw new IllegalArgumentException("Invalid schedule");
         boolean same=cart.equals(prefs(c).getString("cartId",""));
+        if(!same && prefs(c).getBoolean("enabled",false)) throw new IllegalArgumentException("Unassign this phone before changing carts");
         if(!same) clear(c);
-        android.content.SharedPreferences.Editor e=prefs(c).edit().putString("cartId",cart).putString("openTime",time).putLong("expiresAt",expires);
+        android.content.SharedPreferences.Editor e=prefs(c).edit().putString("cartId",cart).putString("openTime",time).remove("expiresAt");
         String done=data.optString("completedDate","");
         if(done.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")) e.putString("completedDate",done);
         e.apply();
@@ -46,7 +47,7 @@ public final class InventoryReminders {
     static void clear(Context c) { alarms(c).cancel(intent(c)); manager(c).cancel(ID); prefs(c).edit().clear().apply(); }
     static void schedule(Context c,boolean repeat) {
         alarms(c).cancel(intent(c));
-        if(!prefs(c).getBoolean("enabled",false) || prefs(c).getLong("expiresAt",0)<=System.currentTimeMillis()) { manager(c).cancel(ID); return; }
+        if(!prefs(c).getBoolean("enabled",false)) { manager(c).cancel(ID); return; }
         String time=prefs(c).getString("openTime",""); if(time.isEmpty())return;
         long now=System.currentTimeMillis();
         long next=OpeningSchedule.next(time,now,prefs(c).getString("completedDate",""),repeat);
@@ -57,7 +58,7 @@ public final class InventoryReminders {
     }
     static void fire(Context c) {
         long now=System.currentTimeMillis();
-        if(!prefs(c).getBoolean("enabled",false) || prefs(c).getLong("expiresAt",0)<=now) { clear(c); return; }
+        if(!prefs(c).getBoolean("enabled",false)) { clear(c); return; }
         String time=prefs(c).getString("openTime",""); if(time.isEmpty()) return;
         long open=OpeningSchedule.businessOpening(time,now);
         if(now<open-30*60_000L || OpeningSchedule.date(open).equals(prefs(c).getString("completedDate",""))) { schedule(c,false); return; }

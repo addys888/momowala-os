@@ -21,6 +21,9 @@ public class MainActivity extends Activity {
     private static final String HOST = "momowala-os.vercel.app";
     private static final String ORIGIN = "https://" + HOST;
     private WebView web;
+    private AppUpdater updater;
+    private final android.os.Handler updateHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable updatePoll=new Runnable(){public void run(){if(updater!=null)updater.resume(false);updateHandler.postDelayed(this,15000);}};
     private ValueCallback<Uri[]> fileCallback;
     private final List<WebView> popups = new ArrayList<>();
     private ProgressBar progress;
@@ -28,6 +31,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        updater=new AppUpdater(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -66,7 +70,7 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportMultipleWindows(true); s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.1.1");
+        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.2.0");
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, false);
         view.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
@@ -191,14 +195,17 @@ public class MainActivity extends Activity {
         return "https".equals(u.getScheme()) && HOST.equals(u.getHost()) && (u.getPort()==-1 || u.getPort()==443);
     }
     private void showMenu(View anchor) {
-        String[] items={"Reload", "Print screen", "Open website", "Download updates", "About / notifications"};
+        String[] items={"Reload", "Print screen", "Open website", "Check for updates", "Unassign opening alarms", "About / notifications"};
         new AlertDialog.Builder(this).setTitle("App settings").setItems(items,(dialog,index) -> {
             switch (items[index]) {
                 case "Reload": if (web != null) { failure.setVisibility(View.GONE); web.reload(); } break;
                 case "Print screen": if (web != null) ((PrintManager)getSystemService(PRINT_SERVICE)).print("Cartlyft",web.createPrintDocumentAdapter("Cartlyft"),null); break;
                 case "Open website": external(Uri.parse(ORIGIN+"/login")); break;
-                case "Download updates": external(Uri.parse(ORIGIN+"/install.html")); break;
-                default: new AlertDialog.Builder(this).setTitle("Cartlyft 1.1.1").setMessage("For Android 7 and newer.\n\nKeep the app open for order alerts. Background push notifications are not available in this APK.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
+                case "Unassign opening alarms":
+                    new AlertDialog.Builder(this).setTitle("Unassign this phone?").setMessage("Opening alarms will stop, including while logged out. Sign in to assign this phone again.")
+                      .setPositiveButton("Unassign",(d,w)->InventoryReminders.clear(this)).setNegativeButton("Keep alarms",null).show(); break;
+                case "Check for updates": updater.check(); break;
+                default: new AlertDialog.Builder(this).setTitle("Cartlyft 1.2.0").setMessage("For Android 7 and newer.\n\nKeep the app open for order alerts. Background push notifications are not available in this APK.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
             }
         }).setNegativeButton("Close",null).show();
     }
@@ -210,6 +217,8 @@ public class MainActivity extends Activity {
         super.onActivityResult(request,result,data);
         if (request==100 && fileCallback!=null) { fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data)); fileCallback=null; }
     }
+    @Override protected void onResume() { super.onResume(); if(updater!=null)updater.foreground(); updateHandler.postDelayed(updatePoll,750); }
+    @Override protected void onPause() { updateHandler.removeCallbacks(updatePoll); super.onPause(); }
     @Override public void onBackPressed() { if (web!=null && web.canGoBack()) web.goBack(); else super.onBackPressed(); }
     @Override protected void onDestroy() { if(fileCallback!=null) fileCallback.onReceiveValue(null); if(web!=null) web.destroy(); for(WebView p:popups) p.destroy(); super.onDestroy(); }
 }

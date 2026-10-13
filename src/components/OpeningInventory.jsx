@@ -64,11 +64,13 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
     </>}
     {__ANDROID_APP__ && session?.role==='staff' && <div style={{borderTop:'1px solid #E3E9EF',marginTop:18,paddingTop:14,fontSize:13}}>
       <strong>Opening alarm · 30 minutes before {cart?.openTime || 'opening'}</strong>
-      <p style={{lineHeight:1.6,margin:'7px 0 10px',color:'#617184'}}>Rings and vibrates until opening stock is saved. Android sound, notification and battery settings still apply. Keep this staff account signed in. Force-stopping the app prevents reminders. Changes from another phone are checked while this screen is open.</p>
-      {!native?.enabled && <button style={button} disabled={!cart?.openTime || !loaded} onClick={()=>setNative(nativeCommand('enableInventory'))}>Enable on this phone</button>}
+      <p style={{lineHeight:1.6,margin:'7px 0 10px',color:'#617184'}}>Rings and vibrates until opening stock is saved. Android sound, notification and battery settings still apply. Alarms continue after logout until you unassign this phone. Sign in to save inventory. Force-stopping the app prevents reminders. Changes from another phone are checked while this screen is open.</p>
+      {!native?.enabled && <button style={button} disabled={!cart?.openTime || !loaded} onClick={()=>{ nativeCommand('configureInventory',{cartId,openTime:cart.openTime,expiresAt:session.expiresAt,completedDate:record?.business_date || ''}); setNative(nativeCommand('enableInventory')); }}>Enable on this phone</button>}
+      {native?.enabled && native.cartId!==cartId && <p role="alert">This phone is assigned to another cart. Unassign it before enabling this cart’s reminders.</p>}
+      {native?.enabled && <button style={{...button,background:'#fff',color:'#B42318',border:'1px solid #D7DFE8',marginTop:8}} onClick={()=>{if(confirm('Stop opening alarms and unassign this phone?')) setNative(nativeCommand('clearInventory'));}}>Unassign this phone</button>}
       {native?.enabled && !native.notifications && <button style={button} onClick={()=>nativeCommand('notificationSettings')}>Allow notifications in settings</button>}
       {native?.enabled && native.notifications && !native.exact && <button style={button} onClick={()=>nativeCommand('alarmSettings')}>Allow precise alarms</button>}
-      {native?.enabled && native.notifications && native.exact && <p style={{color:'#087A65'}}>Opening reminders are enabled. Check alarm volume and vibration in Android settings.</p>}
+      {native?.enabled && native.cartId===cartId && native.notifications && native.exact && <p style={{color:'#087A65'}}>Opening reminders are enabled. Check alarm volume and vibration in Android settings.</p>}
     </div>}
   </section>;
 }

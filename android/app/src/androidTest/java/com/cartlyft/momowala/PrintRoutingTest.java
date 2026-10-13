@@ -40,7 +40,8 @@ public class PrintRoutingTest extends Instrumentation {
             navigate.invoke(activity, null, Uri.parse("https://example.com"), true);
             check(activity.sent != null, "Normal external links regressed");
             testReminders();
-            result.putString("stream", "PASS: real scheduled notification, completion cancellation, expiry cleanup;  RawBT intent, byte preservation, subframe guard, blocked schemes, HTTPS routing\n");
+            testUpdates();
+            result.putString("stream", "PASS: update manifest and tampered APK rejection; real scheduled notification, completion cancellation, logout-independent assignment;  RawBT intent, byte preservation, subframe guard, blocked schemes, HTTPS routing\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
             result.putString("stream", "FAIL: " + error.toString() + "\n");
@@ -65,8 +66,35 @@ public class PrintRoutingTest extends Instrumentation {
             check(InventoryReminders.manager(context).getActiveNotifications().length==0,"Saved inventory did not cancel notification");
             InventoryReminders.prefs(context).edit().putLong("expiresAt",0).commit();
             InventoryReminders.fire(context);
-            check(!InventoryReminders.prefs(context).getBoolean("enabled",false),"Expired assignment remains enabled");
+            check(InventoryReminders.prefs(context).getBoolean("enabled",false),"Session expiry incorrectly removed device assignment");
+            check(!InventoryReminders.prefs(context).contains("token"),"Device assignment retained login token");
+            try {
+                InventoryReminders.configure(context,new org.json.JSONObject(config.toString()).put("cartId","different-cart"));
+                throw new AssertionError("Assignment changed without unassigning");
+            } catch(IllegalArgumentException expected) { }
+            check("local-test-only".equals(InventoryReminders.prefs(context).getString("cartId","")),"Existing assignment was lost");
+            InventoryReminders.clear(context);
+            check(!InventoryReminders.prefs(context).getBoolean("enabled",false),"Explicit unassign failed");
         } finally { InventoryReminders.clear(context); }
+    }
+    private void testUpdates() throws Exception {
+        org.json.JSONObject info=new org.json.JSONObject().put("versionCode",5).put("versionName","1.3.0").put("path","/downloads/cartlyft-1.3.0.apk").put("bytes",12).put("sha256",new String(new char[64]).replace('\0','a'));
+        AppUpdater.validateManifest(info);
+        for(String path:new String[]{"https://evil.example/update.apk","/downloads/../private.apk","/downloads/cartlyft-1.3.0.apk?redirect=evil"}) {
+            try { AppUpdater.validateManifest(new org.json.JSONObject(info.toString()).put("path",path));throw new AssertionError("Unsafe update path accepted"); } catch(java.io.IOException expected) { }
+        }
+        java.io.File file=new java.io.File(getTargetContext().getCacheDir(),"tampered-update.apk");
+        try {
+            try(java.io.FileOutputStream out=new java.io.FileOutputStream(file)) { out.write(new byte[12]); }
+            try { AppUpdater.validateApk(getTargetContext(),file,info);throw new AssertionError("Tampered update accepted"); } catch(java.io.IOException expected) { }
+            java.io.File folder=new java.io.File(getTargetContext().getExternalFilesDir(null),"updates");folder.mkdirs();
+            Uri uri=androidx.core.content.FileProvider.getUriForFile(getTargetContext(),getTargetContext().getPackageName()+".updates",new java.io.File(folder,"cartlyft.apk"));
+            check("content".equals(uri.getScheme()),"Installer must receive a content URI");
+            try {
+                androidx.core.content.FileProvider.getUriForFile(getTargetContext(),getTargetContext().getPackageName()+".updates",file);
+                throw new AssertionError("Update provider exposed unrelated private files");
+            } catch(IllegalArgumentException expected) { }
+        } finally { file.delete(); }
     }
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);

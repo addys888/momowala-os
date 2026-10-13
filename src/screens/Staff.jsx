@@ -239,7 +239,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 
   return (
     <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
-      <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders on this phone will stop until you sign in again." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will stop on this phone."} title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
+      <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders will continue on this assigned phone." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will continue on this assigned phone."} title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>

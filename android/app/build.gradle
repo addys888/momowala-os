@@ -11,8 +11,8 @@ android {
         minSdk 24
         targetSdk 35
         testInstrumentationRunner 'com.cartlyft.momowala.PrintRoutingTest'
-        versionCode 3
-        versionName '1.1.1'
+        versionCode 4
+        versionName '1.2.0'
     }
     signingConfigs {
         release {
@@ -33,3 +33,5 @@ tasks.register('requireReleaseSigning') {
     doLast { if (!signingFile.exists()) throw new GradleException('Release signing is missing. See docs/android-app.md.') }
 }
 tasks.configureEach { if (name == 'validateSigningRelease') dependsOn 'requireReleaseSigning' }
+
+dependencies { implementation 'androidx.core:core:1.15.0' }
