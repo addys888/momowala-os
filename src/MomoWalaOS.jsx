@@ -206,6 +206,9 @@ export default function App() {
     <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow }}>
       {syncOps.length > 0 && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
         {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} change(s) saved on this device, waiting to sync.`}
+        {syncOps.some(o => o.error) && <button style={{ marginLeft: 8, padding: '8px 12px', borderRadius: 8 }} onClick={async () => {
+          try { await outbox.retryFailed(); } catch { alert('Could not retry. Your changes remain saved on this device.'); }
+        }}>Retry sync</button>}
         {syncOps.some(o => o.error) && <button onClick={() => {
           if (confirm('Keep a recovery copy of rejected changes and reload the latest saved data?')) { discardFailedOperations(); window.location.reload(); }
         }}>Reload saved data</button>}

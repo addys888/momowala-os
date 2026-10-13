@@ -38,3 +38,22 @@ test('storage failure prevents accepting a command', () => {
   const queue = createOutbox({ read: () => [], write: () => { throw Error('quota'); }, actor: () => 'a', send: () => {} });
   assert.throws(() => queue.enqueue('order', {}), /quota/);
 });
+
+test('explicit retry preserves rejected payload and ID and then drains dependent changes', async () => {
+  let fixed=false; const calls=[];
+  const ctx=setup(async op=>{calls.push(structuredClone(op));return fixed?{data:{status:'ok'}}:{error:{code:'P0001',message:'Column not allowed: unrecorded'}};});
+  const first=ctx.queue.enqueue('row',{table:'day_close_logs',after:{unrecorded:null}});
+  ctx.queue.enqueue('row',{table:'carts',after:{name:'A'}});
+  await ctx.queue.flush();
+  fixed=true;
+  await ctx.restart().retryFailed();
+  assert.equal(ctx.queue.list().length,0);
+  assert.equal(calls[1].id,first.id);
+  assert.deepEqual(calls[1].payload,first.payload);
+  assert.equal(calls.length,3);
+});
+test('retry never clears another account’s rejection', async () => {
+  const ctx=setup(async()=>({error:{code:'P0001',message:'Rejected'}}));
+  ctx.queue.enqueue('row',{});await ctx.queue.flush();ctx.setActor('owner:cart-b');
+  await ctx.queue.retryFailed();assert.equal(ctx.queue.list()[0].error,'Rejected');
+});

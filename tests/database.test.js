@@ -163,3 +163,16 @@ test('concurrent opening submissions transfer once and failed batches leave no p
   assert.deepEqual(inv['test-a'].veg,{freezer:100-qty,cart:qty});
   assert.equal(await request("select count(*) from cart_loadings where note='Opening stock transfer'",staff),'1');
 });
+
+test('day-close serializer flags save and retry without duplicate reports', async () => {
+  const after={id:880013,cart_id:'test-a',date:'2026-10-10',holiday:null,unrecorded:true,revenue:100};
+  await sql('delete from day_close_logs where id=880013');
+  const id=crypto.randomUUID();
+  assert.equal((await mutate('row',{table:'day_close_logs',before:null,after},owner,id)).status,'ok');
+  assert.equal((await mutate('row',{table:'day_close_logs',before:null,after},owner,id)).status,'ok');
+  assert.equal(await sql('select count(*) from day_close_logs where id=880013 and unrecorded=true'),'1');
+  await assert.rejects(mutate('row',{table:'day_close_logs',before:after,after:{...after,unrecorded:false}},other),/Not authorised/);
+  await assert.rejects(mutate('row',{table:'day_close_logs',before:after,after:{...after,unrecorded:false}},staff),/Not authorised/);
+  assert.equal((await mutate('row',{table:'day_close_logs',before:after,after:{...after,unrecorded:null}},owner)).status,'ok');
+  await sql('delete from day_close_logs where id=880013');
+});

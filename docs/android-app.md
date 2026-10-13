@@ -82,3 +82,12 @@ From this version, use **App settings → Check for updates → Download update*
 Existing versions need one download from the install page to gain the native updater. Future releases still require explicit owner approval before publication. The updater only downloads when requested by the user; it does not install unpublished work.
 
 Validation: 16 unit/API tests, 15 isolated database tests, Android debug/release lint/builds, Android 7 instrumentation covering notification scheduling/cancellation, logout persistence, cart assignment isolation, print routing, invalid update metadata, tampered APK rejection and narrow provider paths. Signed 1.1.1 → 1.2.0 in-place installation succeeded on the Android 7 emulator. Both releases use the same signing certificate. Physical-phone/OEM installation prompts, ringing/vibration and printer output still need on-device checks.
+
+
+## Post-1.2.0 sync hotfix (13 October 2026)
+
+The live database lacked `day_close_logs.unrecorded`, although the bundled day-close serializer always includes it (including null for ordinary days). The row RPC therefore rejected reconciliation writes with `Column not allowed: unrecorded`. The compatibility migration adds the nullable boolean without changing historical reports or access checks. Applied and verified on the existing production project; no APK release or version bump.
+
+Already rejected operations remain paused in 1.2.0 local storage; a normal refresh does not retry them. Its existing “Reload saved data” action archives rejected operations locally and removes them from the active queue, so users must note and re-enter any unsynced reconciliation figures. Do not clear app storage or uninstall. A new explicit “Retry sync” button is staged in source for the next approved app release; it preserves IDs/payloads and only retries the current actor’s queue. It is not present in the published 1.2.0 APK.
+
+Regression checks: 18 unit/API tests, 16 isolated PostgreSQL tests, including nullable/manual day-close flags, duplicate prevention and owner/cart authorization.

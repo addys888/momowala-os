@@ -38,5 +38,17 @@ export function createOutbox({ read, write, send, actor, put, remove, onResult =
     if (!running) running = drain().finally(() => { running = null; });
     return running;
   }
-  return { enqueue, flush, list };
+  async function retryFailed() {
+    // Preserve operation IDs and payloads. Never resend another account's queue.
+    if (running) await running;
+    for (const op of list()) {
+      if (op.actor !== actor() || !op.error) continue;
+      const pending = { ...op };
+      delete pending.error;
+      save(pending);
+    }
+    status();
+    return flush();
+  }
+  return { enqueue, flush, list, retryFailed };
 }
