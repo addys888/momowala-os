@@ -57,3 +57,9 @@ test('retry never clears another account’s rejection', async () => {
   ctx.queue.enqueue('row',{});await ctx.queue.flush();ctx.setActor('owner:cart-b');
   await ctx.queue.retryFailed();assert.equal(ctx.queue.list()[0].error,'Rejected');
 });
+test('archived restore sends original operation and rejects a different account', async()=>{
+  const calls=[];const ctx=setup(async op=>{calls.push(op);return {data:{status:'ok'}};});
+  const archived={id:crypto.randomUUID(),actor:'owner:cart-a',kind:'row',payload:{after:{revenue:750}},createdAt:1,sequence:0,error:'Rejected'};
+  await ctx.queue.restore(archived);assert.equal(calls[0].id,archived.id);assert.deepEqual(calls[0].payload,archived.payload);assert.equal(ctx.queue.list().length,0);
+  ctx.setActor('owner:cart-b');await assert.rejects(ctx.queue.restore(archived),/original account/);assert.equal(calls.length,1);
+});

@@ -2,9 +2,13 @@ import React, { useState, useEffect, useRef, createContext, useContext } from 'r
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
 import { TODAY, WARE_TYPES, brand, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, stockOversell, persistInv, wareLedger } from '../../core';
+import { ReconciliationRecovery } from '../../components/ReconciliationRecovery';
+import { useStore } from '../../store';
+import { pendingOperations } from '../../lib/store';
 import { SectionHeader } from '../../components/shared';
 
 function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], initialDate }) {
+  useStore(); // Subscribe to sync-driven context updates.
   const shiftDate = (d, n) => { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10); };
   // Business day with a 1 AM grace: between midnight and 1 AM IST the "day to
   // close" is still yesterday, so a late-night close lands on the right date.
@@ -12,6 +16,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
   const businessDate = istNowMinutes() < GRACE_HOUR * 60 ? shiftDate(localDate(), -1) : localDate();
 
   const [date, setDate] = useState(initialDate || businessDate);
+  const pendingClose = pendingOperations().some(op=>op.payload?.table==='day_close_logs' && op.payload?.after?.cart_id===cartId && op.payload?.after?.date===date);
   // Deep-link from the dashboard nudge: jump to the day it asked to reconcile.
   useEffect(() => { if (initialDate) setDate(initialDate); }, [initialDate]);
   const [physicalCash, setPhysicalCash] = useState('');
@@ -124,6 +129,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
   return (
     <div>
       <SectionHeader title="Reconciliation" subtitle="Close the day — cash, stock, plates & glasses" />
+      <ReconciliationRecovery cartId={cartId} />
 
       {/* Day picker — reconcile today, or backfill a forgotten day (last 7). */}
       <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 14 }}>
@@ -155,9 +161,9 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
       ) : alreadyClosed ? (
         <div style={{ background: colors.green, color: '#fff', padding: 28, borderRadius: 16, textAlign: 'center' }}>
           <CheckCircle2 size={44} style={{ marginBottom: 10 }} />
-          <div style={{ fontSize: 20, fontWeight: 800 }}>{dayLabel(date)} closed</div>
+          <div style={{ fontSize: 20, fontWeight: 800 }}>{pendingClose?'Saved on this phone · sync pending':`${dayLabel(date)} closed`}</div>
           <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
-            {thisClose.unrecorded
+            {pendingClose ? 'Keep this app online until the sync warning clears. This report is not yet confirmed on the server.' : thisClose.unrecorded
               ? `Sales entered by hand — ₹${((thisClose.physicalCash || 0) + (thisClose.phonePeAmount || 0)).toLocaleString('en-IN')} recorded for the day.`
               : 'Reconciliation saved. Pick another day above if needed.'}
           </div>

@@ -1,5 +1,6 @@
 import { supabase, requestHeaders } from './supabase';
 import { createOutbox } from './outbox';
+import { archiveRejected, reconciliationBackups } from './recovery';
 
 // ─── PASSWORD HASHING ───
 // Legacy hash compatibility for existing account helpers. Authentication and
@@ -460,9 +461,22 @@ export const validateSession = () => supabase?.rpc('app_identity');
 export const revokeSession = () => supabase?.rpc('app_logout');
 export function pendingOperations() { return outbox.list().filter(o => o.actor === currentActor()); }
 export function discardFailedOperations() {
-  const ops = outbox.list();
-  storage.set('failedOperationsBackup', [...storage.get('failedOperationsBackup', []), ...ops.filter(o => o.error)]);
-  for (const op of ops.filter(o => o.error)) localStorage.removeItem('mw:op:' + op.id);
+  archiveRejected({ operations: outbox.list(), actor: currentActor(), backup: storage.get('failedOperationsBackup', []),
+    persistBackup: value => localStorage.setItem('mw:failedOperationsBackup', JSON.stringify(value)),
+    remove: id => localStorage.removeItem('mw:op:' + id) });
+}
+export function savedReconciliations(cartId) {
+  return reconciliationBackups(storage.get('failedOperationsBackup', []), currentActor(), cartId);
+}
+export async function restoreReconciliation(id, cartId) {
+  const op = savedReconciliations(cartId).find(item => item.id === id);
+  if (!op) throw new Error('This backup is not available for the signed-in owner.');
+  const row = op.payload.after;
+  const {data,error} = await supabase.from('day_close_logs').select('id').eq('cart_id',cartId).eq('date',row.date);
+  if (error) throw new Error('Could not check the saved report. Connect to the internet and retry.');
+  if (data.some(item => item.id !== row.id)) throw new Error('A report for this date already exists on the server. Review it before restoring; nothing was overwritten.');
+  await outbox.restore(op);
+  // Retain the original recovery copy even after success for traceability.
 }
 
 export async function loadInventory() {

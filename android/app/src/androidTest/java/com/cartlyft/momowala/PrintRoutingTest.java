@@ -41,6 +41,7 @@ public class PrintRoutingTest extends Instrumentation {
             check(activity.sent != null, "Normal external links regressed");
             testReminders();
             testUpdates();
+            testPartnerIcon();
             result.putString("stream", "PASS: update manifest and tampered APK rejection; real scheduled notification, completion cancellation, logout-independent assignment;  RawBT intent, byte preservation, subframe guard, blocked schemes, HTTPS routing\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
@@ -95,6 +96,15 @@ public class PrintRoutingTest extends Instrumentation {
                 throw new AssertionError("Update provider exposed unrelated private files");
             } catch(IllegalArgumentException expected) { }
         } finally { file.delete(); }
+    }
+    private void testPartnerIcon() throws Exception {
+        android.graphics.drawable.Drawable icon=getTargetContext().getPackageManager().getApplicationIcon(getTargetContext().getPackageName());
+        android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(216,216,android.graphics.Bitmap.Config.ARGB_8888);
+        icon.setBounds(0,0,216,216);icon.draw(new android.graphics.Canvas(bitmap));
+        check(bitmap.getPixel(4,4)==android.graphics.Color.rgb(217,35,68),"Partner icon background must be red");
+        java.io.File output=new java.io.File(getTargetContext().getExternalFilesDir(null),"partner-icon.png");
+        try(java.io.FileOutputStream stream=new java.io.FileOutputStream(output)){bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,stream);}
+        check("Cartlyft Partner".contentEquals(getTargetContext().getApplicationInfo().loadLabel(getTargetContext().getPackageManager())),"Partner app label changed unexpectedly");
     }
     private static void check(boolean condition, String message) {
         if (!condition) throw new AssertionError(message);

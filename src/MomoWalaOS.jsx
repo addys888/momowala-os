@@ -152,6 +152,11 @@ export default function App() {
     return () => { alive = false; clearInterval(t); pollRef.current = null; };
   }, [session]);
   const refreshNow = async () => { if (pollRef.current) await pollRef.current(); };
+  const refreshSavedData = async () => {
+    const token = storage.get('session', null)?.token;
+    const cloud = await loadCloudState();
+    if (cloud && token === storage.get('session', null)?.token) setState(prev => normalize(mergeStates(prev, cloud)));
+  };
 
   // Persist to localStorage, but ONLY the slices whose reference actually changed.
   // State is updated immutably, so an unchanged slice keeps its reference and is
@@ -203,15 +208,15 @@ export default function App() {
 
   if (!hydrated) return <AppLaunch />;
   return (
-    <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow }}>
+    <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow, refreshSavedData }}>
       {syncOps.length > 0 && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
         {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} change(s) saved on this device, waiting to sync.`}
         {syncOps.some(o => o.error) && <button style={{ marginLeft: 8, padding: '8px 12px', borderRadius: 8 }} onClick={async () => {
           try { await outbox.retryFailed(); } catch { alert('Could not retry. Your changes remain saved on this device.'); }
         }}>Retry sync</button>}
         {syncOps.some(o => o.error) && <button onClick={() => {
-          if (confirm('Keep a recovery copy of rejected changes and reload the latest saved data?')) { discardFailedOperations(); window.location.reload(); }
-        }}>Reload saved data</button>}
+          if (confirm('Set rejected changes aside in a recovery copy and reload server data? They will not be saved to the server. Owner reconciliation backups remain available under Reconcile → Recover saved reports.')) { try { discardFailedOperations(); window.location.reload(); } catch { alert('Could not save a recovery copy. Nothing was removed. Free storage and retry.'); } }
+        }}>Set aside & reload</button>}
       </div>}
       <BrowserRouter>
         <Routes>

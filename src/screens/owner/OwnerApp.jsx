@@ -111,7 +111,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         {/* Nags until this device has push on — otherwise the owner's phone stays
             silent for incoming customer orders and daily reminders. */}
         <OrderAlertsPrompt cartId={cartId} role="owner" />
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onSeeUncollected={goOrders} onResetWare={resetWare} updateState={updateState} />}
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onSeeUncollected={goOrders} onResetWare={resetWare} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} initialDate={ordersDate} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} initialDate={reconcileDate} />}
@@ -229,7 +229,7 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
   );
 }
 
-function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onToggleVendor, onReconcile, onSeeOrders, onSeeUncollected, onResetWare, updateState }) {
+function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onToggleVendor, onReconcile, onSeeOrders, onSeeUncollected, onResetWare, updateState }) {
   // Day-close nudge: the plate/cash/stock theft audit only runs at day-close, so
   // a stretch of un-closed days means the audit is producing nothing. Warn when
   // today has sales but isn't closed, and count how long the streak has run.
@@ -331,6 +331,16 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onToggleOpen, stoc
         </div>
         <button onClick={onEditProfile} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Edit3 size={13}/> Edit</button>
       </div>
+
+      <section aria-label="Daily operations" style={{background:'#fff',border:`1px solid ${colors.border}`,borderRadius:12,padding:14,marginBottom:12}}>
+        <div style={{fontWeight:800,fontSize:14,marginBottom:8}}>Daily operations</div>
+        <div style={{fontSize:13,color:colors.muted,lineHeight:1.7}}>Hours (IST): <strong>{cart?.openTime || 'Not set'} – {cart?.closeTime || 'Not set'}</strong><br/>Staff inventory reminder: 30 minutes before opening, when enabled on their phone.</div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}>
+          <button style={{...adminBtn,minHeight:44}} onClick={onEditProfile}>Cart settings & hours</button>
+          <button style={{...adminBtn,minHeight:44}} onClick={onOpeningStock}>Opening stock</button>
+          <button style={{...adminBtn,minHeight:44}} onClick={onSeeOrders}>Live orders</button>
+        </div>
+      </section>
 
       {/* 2) Open/closed + reminders share one compact row */}
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>

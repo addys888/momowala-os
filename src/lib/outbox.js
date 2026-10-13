@@ -50,5 +50,18 @@ export function createOutbox({ read, write, send, actor, put, remove, onResult =
     status();
     return flush();
   }
-  return { enqueue, flush, list, retryFailed };
+  async function restore(operation) {
+    if (operation.actor !== actor()) throw new Error('Sign in with the original account to restore this change.');
+    if (running) await running;
+    if (operation.actor !== actor()) throw new Error('Account changed. Please retry.');
+    const existing = list().find(op => op.id === operation.id);
+    if (existing && (existing.actor !== operation.actor || JSON.stringify(existing.payload) !== JSON.stringify(operation.payload))) throw new Error('A different pending change has this ID.');
+    const pending = structuredClone(operation);
+    delete pending.error;
+    save(pending); status();
+    await flush();
+    const remaining = list().find(op => op.id === operation.id);
+    if (remaining) throw new Error(remaining.error || 'Still waiting to sync. Keep the app online and retry. Your backup is retained.');
+  }
+  return { enqueue, flush, list, retryFailed, restore };
 }

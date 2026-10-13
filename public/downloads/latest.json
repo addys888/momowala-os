@@ -1,8 +1,8 @@
 {
-  "versionCode": 4,
-  "versionName": "1.2.0",
-  "path": "/downloads/cartlyft-1.2.0.apk",
-  "bytes": 2356124,
-  "sha256": "754ed5aa6daa1f61537b4694d8e4ffb10f00500d1e8e3af2a7df831d712629a8",
-  "notes": "Opening inventory, persistent daily reminders, improved layout and in-app updates. Cross-phone background updates are not yet available."
+  "versionCode": 5,
+  "versionName": "1.3.0",
+  "path": "/downloads/cartlyft-1.3.0.apk",
+  "bytes": 2363420,
+  "sha256": "19e57ab5befeba2a7cf10ea4f763a14a2a3be50e37af54a0d7208277030b9e3d",
+  "notes": "Cartlyft Partner red icon, reconciliation backup recovery, safe sync retry and daily operations shortcuts. Cross-phone background updates are not yet available."
 }

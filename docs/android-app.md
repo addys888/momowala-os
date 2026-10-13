@@ -1,6 +1,6 @@
 # Cartlyft Android application
 
-Signed, universal APK for Android 7.0 (API 24) and newer. Package: `com.cartlyft.momowala`. Version 1.2.0 / code 4. The application uses the existing Supabase database and Vercel APIs. It bundles the React screens with compatibility bundles for Chrome/WebView 51 and newer, so installation does not depend on PWA shortcut support.
+Signed, universal APK for Android 7.0 (API 24) and newer. Package: `com.cartlyft.momowala`. Version 1.3.0 / code 5. The application uses the existing Supabase database and Vercel APIs. It bundles the React screens with compatibility bundles for Chrome/WebView 51 and newer, so installation does not depend on PWA shortcut support.
 
 ## Install
 
@@ -30,7 +30,7 @@ npm run build:android
 
 Outputs:
 
-- `public/downloads/cartlyft-1.2.0.apk` and `.apk.sha256`
+- `public/downloads/cartlyft-1.3.0.apk` and `.apk.sha256`
 - `android/app/build/outputs/bundle/release/app-release.aab` (for future Play Console work)
 - `android/app/build/reports/lint-results-release.html`
 
@@ -91,3 +91,14 @@ The live database lacked `day_close_logs.unrecorded`, although the bundled day-c
 Already rejected operations remain paused in 1.2.0 local storage; a normal refresh does not retry them. Its existing “Reload saved data” action archives rejected operations locally and removes them from the active queue, so users must note and re-enter any unsynced reconciliation figures. Do not clear app storage or uninstall. A new explicit “Retry sync” button is staged in source for the next approved app release; it preserves IDs/payloads and only retries the current actor’s queue. It is not present in the published 1.2.0 APK.
 
 Regression checks: 18 unit/API tests, 16 isolated PostgreSQL tests, including nullable/manual day-close flags, duplicate prevention and owner/cart authorization.
+
+
+## Version 1.3.0 — Cartlyft Partner and report recovery
+
+User authorized the recovery update and partner branding. The launcher now uses a red Cartlyft vector mark (Android 7) and adaptive icon (Android 8+), with the label Cartlyft Partner. Package ID and release signing key remain unchanged. Tenant logos remain inside the app. Green is reserved for a separate future customer app; see `partner-comparison-and-customer-roadmap.md`.
+
+On the SAME PHONE, sign in as the original owner and open **Reconcile → Recover saved reports**. The screen shows matching archived reconciliation date, cash, UPI, revenue, stock counts and original error. **Restore this report → Confirm restore** resubmits the original operation ID after checking for an existing report on that date. The backup is retained. This does not manufacture missing backups or recover data after uninstall/clear-storage. No actual customer figures were restored during development.
+
+**Retry sync** retries rejected active operations without changing their IDs or payloads. **Set aside & reload** explains that changes are not yet server-saved; backup persistence must succeed before removing active operations, and only the current account is affected. Reconciliation now clearly distinguishes a pending device save from confirmed server data. Home shows business hours and direct Cart settings & hours, Opening stock and Live orders shortcuts.
+
+Validation: 22 unit/API tests; 16 isolated PostgreSQL tests; real browser recovery of example cash ₹500/UPI ₹250 to the isolated database, with server revenue ₹750 confirmed; owner dashboard navigation/rendering with no browser errors; Android debug/release builds and lint; Android 7 native regressions and rendered red-icon check; signed 1.2.0 → 1.3.0 in-place upgrade. Physical phones, printers and multi-device Firebase behavior retain their previously documented gaps.
