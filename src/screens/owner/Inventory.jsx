@@ -2,7 +2,7 @@ import { OpeningInventory } from '../../components/OpeningInventory';
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
-import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, persistConsumables, persistInv, stockModeFor, warePacksFor, wareLedger, slugify } from '../../core';
+import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, stockModeFor, warePacksFor, wareLedger, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
 function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
@@ -13,7 +13,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const [adjusting, setAdjusting] = useState(null); // { key, label } | null
   const [moving, setMoving] = useState(null); // { type, label, dir:'load'|'return', qty } | null
   const [editCons, setEditCons] = useState(null); // { key?, name, unit, stock } | null
-  const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
+  const setCartInv = (newInv, extra, ops) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra }, ops ? [{ kind: 'inventory', payload: { cartId, ops, expected: inv } }] : []);
   const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
   const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
   const labelFor = (key) => stockTypes.find(st => st.key === key)?.label || key;
@@ -34,9 +34,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     updateState({
       menus: newMenus,
       inventory: { ...state.inventory, [cartId]: newInv },
-    });
-    pushMenus(newMenus, cartId);
-    if (Object.keys(newOps).length) persistInv(cartId, newOps, { ...state.inventory, [cartId]: newInv });
+    }, Object.keys(newOps).length ? [{ kind: 'inventory', payload: { cartId, ops: newOps, expected: inv } }] : []);
   };
 
   // Accepts a batch: [{ type, qty }] so a delivery of all momo types is recorded
@@ -53,8 +51,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       deltas[type] = { df: qty };
     });
     if (!Object.keys(deltas).length) { setShowAddStock(false); return; }
-    setCartInv(newInv, { stockLogs: [...state.stockLogs, ...logs] });
-    persistInv(cartId, deltas, { ...state.inventory, [cartId]: newInv });
+    if (!setCartInv(newInv, { stockLogs: [...state.stockLogs, ...logs] }, deltas)) return;
     setShowAddStock(false);
   };
 
@@ -105,8 +102,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       type: 'STOCK_ADJUST', item: type, qty: applied,
       note: `${verb} ${Math.abs(applied)} ${labelFor(type)} in freezer — ${reason}`
     };
-    setCartInv(newInv, { stockLogs: [...state.stockLogs, log] });
-    persistInv(cartId, { [type]: { df: applied } }, { ...state.inventory, [cartId]: newInv });
+    if (!setCartInv(newInv, { stockLogs: [...state.stockLogs, log] }, { [type]: { df: applied } })) return;
     setAdjusting(null);
   };
 
@@ -120,8 +116,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       time: istTime(),
       type: 'CART_LOAD', item: type, qty, note: `Moved ${qty} ${labelFor(type)} pieces to cart`
     };
-    setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
-    persistInv(cartId, { [type]: { df: -qty, dc: qty } }, { ...state.inventory, [cartId]: newInv });
+    return setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { df: -qty, dc: qty } });
   };
 
   // Move pieces back from the cart into the freezer (e.g. loaded too many).
@@ -134,8 +129,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       time: istTime(),
       type: 'CART_UNLOAD', item: type, qty, note: `Returned ${qty} ${labelFor(type)} pieces to freezer`
     };
-    setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
-    persistInv(cartId, { [type]: { df: qty, dc: -qty } }, { ...state.inventory, [cartId]: newInv });
+    return setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { df: qty, dc: -qty } });
   };
 
   // Correct / hard-reset a stock type's CART count after a miscount or mishap.
@@ -152,15 +146,14 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     if (delta === 0) return;
     const newInv = { ...inv, [type]: { ...(inv[type] || { freezer: 0, cart: 0 }), cart: target } };
     const log = { id: Date.now(), cartId, date: TODAY, time: istTime(), type: 'CART_ADJUST', item: type, qty: delta, note: `Cart recount → set to ${target} (${delta > 0 ? '+' : ''}${delta})` };
-    setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] });
-    persistInv(cartId, { [type]: { cset: target } }, { ...state.inventory, [cartId]: newInv });
+    if (!setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { cset: target } })) return;
   };
 
   // Confirmed from the move modal (load to cart / return to freezer).
   const confirmMove = () => {
     if (!moving || moving.qty <= 0) { setMoving(null); return; }
-    if (moving.dir === 'load') loadToCart(moving.type, moving.qty);
-    else returnToFreezer(moving.type, moving.qty);
+    const saved = moving.dir === 'load' ? loadToCart(moving.type, moving.qty) : returnToFreezer(moving.type, moving.qty);
+    if (saved === false) return;
     setMoving(null);
   };
 
@@ -170,16 +163,14 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const k = key || slugify(name) || ('c' + Date.now());
     const prev = cons[k] || { perOrder: 0 };
     cons[k] = { ...prev, name: name.trim(), unit: (unit || '').trim() || 'pcs', stock: parseFloat(stock) || 0 };
-    setCartInv({ ...inv, consumables: cons });
-    persistConsumables(cartId, cons, { ...state.inventory, [cartId]: { ...inv, consumables: cons } });
+    if (!updateState({ inventory: { ...state.inventory, [cartId]: { ...inv, consumables: cons } } }, [{ kind: 'consumables', payload: { cartId, value: cons } }])) return;
     setEditCons(null);
   };
   const removeConsumable = (key) => {
     if (!confirm('Remove this consumable/supply item?')) return;
     const cons = { ...(inv.consumables || {}) };
     delete cons[key];
-    setCartInv({ ...inv, consumables: cons });
-    persistConsumables(cartId, cons, { ...state.inventory, [cartId]: { ...inv, consumables: cons } });
+    if (!updateState({ inventory: { ...state.inventory, [cartId]: { ...inv, consumables: cons } } }, [{ kind: 'consumables', payload: { cartId, value: cons } }])) return;
   };
 
   return (

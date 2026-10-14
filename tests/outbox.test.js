@@ -63,3 +63,11 @@ test('archived restore sends original operation and rejects a different account'
   await ctx.queue.restore(archived);assert.equal(calls[0].id,archived.id);assert.deepEqual(calls[0].payload,archived.payload);assert.equal(ctx.queue.list().length,0);
   ctx.setActor('owner:cart-b');await assert.rejects(ctx.queue.restore(archived),/original account/);assert.equal(calls.length,1);
 });
+
+test('late committed response never reaches a different signed-in account', async () => {
+  let who='owner:a',saved=[],resolve;const committed=[];
+  const queue=createOutbox({read:()=>saved,write:value=>{saved=value;},actor:()=>who,send:()=>new Promise(r=>{resolve=r;}),onResult:r=>committed.push(r)});
+  queue.enqueue('order',{});const running=queue.flush();who='owner:b';
+  resolve({data:{status:'ok',order:{id:1}}});await running;
+  assert.equal(committed.length,0);assert.equal(saved.length,0);
+});

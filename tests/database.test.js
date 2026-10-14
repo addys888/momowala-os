@@ -25,6 +25,8 @@ const order = id => ({ id, cart_id: 'test-a', date: '2026-10-11', time: '12:00',
 await sql(`
  delete from orders where cart_id in ('test-a','test-b');
  delete from app_private.operations;
+ delete from cart_loadings where id between 92901 and 92906;
+ delete from wastage_logs where id between 92901 and 92906;
  insert into carts(id,name,active,owner_mobile) values('test-a','A',true,'9000000001'),('test-b','B',true,'9000000002') on conflict(id) do update set active=true,name=excluded.name;
  insert into staff(id,cart_id,name,mobile,active) values(101,'test-a','Test Staff','9000000003',true) on conflict(id) do update set active=true,name=excluded.name;
  insert into app_sessions(token,role,cart_id,name,staff_id,expires_at) values
@@ -175,4 +177,60 @@ test('day-close serializer flags save and retry without duplicate reports', asyn
   await assert.rejects(mutate('row',{table:'day_close_logs',before:after,after:{...after,unrecorded:false}},staff),/Not authorised/);
   assert.equal((await mutate('row',{table:'day_close_logs',before:after,after:{...after,unrecorded:null}},owner)).status,'ok');
   await sql('delete from day_close_logs where id=880013');
+});
+
+test('two phones with the same staff account share committed orders and logout is independent', async () => {
+  await sql("update staff set active=true,password_hash=app_hash('sync-test-password') where id=101");
+  const login = async () => JSON.parse(await request("select app_login('9000000003','sync-test-password','team')"));
+  const phoneA = await login(), phoneB = await login();
+  assert.equal(phoneA.status, 'ok');
+  assert.equal(phoneB.status, 'ok');
+  assert.notEqual(phoneA.token, phoneB.token);
+  try {
+    const result = await mutate('order', { before: null, after: { ...order(91999), source: 'staff-entry', staff: 'Test Staff' } }, phoneA.token);
+    assert.equal(result.status, 'ok');
+    assert.equal(await request('select count(*) from orders where id=91999', phoneB.token), '1');
+    assert.equal(await request('select count(*) from orders where id=91999', other), '0');
+    await request('select app_logout()', phoneA.token);
+    assert.equal(await request('select count(*) from orders where id=91999', phoneB.token), '1');
+  } finally {
+    await request('select app_logout()', phoneA.token);
+    await request('select app_logout()', phoneB.token);
+  }
+});
+
+const batch = async (commands, token=owner, id=crypto.randomUUID()) => JSON.parse(await request(`select app_mutate_batch('${id}',${quote(commands)})`,token));
+test('stock movement and its audit record commit together and retry once', async () => {
+  await sql("update inventory set data=jsonb_set(data,'{test-a,veg}','{\"freezer\":100,\"cart\":50}') where id=1");
+  const commands=[{kind:'row',payload:{table:'cart_loadings',before:null,after:{id:92901,cart_id:'test-a',date:'2026-10-13',type:'CART_LOAD',item:'veg',qty:10}}},{kind:'inventory',payload:{cartId:'test-a',ops:{veg:{df:-10,dc:10}}}}];
+  const id=crypto.randomUUID();
+  assert.equal((await batch(commands,owner,id)).status,'ok');
+  await batch(commands,owner,id);
+  assert.equal(await sql("select data->'test-a'->'veg'->>'cart' from inventory where id=1"),'60');
+  assert.equal(await sql('select count(*) from cart_loadings where id=92901'),'1');
+  const rejected=structuredClone(commands);rejected[0].payload.after.id=92902;rejected[1].payload.ops.veg.df=-999;
+  await assert.rejects(batch(rejected),/Not enough stock/);
+  assert.equal(await sql('select count(*) from cart_loadings where id=92902'),'0');
+  assert.equal(await sql("select data->'test-a'->'veg'->>'freezer' from inventory where id=1"),'90');
+  await assert.rejects(batch(commands,other,id),/Not authorised/);
+});
+test('day close rejects duplicate dates and stale recounts without saving a partial report', async () => {
+  await sql("delete from day_close_logs where cart_id='test-a' and date='2026-10-13'");
+  const close=id=>({kind:'row',payload:{table:'day_close_logs',before:null,after:{id,cart_id:'test-a',date:'2026-10-13',revenue:750}}});
+  const inventory={kind:'inventory',payload:{cartId:'test-a',ops:{veg:{df:60,cset:0}},expected:{veg:{freezer:90,cart:59}}}};
+  await assert.rejects(batch([close(92903),inventory]),/stock changed/);
+  assert.equal(await sql('select count(*) from day_close_logs where id=92903'),'0');
+  inventory.payload.expected.veg.cart=60;
+  await batch([close(92903),inventory]);
+  await assert.rejects(batch([close(92904),inventory]),/already reconciled/);
+  assert.equal(await sql("select data->'test-a'->'veg'->>'freezer' from inventory where id=1"),'150');
+});
+test('staff wastage remains atomic and cannot use a batch to change another cart', async () => {
+  await sql("update inventory set data=jsonb_set(data,'{test-a,veg,cart}','20') where id=1");
+  const commands=[{kind:'row',payload:{table:'wastage_logs',before:null,after:{id:92905,cart_id:'test-a',date:'2026-10-13',stock_key:'veg',qty:5,reason:'Damaged'}}},{kind:'inventory',payload:{cartId:'test-a',ops:{veg:{dc:-5}}}}];
+  await batch(commands,staff);
+  assert.equal(await sql("select data->'test-a'->'veg'->>'cart' from inventory where id=1"),'15');
+  commands[0].payload.after.id=92906;commands[1].payload.cartId='test-b';
+  await assert.rejects(batch(commands,staff),/Not authorised/);
+  assert.equal(await sql('select count(*) from wastage_logs where id=92906'),'0');
 });

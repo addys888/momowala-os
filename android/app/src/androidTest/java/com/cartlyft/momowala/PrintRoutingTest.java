@@ -60,7 +60,9 @@ public class PrintRoutingTest extends Instrumentation {
             InventoryReminders.configure(context,config);
             InventoryReminders.prefs(context).edit().putBoolean("enabled",true).commit();
             InventoryReminders.schedule(context,false);
-            Thread.sleep(3500);
+            // Delivery is asynchronous; allow emulator scheduling latency.
+            long deadline=android.os.SystemClock.elapsedRealtime()+15000;
+            while(InventoryReminders.manager(context).getActiveNotifications().length==0 && android.os.SystemClock.elapsedRealtime()<deadline) Thread.sleep(250);
             check(InventoryReminders.manager(context).getActiveNotifications().length>0,"Scheduled alarm did not post notification");
             config.put("completedDate",OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis())));
             InventoryReminders.configure(context,config);

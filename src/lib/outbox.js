@@ -30,7 +30,9 @@ export function createOutbox({ read, write, send, actor, put, remove, onResult =
         status(); break;
       }
       erase(op.id);
-      onResult(result.data, op);
+      // The receipt can be removed, but never render a previous user's result
+      // into the account that signed in while this request was in flight.
+      if (op.actor === actor()) onResult(result.data, op);
       status();
     }
   }

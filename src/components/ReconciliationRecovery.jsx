@@ -1,3 +1,4 @@
+import { reconciliationRow } from '../lib/operations.js';
 import { useState } from 'react';
 import { savedReconciliations, restoreReconciliation } from '../lib/store';
 import { useStore } from '../store';
@@ -17,7 +18,7 @@ export function ReconciliationRecovery({cartId}) {
     <summary style={{fontWeight:750,cursor:'pointer'}}>Recover saved reports {backups.length>0?`· ${backups.length} backup(s)`:''}</summary>
     <p style={{fontSize:13,lineHeight:1.6,color:'#52677C'}}>These are reports set aside by “Reload saved data” on this device. Review the date and figures, then restore. Existing reports are never silently replaced.</p>
     {!backups.length && <p>No matching reconciliation backups were found for this owner on this device. Check the phone where the figures were entered.</p>}
-    {backups.map(op=>{const row=op.payload.after;return <article key={op.id} style={{padding:'14px 0',borderTop:'1px solid #DCE3EC'}}>
+    {backups.map(op=>{const row=reconciliationRow(op);return <article key={op.id} style={{padding:'14px 0',borderTop:'1px solid #DCE3EC'}}>
       <strong>{row.date}{row.holiday?' · Closed day':''}</strong>
       <p style={{fontSize:14}}>Cash ₹{row.physical_cash ?? 0} · UPI ₹{row.phonepe_amount ?? 0} · Revenue ₹{row.revenue ?? 0}</p>
       <details><summary>Stock counts and original error</summary><ul>{(Array.isArray(row.stock)?row.stock:[]).map((s,i)=><li key={i}>{s.label || s.key}: {s.actual ?? '—'}</li>)}</ul><p style={{fontSize:12}}>{op.error || 'Saved recovery copy'}</p></details>

@@ -123,7 +123,7 @@ export default function App() {
   const pollRef = useRef(null);
   useEffect(() => {
     if (!session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) { pollRef.current = null; return; }
-    let alive = true, inFlight = false;
+    let alive = true, inFlight = false, fullSyncAt = Date.now();
     const tick = async (force = false) => {
       // Never stack requests: on slow 4G a poll can outlast the 12s interval, and
       // firing another on top of it piles up in-flight calls and hangs the app.
@@ -136,20 +136,43 @@ export default function App() {
         if (!alive || !fresh) return;
         setLastSync(Date.now());
         setState(prev => {
-          const prevById = new Map(prev.orders.map(o => [o.id, o]));
-          const changed = fresh.some(o => { const p = prevById.get(o.id); return !p || p.revision !== o.revision; });
           const ops = pendingOperations();
           return { ...prev,
-            orders: changed && !ops.some(o => o.kind === 'order') ? mergeOrders(prev.orders, fresh) : prev.orders,
+            orders: mergeOrders(prev.orders, fresh, ops),
             inventory: inventory && !ops.some(o => ['order', 'inventory', 'consumables'].includes(o.kind)) ? { ...prev.inventory, ...inventory } : prev.inventory,
           };
         });
+        // Menu, hours, reports and yesterday's unpaid orders must also follow
+        // edits made on another phone, without fetching history every 12 seconds.
+        if (force || Date.now() - fullSyncAt >= 60000) {
+          const identity = await validateSession();
+          if (!alive) return;
+          if (identity && !identity.error && !identity.data?.role) {
+            storage.set('session', null); setSession(null); return;
+          }
+          const cloud = await loadCloudState();
+          if (alive && cloud) {
+            setState(prev => normalize(mergeStates(prev, cloud)));
+            fullSyncAt = Date.now();
+          }
+        }
+      } catch (error) {
+        console.warn('Cart sync failed', error.message);
       } finally { inFlight = false; }
     };
     pollRef.current = () => tick(true);
     const t = setInterval(tick, 12000);
+    const resume = () => { if (!document.hidden) void tick(true); };
+    document.addEventListener('visibilitychange', resume);
+    window.addEventListener('focus', resume);
+    window.addEventListener('online', resume);
     tick();
-    return () => { alive = false; clearInterval(t); pollRef.current = null; };
+    return () => {
+      alive = false; clearInterval(t); pollRef.current = null;
+      document.removeEventListener('visibilitychange', resume);
+      window.removeEventListener('focus', resume);
+      window.removeEventListener('online', resume);
+    };
   }, [session]);
   const refreshNow = async () => { if (pollRef.current) await pollRef.current(); };
   const refreshSavedData = async () => {
@@ -191,18 +214,20 @@ export default function App() {
   // Accepts a plain object of fields to merge, OR a function (prev) => fields
   // when the merge must be computed from the freshest state (avoids stale-closure
   // clobbers under rapid/concurrent updates).
-  const updateState = (updates) => {
+  const updateState = (updates, commands = []) => {
     const prev = stateRef.current;
     const next = { ...prev, ...(typeof updates === 'function' ? updates(prev) : updates) };
-    try { trackChanges(prev, next); }
-    catch { alert('This device could not save the change. Free storage space and retry.'); return; }
+    try { trackChanges(prev, next, commands); }
+    catch { alert('This device could not save the change. Free storage space and retry.'); return false; }
     setState(next);
+    return true;
   };
-  const login = (sess) => { setHydrated(false); storage.set('session', sess); setSession(sess); };
+  const login = (sess) => { setLastSync(null); setHydrated(false); storage.set('session', sess); setSession(sess); };
   const logout = () => {
     if (pendingOperations().length && !confirm('Some changes are waiting to sync. They remain saved on this device. Log out?')) return;
     void revokeSession();
     storage.set('session', null);
+    setLastSync(null);
     setHydrated(false); setSession(null);
   };
 

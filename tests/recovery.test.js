@@ -16,3 +16,7 @@ test('archive changes only the signed-in owner and writes before removing',()=>{
   archiveRejected({operations:[op,{...op,id:'other',actor:'owner:b:'}],actor:op.actor,backup:[],persistBackup:value=>events.push(value),remove:id=>events.push(id)});
   assert.deepEqual(events,[[op],op.id]);
 });
+test('atomic day-close backup retains inventory commands and original operation ID',()=>{
+  const bundled={...op,kind:'batch',payload:{commands:[{kind:'row',payload:op.payload},{kind:'inventory',payload:{cartId:'a',ops:{veg:{df:5,cset:0}}}}]}};
+  assert.deepEqual(reconciliationBackups([bundled],op.actor,'a'),[bundled]);
+});

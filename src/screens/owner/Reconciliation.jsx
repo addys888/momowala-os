@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, brand, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, stockOversell, persistInv, wareLedger } from '../../core';
+import { TODAY, WARE_TYPES, brand, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, stockOversell, wareLedger } from '../../core';
 import { ReconciliationRecovery } from '../../components/ReconciliationRecovery';
 import { useStore } from '../../store';
 import { pendingOperations } from '../../lib/store';
@@ -98,6 +98,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
   };
 
   const closeDay = () => {
+    if (thisClose || !canClose) return;
     const dayClose = {
       id: Date.now(), cartId, date,
       totalOrders: dayOrders.filter(isPaid).length,
@@ -116,13 +117,13 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
       // Return counted leftover momos to the freezer and empty the cart.
       const newInv = { ...inv }; const ops = {};
       stockRows.forEach(r => { const actual = parseInt(r.val) || 0; if (newInv[r.key]) { newInv[r.key] = { freezer: (newInv[r.key].freezer || 0) + actual, cart: 0 }; ops[r.key] = { df: actual, cset: 0 }; } });
-      updateState({ inventory: { ...state.inventory, [cartId]: newInv }, dayCloseLogs: [...state.dayCloseLogs, dayClose] });
-      if (Object.keys(ops).length) persistInv(cartId, ops, { ...state.inventory, [cartId]: newInv });
+      updateState({ inventory: { ...state.inventory, [cartId]: newInv }, dayCloseLogs: [...state.dayCloseLogs, dayClose] }, Object.keys(ops).length ? [{ kind: 'inventory', payload: { cartId, ops, expected: inv } }] : []);
     } else {
       updateState({ dayCloseLogs: [...state.dayCloseLogs, dayClose] });
     }
   };
-  const canClose = physicalCash !== '' && phonePeAmount !== '' && (!isCurrentDay || allStockFilled);
+  const validCount = value => value !== '' && Number.isSafeInteger(Number(value)) && Number(value) >= 0;
+  const canClose = validCount(physicalCash) && validCount(phonePeAmount) && (!isCurrentDay || (allStockFilled && stockRows.every(r => validCount(r.val)))) && wareRows.every(r => (r.val === '' || validCount(r.val)) && r.damaged >= 0);
 
   const dayLabel = (d) => d === businessDate ? 'Today' : d === shiftDate(businessDate, -1) ? 'Yesterday' : istDateLabel(d, { day: 'numeric', month: 'short' });
 

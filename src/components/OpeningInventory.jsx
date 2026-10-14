@@ -8,27 +8,30 @@ const field={width:'100%',minHeight:44,padding:10,border:'1px solid #CCD6E0',bor
 const button={minHeight:44,padding:'10px 16px',border:0,borderRadius:9,background:'#0A2F5C',color:'#fff',fontWeight:700};
 export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady}) {
   const {session,refreshNow}=useStore();
-  const [record,setRecord]=useState(null), [loaded,setLoaded]=useState(false), [error,setError]=useState('');
+  const [savedRecord,setRecord]=useState(null), [loadedFor,setLoadedFor]=useState(''), [error,setError]=useState('');
   const [quantities,setQuantities]=useState({}), [busy,setBusy]=useState(false), [native,setNative]=useState(null);
   const retry=useRef(null), saving=useRef(false);
   const [date,setDate]=useState(()=>openingBusinessDate(cart?.openTime));
+  const loaded = loadedFor === `${cartId}:${date}`;
+  const record = loaded ? savedRecord : null;
   useEffect(()=>{const timer=setInterval(()=>setDate(openingBusinessDate(cart?.openTime)),30000);return()=>clearInterval(timer);},[cart?.openTime]);
   useEffect(()=>{
     let active=true;
+    onReady?.(false);
     const read=async()=>{
       try {
         const {data,error}=await supabase.from('opening_loads').select('*').eq('cart_id',cartId).eq('business_date',date).maybeSingle();
         if(error) throw error;
-        if(active){setRecord(data);setLoaded(true);setError('');onReady?.(!!data);}
+        if(active){setRecord(data);setLoadedFor(`${cartId}:${date}`);setError('');onReady?.(!!data);}
       } catch {if(active)setError('Opening stock status is unavailable. Check your connection and try again.');}
     };
     void read(); const timer=setInterval(read,20000);
     return()=>{active=false;clearInterval(timer);};
   },[cartId,date,onReady]);
   useEffect(()=>{
-    if(!loaded || session?.role!=='staff' || !cart?.openTime) return;
+    if(!loaded || session?.role!=='staff' || !cart?.openTime || (record && record.business_date!==date)) return;
     nativeCommand('configureInventory',{cartId,openTime:cart.openTime,expiresAt:session.expiresAt,completedDate:record?.business_date || ''});
-  },[loaded,record,cartId,cart?.openTime,session?.role,session?.expiresAt]);
+  },[loaded,record,date,cartId,cart?.openTime,session?.role,session?.expiresAt]);
   useEffect(()=>{
     const read=()=>setNative(nativeCommand('inventoryStatus'));
     read();window.addEventListener('focus',read);return()=>window.removeEventListener('focus',read);
@@ -44,7 +47,7 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
     try {
       const {data,error}=await supabase.rpc('app_load_opening_inventory',{p_cart_id:cartId,p_date:date,p_operation_id:retry.current.id,p_quantities:values});
       if(error)throw error;
-      if(data.record){setRecord(data.record);setLoaded(true);onReady?.(true);}
+      if(data.record){setRecord(data.record);setLoadedFor(`${cartId}:${date}`);onReady?.(true);}
       if(data.status!=='ok')setError(data.message);
       await refreshNow();
     }catch(e){setError(e.message || 'Could not save. Retry when connected; stock will not be loaded twice.');}

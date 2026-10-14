@@ -49,8 +49,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
 
   const setMenu = (next) => {
     const menus = { ...state.menus, [cartId]: next };
-    updateState({ menus });
-    pushMenus(menus, cartId); // menu edits push immediately — never via the recurring sync
+    return updateState({ menus });
   };
   const dedupe = (section) => {
     const list = menu[section] || [];
@@ -62,7 +61,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
     const list = menu[section] || [];
     const exists = item.id && list.some(x => x.id === item.id);
     const nextList = exists ? list.map(x => x.id === item.id ? item : x) : [...list, { ...item, id: item.id || newId(section[0]) }];
-    setMenu({ ...menu, [section]: nextList });
+    if (!setMenu({ ...menu, [section]: nextList })) return;
     setEdit(null);
   };
   const removeItem = (section, id) => { if (confirm('Remove this item?')) setMenu({ ...menu, [section]: (menu[section] || []).filter(x => x.id !== id) }); };

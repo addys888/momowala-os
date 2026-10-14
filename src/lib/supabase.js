@@ -16,7 +16,9 @@ export function requestHeaders() {
 }
 const noStoreFetch = (input, init = {}) => {
   const headers = new Headers(init.headers);
-  for (const [key, value] of Object.entries(requestHeaders())) headers.set(key, value);
+  for (const [key, value] of Object.entries(requestHeaders())) {
+    if (!headers.has(key)) headers.set(key, value);
+  }
   return fetch(input, { ...init, headers, cache: 'no-store' });
 };
 export const supabase = url && anonKey

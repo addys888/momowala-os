@@ -1,8 +1,8 @@
 import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, X, Clock, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
-import { storage, nextOrderToken, ackOrder } from '../lib/store';
-import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, persistInv, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
+import { storage } from '../lib/store';
+import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorEnabledFor, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../components/RemindersButton';
 import { printReceipt, printKitchenTicket } from '../lib/escpos';
@@ -31,7 +31,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   useEffect(() => {
     const committed = e => {
       const o = e.detail.order;
-      if (o) setJustPlaced(previous => previous?.order?.id === o.id ? { ...previous, token: o.token, order: { ...previous.order, token: o.token } } : previous);
+      if (o) setJustPlaced(previous => previous?.order?.id === o.id ? { ...previous, token: o.token, order: { ...previous.order, token: o.token, revision: o.revision } } : previous);
     };
     window.addEventListener('mw:committed', committed);
     return () => window.removeEventListener('mw:committed', committed);
@@ -66,10 +66,9 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   // cron stops too. Written immediately (not via the debounced sync) so the
   // phone stops buzzing within a second.
   const acknowledgeOrder = (orderId) => {
+    if (!updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, acknowledgedAt: new Date().toISOString() } : o) })) return;
     stopOrderAlarm();
     setOrderAlert(null);
-    updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, acknowledgedAt: new Date().toISOString() } : o) });
-    ackOrder(orderId);
   };
 
   const cartInfo = state.carts.find(c => c.id === cartId);
@@ -102,7 +101,6 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       const total = cart.reduce((s, item) => s + item.price * item.qty, 0);
       // Shared per-cart/day counter (same RPC the customer QR flow uses) so staff
       // and customer tokens never collide; local count is the offline fallback.
-      const serverNum = await nextOrderToken(cartId, TODAY);
       const token = 'Waiting to sync';
       const order = {
         id: Date.now(),
@@ -125,8 +123,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       const newInv = deductInventory(inv, cart, menu.items);
       // Functional update so the new order appends to the freshest orders list,
       // never a stale closure snapshot.
-      updateState(s => ({ inventory: { ...s.inventory, [cartId]: newInv }, orders: [...s.orders, order] }));
-      const deltas = orderStockDeltas(cart, menu.items);
+      if (!updateState(s => ({ inventory: { ...s.inventory, [cartId]: newInv }, orders: [...s.orders, order] }))) return;
 
       setCart([]);
       setJustPlaced({ token, total, payment, order });
@@ -148,11 +145,10 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     const newItems = [...order.items, ...extraItems];
     const newTotal = newItems.reduce((s, it) => s + it.price * it.qty, 0);
     const newInv = deductInventory(inv, extraItems, menu.items);
-    updateState(s => ({
+    if (!updateState(s => ({
       inventory: { ...s.inventory, [cartId]: newInv },
       orders: s.orders.map(o => o.id === target.id ? { ...o, items: newItems, total: newTotal } : o),
-    }));
-    const deltas = orderStockDeltas(extraItems, menu.items);
+    }))) return;
 
     reset();
   };
@@ -175,10 +171,6 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       setCartInv(newInv, {
         orders: state.orders.map(o => o.id === orderId ? { ...o, payment, split, staff: staffName, settledAt: new Date().toISOString(), stockDeducted: true } : o),
       });
-      if (!alreadyDeducted) {
-        const deltas = orderStockDeltas(order.items, menu.items);
-
-      }
     } finally {
       settlingRef.current.delete(orderId);
       setSettling(s => { const n = new Set(s); n.delete(orderId); return n; });
@@ -210,10 +202,6 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         ? { ...o, payment: 'cancelled', cancelReason: reason, staff: o.staff || staffName, settledAt: new Date().toISOString(), stockDeducted: false }
         : o),
     });
-    if (wasDeducted) {
-      const deltas = orderStockDeltas(order.items, menu.items);
-
-    }
     setCancelTarget(null);
   };
 
@@ -233,8 +221,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       time: istTime(),
       stockKey, label: st?.label || stockKey, qty, reason, staff: staffName,
     };
-    setCartInv(newInv, { wastageLogs: [...state.wastageLogs, log] });
-    persistInv(cartId, { [stockKey]: { dc: -qty } }, { ...state.inventory, [cartId]: newInv });
+    return updateState({ inventory: { ...state.inventory, [cartId]: newInv }, wastageLogs: [...state.wastageLogs, log] }, [{ kind: 'inventory', payload: { cartId, ops: { [stockKey]: { dc: -qty } }, expected: inv } }]);
   };
 
   return (
@@ -331,23 +318,29 @@ function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
   useEffect(() => { if (printer.enabled) return; const t = setTimeout(onClose, 2600); return () => clearTimeout(t); }, [info]);
   // Auto-print the internal kitchen ticket (no prices) once, the moment the order
   // is placed. The customer bill stays a manual tap (button below / My Orders).
-  useEffect(() => { try { if (printer.enabled && printer.autoPrint && info?.order) printKitchenTicket(info.order, cart); } catch { /* never block order flow */ } }, [info]);
+  const printed = React.useRef(new Set());
+  const confirmed = !!info.order?.revision;
+  useEffect(() => {
+    if (!printer.enabled || !printer.autoPrint || !confirmed || printed.current.has(info.order.id)) return;
+    printed.current.add(info.order.id);
+    try { printKitchenTicket(info.order, cart); } catch { /* Reprint remains available in My Orders. */ }
+  }, [info, printer.enabled, printer.autoPrint, confirmed, cart]);
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)', zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: colors.ink, color: colors.primary, borderRadius: 20, padding: '32px 28px', textAlign: 'center', maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)' }}>
         <CheckCircle2 size={56} color={colors.primary} style={{ margin: '0 auto 12px' }} />
-        <div style={{ fontSize: 18, fontWeight: 800 }}>Order registered!</div>
+        <div style={{ fontSize: 18, fontWeight: 800 }}>{confirmed ? 'Order synced' : 'Order saved on this phone'}</div>
         <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div>
         <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : info.payment === 'zomato' ? '🛵 Zomato — weekly payout' : info.payment === 'swiggy' ? '🛵 Swiggy — weekly payout' : info.payment === 'split' ? '🔀 Split — cash + UPI' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
         {/* Single button: prints the customer bill (only when the printer is on and
             NOT already auto-printing) AND always advances. Printing is best-effort —
             any printer/RawBT failure can never block moving to the next order. */}
         <button onClick={() => {
-          try { if (printer.enabled && !printer.autoPrint && info.order) printReceipt(info.order, cart, { footer: printer.footer }); }
+          try { if (printer.enabled && !printer.autoPrint && confirmed && info.order) printReceipt(info.order, cart, { footer: printer.footer }); }
           catch { /* printer glitch must not block the flow */ }
           finally { onClose(); }
         }} style={{ marginTop: 16, background: colors.primary, color: colors.ink, border: 'none', padding: '14px 24px', borderRadius: 12, fontWeight: 800, fontSize: 15, cursor: 'pointer', width: '100%' }}>
-          {printer.enabled && !printer.autoPrint ? '🖨️ Print bill & Next order' : 'Next order →'}
+          {printer.enabled && !printer.autoPrint && confirmed ? '🖨️ Print bill & Next order' : 'Next order →'}
         </button>
       </div>
     </div>
@@ -812,7 +805,7 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
     if (!stockKey || n <= 0) { setErr('Enter how many pieces.'); return; }
     // Can't waste more than is physically on the cart.
     if (n > onCart) { setErr(`Only ${onCart} ${stockTypes.find(s => s.key === stockKey)?.label || ''} pcs on the cart — can't log ${n}.`); return; }
-    onLog(stockKey, n, reason);
+    if (onLog(stockKey, n, reason) === false) return;
     setDone(`Logged ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage.`);
     setQty(''); setTimeout(() => setDone(''), 2500);
   };

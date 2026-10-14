@@ -38,7 +38,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       printer: { enabled: !!printerEnabled, footer: (printerFooter || '').trim(), autoPrint: !!printerAutoPrint },
       vendorLinks: { zomato: (zomatoUrl || '').trim(), swiggy: (swiggyUrl || '').trim() },
     } };
-    updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c), menus: newMenus });
+    if (!updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c), menus: newMenus })) return;
     saveCartProfile(updated); // persist immediately so it survives a refresh
     pushMenus(newMenus, cartId);
     setShowProfile(false);

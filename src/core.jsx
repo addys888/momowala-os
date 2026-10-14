@@ -650,7 +650,7 @@ const CANCEL_REASONS = ['Customer left / no-show', 'Duplicate order', 'Wrong ite
 
 const CANCEL_WINDOW_MS = 5 * 60 * 1000;
 
-const withinCancelWindow = (o) => Date.now() - o.id <= CANCEL_WINDOW_MS;
+const withinCancelWindow = (o) => Date.now() - (o.insertedAt ? Date.parse(o.insertedAt) : o.id) <= CANCEL_WINDOW_MS;
 // A staff-side settled order the staff is still allowed to cancel.
 
 const staffCancellable = (o) => o.source === 'staff-entry' && o.payment !== 'cancelled' && withinCancelWindow(o);

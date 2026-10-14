@@ -1,3 +1,5 @@
+import { operationChanges, reconciliationRow } from './operations.js';
+import { mergeOrderUpdates, readOrderPages } from './orderSync.js';
 import { supabase, requestHeaders } from './supabase';
 import { createOutbox } from './outbox';
 import { archiveRejected, reconciliationBackups } from './recovery';
@@ -48,6 +50,7 @@ const orderToRow = (o) => ({
 });
 const rowToOrder = (r) => ({
   revision: r.revision ?? 0,
+  insertedAt: r.inserted_at,
   id: r.id, cartId: r.cart_id ?? undefined, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
   split: r.split ?? undefined,
@@ -186,28 +189,15 @@ const mergeByNewest = (a = [], b = []) => {
   return [...seen.values()].sort((x, y) => x.id - y.id);
 };
 
-// Orders move one-way through states: pending → paid (cash/upi) → cancelled.
-// When the same id exists on both sides, keep the copy that is FURTHEST along
-// that chain so a later transition (settle, cancel-after-settle) always wins.
-// The old rule ("keep local if non-pending") froze the first settled copy a
-// device ever saw: with the Unpaid flow's multi-step transitions, a later
-// cancel/settle never propagated, localStorage kept the stale copy, and
-// devices drifted apart by a stuck order that no reload could fix.
-// Equal-rank conflicts (e.g. cash vs upi) resolve by the later settledAt.
-export const mergeOrders = (a = [], b = []) => {
-  const seen = new Map(a.map(o => [o.id, o]));
-  for (const o of b) {
-    const previous = seen.get(o.id);
-    if (!previous || (o.revision ?? 0) >= (previous.revision ?? 0)) seen.set(o.id, o);
-  }
-  return [...seen.values()].sort((x, y) => x.id - y.id);
-};
+// Server revisions order committed updates; pending local edits protect only
+// their own order IDs, never unrelated orders arriving from another phone.
+export const mergeOrders = mergeOrderUpdates;
 
 export function mergeStates(localState, cloud) {
   // Cloud reads are already scoped by the server. Never union previous users'
   // private caches into a newly authenticated account.
   const next = { ...localState, ...cloud };
-  for (const op of outbox.list().filter(o => o.actor === currentActor())) {
+  for (const op of pendingOperations()) {
     const { after } = op.payload;
     if (op.kind === 'order' && after) next.orders = unionById(next.orders, [rowToOrder(after)]);
     if (op.kind === 'row') {
@@ -277,13 +267,22 @@ export async function pushInventoryBlob() { throw new Error('Whole inventory wri
 // pick up new customer QR orders in near-real-time (and fire the order alert).
 export async function loadCartOrders(cartId, date) {
   if (!supabase) return null;
-  const { data, error } = await supabase.from('orders').select('*').eq('cart_id', cartId).eq('date', date).order('id');
-  if (error) { console.warn('order poll failed', error.message); return null; }
-  return data.map(rowToOrder);
+  const startedSession = requestHeaders()['x-app-session'];
+  try {
+    const data = await readOrderPages((from, to) => supabase.from('orders').select('*')
+      .eq('cart_id', cartId).eq('date', date).order('id').range(from, to));
+    if (startedSession !== requestHeaders()['x-app-session']) return null;
+    return data.map(rowToOrder);
+  } catch (error) {
+    console.warn('order poll failed', error.message);
+    return null;
+  }
 }
 
 // ─── CLOUD LOAD ───
+let changeEpoch = 0;
 export async function loadCloudState() {
+  const startedEpoch = changeEpoch;
   if (!supabase) return null;
   const startedSession = requestHeaders()['x-app-session'];
   try {
@@ -323,7 +322,7 @@ export async function loadCloudState() {
     // Every scoped read must succeed before replacing cached state.
     const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses, payoutMarks].find((r) => r.error);
     if (failed) throw failed.error;
-    if (requestHeaders()['x-app-session'] !== startedSession) return null;
+    if (requestHeaders()['x-app-session'] !== startedSession || startedEpoch !== changeEpoch) return null;
     storage.set('serverMenus', menus.data?.data || {});
     return {
       orders: orders.data.map((r) => rowToOrder(r)),
@@ -416,15 +415,27 @@ export const outbox = createOutbox({
   actor: currentActor,
   send: op => {
     if (!supabase) throw new Error('Offline');
-    return supabase.rpc('app_mutate', { p_id: op.id, p_kind: op.kind, p_payload: op.payload });
+    const token = requestHeaders()['x-app-session'] || '';
+    const request = op.kind === 'batch'
+      ? supabase.rpc('app_mutate_batch', { p_id: op.id, p_commands: op.payload.commands })
+      : supabase.rpc('app_mutate', { p_id: op.id, p_kind: op.kind, p_payload: op.payload });
+    return request.setHeader('x-app-session', token);
   },
   onResult: (result, op) => {
+    if (op.kind === 'batch') {
+      operationChanges([op]).forEach((change, i) => {
+        if (change.kind === 'menu') storage.set('serverMenus', { ...storage.get('serverMenus', {}), [change.payload.cartId]: change.payload.value });
+        emit('mw:committed', { ...result.results[i], op: change });
+      });
+      return;
+    }
     if (op.kind === 'menu') storage.set('serverMenus', { ...storage.get('serverMenus', {}), [op.payload.cartId]: op.payload.value });
     emit('mw:committed', { ...result, op });
   },
-  onStatus: ops => emit('mw:sync', ops),
+  onStatus: ops => { changeEpoch++; emit('mw:sync', ops); },
 });
-export function trackChanges(before, after) {
+export function trackChanges(before, after, extraCommands = []) {
+  const commands = [];
   if (!storage.get('session', null)?.token) return;
   for (const [key, cfg] of Object.entries(slices)) {
     if (before[key] === after[key]) continue;
@@ -443,23 +454,35 @@ export function trackChanges(before, after) {
         ar = Object.fromEntries(['id', ...changed].map(k => [k, ar[k]]));
         br = Object.fromEntries(['id', ...changed].map(k => [k, br[k]]));
       }
-      outbox.enqueue(key === 'orders' ? 'order' : 'row', { table: cfg.table, before: br, after: ar });
+      commands.push({ kind: key === 'orders' ? 'order' : 'row', payload: { table: cfg.table, before: br, after: ar } });
     }
   }
   if (before.menus !== after.menus) {
     for (const [cartId, menu] of Object.entries(after.menus)) {
       if (JSON.stringify(before.menus[cartId]) !== JSON.stringify(menu)) {
-        const queued = outbox.list().filter(o => o.kind === 'menu' && o.payload.cartId === cartId).at(-1);
-        outbox.enqueue('menu', { cartId, before: queued?.payload.value ?? storage.get('serverMenus', {})[cartId] ?? null, value: menu });
+        const queued = pendingOperations().filter(o => o.kind === 'menu' && o.payload.cartId === cartId).at(-1);
+        commands.push({ kind: 'menu', payload: { cartId, before: queued?.payload.value ?? storage.get('serverMenus', {})[cartId] ?? null, value: menu } });
       }
     }
+  }
+  commands.push(...extraCommands);
+  if (commands.length) {
+    // A single storage write precedes every optimistic state change.
+    const requiresBatch = commands.length > 1 || commands.some(c => ['inventory','consumables'].includes(c.kind) || c.payload.table === 'day_close_logs');
+    if (requiresBatch) outbox.enqueue('batch', { commands });
+    else outbox.enqueue(commands[0].kind, commands[0].payload);
   }
   void outbox.flush();
 }
 export function syncToCloud() { void outbox.flush(); }
 export const validateSession = () => supabase?.rpc('app_identity');
-export const revokeSession = () => supabase?.rpc('app_logout');
-export function pendingOperations() { return outbox.list().filter(o => o.actor === currentActor()); }
+export async function revokeSession() {
+  if (!supabase) return;
+  const token = requestHeaders()['x-app-session'] || '';
+  try { return await supabase.rpc('app_logout').setHeader('x-app-session', token); }
+  catch { /* Local logout still completes offline; server expiry remains enforced. */ }
+}
+export function pendingOperations() { return operationChanges(outbox.list().filter(o => o.actor === currentActor())); }
 export function discardFailedOperations() {
   archiveRejected({ operations: outbox.list(), actor: currentActor(), backup: storage.get('failedOperationsBackup', []),
     persistBackup: value => localStorage.setItem('mw:failedOperationsBackup', JSON.stringify(value)),
@@ -471,7 +494,7 @@ export function savedReconciliations(cartId) {
 export async function restoreReconciliation(id, cartId) {
   const op = savedReconciliations(cartId).find(item => item.id === id);
   if (!op) throw new Error('This backup is not available for the signed-in owner.');
-  const row = op.payload.after;
+  const row = reconciliationRow(op);
   const {data,error} = await supabase.from('day_close_logs').select('id').eq('cart_id',cartId).eq('date',row.date);
   if (error) throw new Error('Could not check the saved report. Connect to the internet and retry.');
   if (data.some(item => item.id !== row.id)) throw new Error('A report for this date already exists on the server. Review it before restoring; nothing was overwritten.');

@@ -39,7 +39,8 @@ function TeamLogin() {
       if (r.status === 'no_password') { setError('Your password has not been set yet. Ask your owner.'); return; }
       if (r.status === 'wrong_password') { setError('Wrong password.'); return; }
       setError(r.message || 'This number is not registered. Ask your cart owner or the admin.');
-    } finally { setBusy(false); }
+    } catch { setError('Could not connect. Check your internet connection and try again.'); }
+    finally { setBusy(false); }
   };
 
   return (
@@ -89,7 +90,8 @@ function AdminLogin() {
       if (r.status === 'not_registered') { setError('This mobile is not the platform admin.'); return; }
       if (r.status === 'rpc_missing') { setError('Recovery is not available yet — the server update is pending.'); return; }
       setError(r.message || 'Could not reset the password. Please try again.');
-    } finally { setBusy(false); }
+    } catch { setError('Could not connect. Check your internet connection and try again.'); }
+    finally { setBusy(false); }
   };
 
 
@@ -109,7 +111,8 @@ function AdminLogin() {
       if (r.status === 'ok') { login({ role: 'admin', token: r.token, expiresAt: r.expiresAt }); nav('/admin'); return; }
       if (r.status === 'needs_setup') { setError('Contact the platform administrator to finish setup.'); return; }
       setError(r.message || 'Wrong password.');
-    } finally { setBusy(false); }
+    } catch { setError('Could not connect. Check your internet connection and try again.'); }
+    finally { setBusy(false); }
   };
 
   if (recover) {

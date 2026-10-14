@@ -44,7 +44,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
   // Edit name/mobile — synced via the recurring staff PATCH (name/mobile columns).
   // The password hash is untouched, so they keep logging in (with the new mobile).
   const saveStaffEdit = (id, name, mobile) => {
-    updateState({ staff: state.staff.map(s => s.id === id ? { ...s, name: name.trim(), mobile } : s) });
+    if (!updateState({ staff: state.staff.map(s => s.id === id ? { ...s, name: name.trim(), mobile } : s) })) return;
     setEditStaff(null);
   };
   const removeStaff = (id) => { if (confirm('Remove this staff member and their attendance records? Disable login instead if you want to keep their history.')) updateState({ staff: state.staff.filter(s => s.id !== id) }); };

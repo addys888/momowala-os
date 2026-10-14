@@ -277,12 +277,12 @@ function Reports({ state, updateState, cartId }) {
 
   const addExpense = (category, amount, note, date = TODAY, fund = 'cart') => {
     const e = { id: Date.now(), cartId, date: date || TODAY, category, amount, note, fund };
-    updateState({ expenses: [...(state.expenses || []), e] });
+    if (!updateState({ expenses: [...(state.expenses || []), e] })) return;
     setShowExpense(false);
   };
   const removeExpense = (id) => { updateState({ expenses: state.expenses.filter(e => e.id !== id) }); setDelExpense(null); };
   const updateExpense = (id, category, amount, note, date = TODAY, fund = 'cart') => {
-    updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY, fund } : e) });
+    if (!updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY, fund } : e) })) return;
     setEditExpenseItem(null);
   };
 
