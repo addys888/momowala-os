@@ -2,7 +2,7 @@ import { backendHeaders, cronAuthorized } from '../../server/auth.js';
 // Reminder cron. Runs every ~15 min (see vercel.json crons). For each active
 // cart it checks IST time against openTime/closeTime and sends a web-push to the
 // cart's subscribers (owner + on-duty staff):
-//   • 1 hour BEFORE opening  → "load stock onto the cart"
+// Opening reminders are handled separately by opening-alerts.js.
 //   • AT closing time        → "reconcile the day"
 // A reminder_sends row (unique cart_id+date+kind) makes each send once-per-day.
 
@@ -58,7 +58,7 @@ export default async function handler(req, res) {
   const due = [];
   for (const c of carts || []) {
     if (c.active === false) continue;
-    if (inSlot(parseMin(c.open_time) != null ? parseMin(c.open_time) - 60 : null)) due.push({ cart: c, kind: 'load' });
+    // Opening alerts are handled by the manager-scoped durable opening-alerts job.
     if (inSlot(parseMin(c.close_time))) due.push({ cart: c, kind: 'reconcile' });
   }
 

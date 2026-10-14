@@ -137,6 +137,7 @@ test('staff attendance rejects invalid dates, durations and employment ranges',a
 
 test('opening load is scoped, atomic, idempotent and cannot overdraft freezer', async () => {
   await sql("delete from opening_loads where cart_id in ('test-a','test-b'); update carts set open_time='16:00' where id='test-a'; update inventory set data=jsonb_set(data,'{test-a,veg}','{\"freezer\":100,\"cart\":0}') where id=1");
+  await request("select app_assign_opening_manager('test-a',101,coalesce((select revision from cart_opening_managers where cart_id='test-a'),0))",owner);
   const id=crypto.randomUUID();
   const load=(qty,token=staff,operation=id)=>request(`select app_load_opening_inventory('test-a',(now() at time zone 'Asia/Kolkata')::date,'${operation}',${quote(qty)})`,token);
   await assert.rejects(load({veg:20},other),/Not authorised/);
@@ -233,4 +234,75 @@ test('staff wastage remains atomic and cannot use a batch to change another cart
   commands[0].payload.after.id=92906;commands[1].payload.cartId='test-b';
   await assert.rejects(batch(commands,staff),/Not authorised/);
   assert.equal(await sql('select count(*) from wastage_logs where id=92906'),'0');
+});
+
+test('opening manager assignment is owner-only, scoped and rejects stale replacement', async()=>{
+  await sql("delete from cart_opening_managers where cart_id='test-a'; delete from opening_manager_audit where cart_id='test-a'; update staff set active=true where id=101");
+  const assign=(id,revision,token=owner)=>request(`select app_assign_opening_manager('test-a',${id ?? 'null'},${revision})`,token).then(JSON.parse);
+  await assert.rejects(assign(101,0,staff),/Not authorised/);
+  await assert.rejects(assign(101,0,other),/Not authorised/);
+  await assert.rejects(assign(99999,0),/active staff/);
+  assert.equal((await assign(101,0)).status,'ok');
+  assert.equal((await assign(null,0)).status,'conflict');
+  assert.equal(await request('select count(*) from opening_manager_audit',staff),'0');
+  assert.equal(await request("select count(*) from opening_manager_audit where cart_id='test-a'",owner),'1');
+  await assert.rejects(request("update cart_opening_managers set staff_id=null",owner),/permission denied/);
+  const status=()=>request("select app_opening_status('test-a',current_date)",staff).then(JSON.parse);
+  assert.equal((await status()).canLoad,true);
+  await assign(null,1);
+  assert.equal((await status()).canLoad,false);
+  await assert.rejects(request(`select app_load_opening_inventory('test-a',(now() at time zone 'Asia/Kolkata')::date,'${crypto.randomUUID()}','{"veg":1}')`,staff),/assigned active manager/);
+  await assign(101,2);
+});
+
+test('owner confirmations are atomic, deduplicated, isolated and persistent', async()=>{
+  await sql("delete from opening_loads where cart_id='test-a'; delete from opening_alerts where cart_id in ('test-a','test-b'); update inventory set data=jsonb_set(data,'{test-a,veg}','{\"freezer\":100,\"cart\":0}') where id=1");
+  const id=crypto.randomUUID();
+  const call=token=>request(`select app_load_opening_inventory('test-a',(now() at time zone 'Asia/Kolkata')::date,'${id}','{"veg":30}')`,token);
+  await assert.rejects(call(owner),/only the assigned manager/);
+  await call(staff);await call(staff);
+  assert.equal(await request("select count(*) from opening_alerts where kind='completed'",owner),'1');
+  assert.equal(await request('select count(*) from opening_alerts',staff),'0');
+  assert.equal(await request('select count(*) from opening_alerts',other),'0');
+  const alert=await sql("select id from opening_alerts where cart_id='test-a' and kind='completed'");
+  await request(`select app_read_opening_alert(${alert})`,other);
+  assert.equal(await sql(`select read_at is null from opening_alerts where id=${alert}`),'t');
+  await request(`select app_read_opening_alert(${alert})`,owner);
+  assert.equal(await sql(`select read_at is not null from opening_alerts where id=${alert}`),'t');
+});
+
+test('missed alerts occur at opening, survive late loads and midnight reminders use next business date', async()=>{
+  await sql("delete from opening_alerts where cart_id='test-a'; delete from opening_loads where cart_id='test-a'; update carts set open_time='15:00' where id='test-a'");
+  const collect=stamp=>sql(`select app_private.collect_opening_alerts('${stamp}+05:30')`);
+  await collect('2026-10-20 14:29:00');
+  assert.equal(await sql("select count(*) from opening_alerts where cart_id='test-a'"),'0');
+  await collect('2026-10-20 14:30:00');
+  assert.equal(await sql("select count(*) from opening_alerts where cart_id='test-a' and kind='manager_reminder'"),'1');
+  await collect('2026-10-20 14:59:59');
+  assert.equal(await sql("select count(*) from opening_alerts where cart_id='test-a' and kind='missed'"),'0');
+  await Promise.all([collect('2026-10-20 15:00:00'),collect('2026-10-20 15:01:00')]);
+  assert.equal(await sql("select count(*) from opening_alerts where cart_id='test-a' and kind='missed'"),'1');
+  await sql("insert into opening_loads(cart_id,business_date,operation_id,quantities,actor_role,actor_name,created_at) values('test-a','2026-10-21',gen_random_uuid(),'{\"veg\":10}','staff','Test Staff','2026-10-21 15:01:00+05:30')");
+  await collect('2026-10-21 15:02:00');
+  assert.equal(await sql("select count(*) from opening_alerts where cart_id='test-a' and business_date='2026-10-21' and kind='missed'"),'1');
+  await sql("update carts set open_time='00:15' where id='test-a'");
+  await collect('2026-10-22 23:45:00');
+  assert.equal(await sql("select count(*) from opening_alerts where cart_id='test-a' and business_date='2026-10-23' and kind='manager_reminder'"),'1');
+  await sql("update carts set open_time='16:00' where id='test-a'; delete from opening_loads where cart_id='test-a'");
+});
+
+test('notification leases prevent concurrent sends and retry only failed devices', async()=>{
+  await sql("delete from opening_alerts; delete from push_subscriptions; insert into app_private.backend_config values(1,encode(digest('local-notification-secret','sha256'),'hex')) on conflict(id) do update set secret_hash=excluded.secret_hash; insert into opening_alerts(cart_id,business_date,kind,title,body) values('test-a',current_date,'completed','Loaded','Manager loaded 30 pieces'); insert into push_subscriptions(endpoint,cart_id,role,p256dh,auth) values('https://fcm.googleapis.com/test1','test-a','owner','key','auth'),('https://fcm.googleapis.com/test2','test-a','owner','key','auth'),('https://fcm.googleapis.com/other','test-b','owner','key','auth')");
+  const backend=q=>sql(`begin; set local role anon; set local request.headers='{"x-backend-secret":"local-notification-secret"}'; ${q}; commit;`).then(out=>out.split('\n').filter(x=>!['BEGIN','SET','COMMIT',''].includes(x)).at(-1));
+  await assert.rejects(request('select app_claim_opening_notifications()',owner),/Not authorised/);
+  await assert.rejects(request("select app_private.collect_opening_alerts(now())",owner),/permission denied/);
+  const claimed=await Promise.all([backend('select app_claim_opening_notifications()'),backend('select app_claim_opening_notifications()')]);
+  const deliveries=claimed.flatMap(JSON.parse).filter(d=>d.title==='Loaded');
+  assert.equal(deliveries.length,2);assert.equal(new Set(deliveries.map(d=>d.endpoint)).size,2);
+  const d=deliveries[0];
+  await backend(`select app_finish_opening_notification(${d.id},'${d.endpoint}','${d.lease}',true,false)`);
+  await sql('update app_private.opening_deliveries set retry_at=now()');
+  const retry=JSON.parse(await backend('select app_claim_opening_notifications()')).filter(d=>d.title==='Loaded');
+  assert.equal(retry.length,1);assert.notEqual(retry[0].endpoint,d.endpoint);
+  await sql('delete from push_subscriptions');
 });

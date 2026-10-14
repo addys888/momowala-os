@@ -1,3 +1,4 @@
+import { OpeningAlerts } from '../../components/OpeningAlerts';
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
 import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
@@ -111,6 +112,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         {/* Nags until this device has push on — otherwise the owner's phone stays
             silent for incoming customer orders and daily reminders. */}
         <OrderAlertsPrompt cartId={cartId} role="owner" />
+        {tab === 'dashboard' && <OpeningAlerts key={cartId} cartId={cartId} onOpenStock={()=>setTab('inventory')} />}
         {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onSeeUncollected={goOrders} onResetWare={resetWare} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} initialDate={ordersDate} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}

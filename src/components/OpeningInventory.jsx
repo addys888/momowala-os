@@ -11,6 +11,7 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
   const [savedRecord,setRecord]=useState(null), [loadedFor,setLoadedFor]=useState(''), [error,setError]=useState('');
   const [quantities,setQuantities]=useState({}), [busy,setBusy]=useState(false), [native,setNative]=useState(null);
   const retry=useRef(null), saving=useRef(false);
+  const [access,setAccess]=useState(null),[review,setReview]=useState(false);
   const [date,setDate]=useState(()=>openingBusinessDate(cart?.openTime));
   const loaded = loadedFor === `${cartId}:${date}`;
   const record = loaded ? savedRecord : null;
@@ -20,24 +21,29 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
     onReady?.(false);
     const read=async()=>{
       try {
-        const {data,error}=await supabase.from('opening_loads').select('*').eq('cart_id',cartId).eq('business_date',date).maybeSingle();
+        const {data,error}=await supabase.rpc('app_opening_status',{p_cart_id:cartId,p_date:date});
         if(error) throw error;
-        if(active){setRecord(data);setLoadedFor(`${cartId}:${date}`);setError('');onReady?.(!!data);}
+        if(active){
+          if(session?.role==='staff' && !data.canLoad) {
+            const current=nativeCommand('inventoryStatus');
+            if(current?.enabled && current.cartId===cartId)setNative(nativeCommand('clearInventory'));
+          }
+          setAccess(data);setRecord(data.record);setLoadedFor(`${cartId}:${date}`);setError('');onReady?.(!!data.record);}
       } catch {if(active)setError('Opening stock status is unavailable. Check your connection and try again.');}
     };
     void read(); const timer=setInterval(read,20000);
     return()=>{active=false;clearInterval(timer);};
-  },[cartId,date,onReady]);
+  },[cartId,date,onReady,session?.role]);
   useEffect(()=>{
-    if(!loaded || session?.role!=='staff' || !cart?.openTime || (record && record.business_date!==date)) return;
+    if(!loaded || !access?.canLoad || session?.role!=='staff' || !cart?.openTime || (record && record.business_date!==date)) return;
     nativeCommand('configureInventory',{cartId,openTime:cart.openTime,expiresAt:session.expiresAt,completedDate:record?.business_date || ''});
-  },[loaded,record,date,cartId,cart?.openTime,session?.role,session?.expiresAt]);
+  },[loaded,access?.canLoad,record,date,cartId,cart?.openTime,session?.role,session?.expiresAt]);
   useEffect(()=>{
     const read=()=>setNative(nativeCommand('inventoryStatus'));
     read();window.addEventListener('focus',read);return()=>window.removeEventListener('focus',read);
   },[]);
   const save=async()=>{
-    if(saving.current)return;
+    if(saving.current || !access?.canLoad)return;
     const values=Object.fromEntries(stockTypes.map(s=>[s.key,Number(quantities[s.key] || 0)]).filter(([,n])=>n!==0));
     if(!Object.keys(values).length || Object.values(values).some(n=>!Number.isSafeInteger(n)||n<0)){setError('Enter positive whole-piece quantities for the stock being loaded.');return;}
     const encoded=date+JSON.stringify(values);
@@ -55,17 +61,26 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
   };
   return <section style={{background:'#fff',border:'1px solid #DAE3EC',borderRadius:16,padding:18,marginBottom:16}} aria-label="Opening inventory">
     <div style={{fontSize:10,letterSpacing:1.2,fontWeight:800,color:'#617184'}}>DAILY READINESS · {date}</div>
-    <h2 style={{fontSize:20,margin:'8px 0'}}>{record?'Inventory ready':'Load opening stock'}</h2>
-    {!record && <p style={{fontSize:13,lineHeight:1.6,color:'#617184',marginBottom:14}}>Transfer today’s pieces from the freezer or kitchen stock to this cart. Saved quantities stop this phone’s opening reminder.</p>}
+    <h2 style={{fontSize:20,margin:'8px 0'}}>{record?'Inventory ready':access?.canLoad?'Prepare opening stock':'Opening stock status'}</h2>
+    {!record && <p style={{fontSize:13,lineHeight:1.6,color:'#617184',marginBottom:14}}>Your manager transfers today’s pieces from the freezer or kitchen to this cart. One confirmed submission per day; later top-ups use the owner’s Stock controls.</p>}
+    <p style={{fontSize:13,lineHeight:1.6,color:'#617184',margin:'10px 0'}}>Manager: <strong>{access?.managerActive ? access.managerName : 'Not assigned or inactive'}</strong> · Opening {cart?.openTime || 'not set'} IST</p>
+    {!record && loaded && !access?.canLoad && <p style={{fontSize:13,marginBottom:12}}>Only the assigned manager can submit opening stock. {session?.role==='owner'?'Assign or replace the manager in Staff → Registry & activity.':'Ask your owner to check the manager assignment.'}</p>}
     {error && <p role="alert" style={{color:'#B42318',marginBottom:12}}>{error}</p>}
-    {record ? <details><summary style={{color:'#087A65',cursor:'pointer'}}>Opening stock saved · View quantities</summary><p style={{fontSize:13,marginTop:8}}>{Object.entries(record.quantities).map(([key,n])=>`${stockTypes.find(s=>s.key===key)?.label || key}: ${n}`).join(' · ')}</p><p style={{fontSize:12,marginTop:8,color:'#617184'}}>For later top-ups or corrections, use the owner’s Stock controls.</p></details> : <>
+    {record ? <details><summary style={{color:'#087A65',cursor:'pointer'}}>Opening stock saved by {record.actor_name || 'manager'} · View quantities</summary><p style={{fontSize:13,marginTop:8}}>{Object.entries(record.quantities).map(([key,n])=>`${stockTypes.find(s=>s.key===key)?.label || key}: ${n}`).join(' · ')}</p><p style={{fontSize:12,marginTop:8,color:'#617184'}}>For later top-ups or corrections, use the owner’s Stock controls.</p></details> : <>
       {!loaded && <p role="status">Checking today’s saved inventory…</p>}
-      <fieldset disabled={busy || !loaded} style={{border:0,padding:0,margin:0,minWidth:0}}>
+      <fieldset hidden={loaded && !access?.canLoad} disabled={busy || !loaded || !access?.canLoad} style={{border:0,padding:0,margin:0,minWidth:0}}>
         {stockTypes.map(s=><label key={s.key} style={{display:'block',marginBottom:12,fontSize:13,fontWeight:650}}>{s.label} <span style={{fontWeight:400,color:'#617184'}}>· freezer: {inventory[s.key]?.freezer || 0}</span><input aria-label={`Load ${s.label}`} type="number" inputMode="numeric" min="0" step="1" style={{...field,marginTop:5}} value={quantities[s.key] ?? ''} placeholder="Pieces to load" onChange={e=>setQuantities({...quantities,[s.key]:e.target.value})}/></label>)}
-        <button style={button} disabled={!stockTypes.length} onClick={save}>{busy?'Saving stock…':'Save opening stock'}</button>
+        <button style={button} disabled={!stockTypes.length} onClick={()=>{setReview(true);setError('');}}>Review opening stock</button>
       </fieldset>
+      {review && access?.canLoad && <div role="dialog" aria-label="Confirm opening stock" style={{background:'#F1F5F9',borderRadius:12,padding:16,marginTop:16}}>
+        <strong>Review before confirming</strong>
+        <p style={{fontSize:13,lineHeight:1.6,margin:'10px 0'}}>{stockTypes.filter(s=>Number(quantities[s.key])>0).map(s=>`${s.label}: ${quantities[s.key]}`).join(' · ') || 'No quantities entered.'}</p>
+        <p style={{fontSize:12,lineHeight:1.6,marginBottom:12}}>This transfers freezer stock once and creates the owner’s loading confirmation. An internet connection is required.</p>
+        <button style={button} disabled={busy} onClick={save}>{busy?'Confirming…':'Confirm daily load'}</button>
+        <button style={{...button,marginLeft:8,background:'#fff',color:'#0A2F5C'}} disabled={busy} onClick={()=>setReview(false)}>Edit</button>
+      </div>}
     </>}
-    {__ANDROID_APP__ && session?.role==='staff' && <div style={{borderTop:'1px solid #E3E9EF',marginTop:18,paddingTop:14,fontSize:13}}>
+    {__ANDROID_APP__ && access?.canLoad && session?.role==='staff' && <div style={{borderTop:'1px solid #E3E9EF',marginTop:18,paddingTop:14,fontSize:13}}>
       <strong>Opening alarm · 30 minutes before {cart?.openTime || 'opening'}</strong>
       <p style={{lineHeight:1.6,margin:'7px 0 10px',color:'#617184'}}>Rings and vibrates until opening stock is saved. Android sound, notification and battery settings still apply. Alarms continue after logout until you unassign this phone. Sign in to save inventory. Force-stopping the app prevents reminders. Changes from another phone are checked while this screen is open.</p>
       {!native?.enabled && <button style={button} disabled={!cart?.openTime || !loaded} onClick={()=>{ nativeCommand('configureInventory',{cartId,openTime:cart.openTime,expiresAt:session.expiresAt,completedDate:record?.business_date || ''}); setNative(nativeCommand('enableInventory')); }}>Enable on this phone</button>}

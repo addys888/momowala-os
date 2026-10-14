@@ -1,3 +1,4 @@
+import { OpeningManager } from '../../components/OpeningManager';
 import { StaffAttendance } from './StaffAttendance';
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
@@ -101,6 +102,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
         {[['registry','Registry & activity'],['attendance','Attendance & leave']].map(([id,label]) => <button key={id} role="tab" aria-selected={subtab === id} onClick={() => setSubtab(id)} style={{ flex: 1, padding: 12, minHeight: 48, border: `1px solid ${colors.border}`, background: subtab === id ? brand.navy : '#fff', color: subtab === id ? '#fff' : brand.navy, fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}
       </div>
       {subtab === 'attendance' ? <StaffAttendance key={cartId} staff={staff} cartId={cartId} /> : <>
+      <OpeningManager key={cartId} cartId={cartId} cart={cart} staff={staff} />
       {/* Today summary across the cart */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
         <MetricCard label="Orders today" value={cartStats.paid} icon={<FileText size={16}/>} color={colors.green} />

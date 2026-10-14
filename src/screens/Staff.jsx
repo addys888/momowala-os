@@ -2,7 +2,7 @@ import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, X, Clock, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
 import { storage } from '../lib/store';
-import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorEnabledFor, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
+import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../components/RemindersButton';
 import { printReceipt, printKitchenTicket } from '../lib/escpos';

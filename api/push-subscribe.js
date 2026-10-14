@@ -22,6 +22,7 @@ export default async function handler(req, res) {
     endpoint: subscription.endpoint,
     cart_id: cartId,
     role: user.role === 'staff' ? 'staff' : 'owner',
+    staff_id: user.role === 'staff' ? user.staffId : null,
     p256dh: subscription.keys?.p256dh || null,
     auth: subscription.keys?.auth || null,
     updated_at: new Date().toISOString(),
