@@ -14,7 +14,8 @@ public class PrintRoutingTest extends Instrumentation {
         Intent sent;
         @Override public void startActivity(Intent intent) { sent = intent; }
     }
-    @Override public void onCreate(Bundle args) { super.onCreate(args); start(); }
+    private boolean liveFcm,waitFcm;
+    @Override public void onCreate(Bundle args) { liveFcm=args!=null && "true".equals(args.getString("liveFcm")); waitFcm=args!=null && "true".equals(args.getString("waitFcm")); super.onCreate(args); start(); }
     @Override public void onStart() {
         android.os.Looper.prepare();
         Bundle result = new Bundle();
@@ -43,6 +44,28 @@ public class PrintRoutingTest extends Instrumentation {
             testPartnerAlerts();
             testUpdates();
             testPartnerIcon();
+            if(liveFcm) {
+                org.json.JSONObject status=PartnerMessagingService.status(getTargetContext());
+                check(status.getBoolean("configured"),"Firebase config missing");
+                long deadline=android.os.SystemClock.elapsedRealtime()+45000;
+                while(getTargetContext().getSharedPreferences("fcm",0).getString("token","").isEmpty() && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(500);
+                check(!getTargetContext().getSharedPreferences("fcm",0).getString("token","").isEmpty(),"FCM token unavailable");
+                PartnerAlerts.bind(getTargetContext(),new org.json.JSONObject().put("binding","aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"));
+                if(waitFcm) {
+                    Bundle ready=new Bundle();ready.putString("stream","FCM test device ready\n");sendStatus(0,ready);
+                    deadline=android.os.SystemClock.elapsedRealtime()+45000;
+                    android.service.notification.StatusBarNotification received=null;
+                    while(received==null && android.os.SystemClock.elapsedRealtime()<deadline) {
+                        for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(getTargetContext()).getActiveNotifications())if("partner:live-firebase-verification".equals(n.getTag()))received=n;
+                        if(received==null)Thread.sleep(500);
+                    }
+                    check(received!=null,"Live FCM message did not reach device");
+                    received.getNotification().actions[0].actionIntent.send();
+                    Thread.sleep(500);
+                    check(PartnerAlerts.prefs(getTargetContext()).contains("ack:live-firebase-verification"),"Live FCM alert did not acknowledge");
+                    Bundle confirmed=new Bundle();confirmed.putString("stream","Live FCM received and acknowledged\n");sendStatus(0,confirmed);
+                }
+            }
             result.putString("stream", "PASS: update manifest and tampered APK rejection; real scheduled notification, completion cancellation, logout-independent assignment;  RawBT intent, byte preservation, subframe guard, blocked schemes, HTTPS routing\n");
             finish(Activity.RESULT_OK, result);
         } catch (Throwable error) {
@@ -141,7 +164,14 @@ public class PrintRoutingTest extends Instrumentation {
         android.graphics.drawable.Drawable icon=getTargetContext().getPackageManager().getApplicationIcon(getTargetContext().getPackageName());
         android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(216,216,android.graphics.Bitmap.Config.ARGB_8888);
         icon.setBounds(0,0,216,216);icon.draw(new android.graphics.Canvas(bitmap));
-        check(bitmap.getPixel(4,4)==android.graphics.Color.rgb(217,35,68),"Partner icon background must be red");
+        // Adaptive launcher masks make corner pixels transparent on newer Android.
+        android.graphics.Bitmap background=bitmap;
+        if(android.os.Build.VERSION.SDK_INT>=26 && icon instanceof android.graphics.drawable.AdaptiveIconDrawable) {
+            background=android.graphics.Bitmap.createBitmap(216,216,android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.drawable.Drawable layer=((android.graphics.drawable.AdaptiveIconDrawable)icon).getBackground();
+            layer.setBounds(0,0,216,216);layer.draw(new android.graphics.Canvas(background));
+        }
+        check(background.getPixel(4,4)==android.graphics.Color.rgb(217,35,68),"Partner icon background must be red");
         java.io.File output=new java.io.File(getTargetContext().getExternalFilesDir(null),"partner-icon.png");
         try(java.io.FileOutputStream stream=new java.io.FileOutputStream(output)){bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,stream);}
         check("Cartlyft Partner".contentEquals(getTargetContext().getApplicationInfo().loadLabel(getTargetContext().getPackageManager())),"Partner app label changed unexpectedly");

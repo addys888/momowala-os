@@ -38,3 +38,5 @@ Release requires explicit APK approval under AGENTS.md. Continuing development d
 ## Native implementation follow-up
 
 The native FCM receiver, sender, registration, acknowledgment and completion-control code have now been staged. See [native-notifications.md](native-notifications.md) for current verification and the unresolved Firebase account blocker; the earlier native gap above describes the state before this follow-up. Nothing has been activated in production.
+
+Firebase project setup and real Android 15 background FCM delivery are now verified; see native-notifications.md for the resolved cloud blocker, remaining physical-device tests and rollout requirements.

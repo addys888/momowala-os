@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "508871710803",
+    "project_id": "cartlyft-momowala",
+    "storage_bucket": "cartlyft-momowala.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:508871710803:android:bb02fe4e4714115e820ea6",
+        "android_client_info": {
+          "package_name": "com.cartlyft.momowala"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAh1ZWXrc_AUbGx2HjDWroskbKLSWSAS1E"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
