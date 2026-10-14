@@ -44,13 +44,22 @@ public final class InventoryReminders {
         if(OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis())).equals(done)) manager(c).cancel(ID);
         schedule(c,false);
     }
+    static void acknowledge(Context c) {
+        String time=prefs(c).getString("openTime","");if(time.isEmpty())return;
+        prefs(c).edit().putString("acknowledgedDate",OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis()))).apply();
+        manager(c).cancel(ID);schedule(c,false);
+    }
+    static String quietDate(Context c) {
+        String done=prefs(c).getString("completedDate",""),ack=prefs(c).getString("acknowledgedDate","");
+        return done.compareTo(ack)>=0?done:ack;
+    }
     static void clear(Context c) { alarms(c).cancel(intent(c)); manager(c).cancel(ID); prefs(c).edit().clear().apply(); }
     static void schedule(Context c,boolean repeat) {
         alarms(c).cancel(intent(c));
         if(!prefs(c).getBoolean("enabled",false)) { manager(c).cancel(ID); return; }
         String time=prefs(c).getString("openTime",""); if(time.isEmpty())return;
         long now=System.currentTimeMillis();
-        long next=OpeningSchedule.next(time,now,prefs(c).getString("completedDate",""),repeat);
+        long next=OpeningSchedule.next(time,now,quietDate(c),repeat);
         try {
             if(Build.VERSION.SDK_INT<31 || alarms(c).canScheduleExactAlarms()) alarms(c).setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,next,intent(c));
             else alarms(c).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,next,intent(c));
@@ -61,7 +70,7 @@ public final class InventoryReminders {
         if(!prefs(c).getBoolean("enabled",false)) { clear(c); return; }
         String time=prefs(c).getString("openTime",""); if(time.isEmpty()) return;
         long open=OpeningSchedule.businessOpening(time,now);
-        if(now<open-30*60_000L || OpeningSchedule.date(open).equals(prefs(c).getString("completedDate",""))) { schedule(c,false); return; }
+        if(now<open-30*60_000L || OpeningSchedule.date(open).equals(quietDate(c))) { schedule(c,false); return; }
         channel(c);
         Intent launch=new Intent(c,MainActivity.class).putExtra("openingInventory",true).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent content=PendingIntent.getActivity(c,ID,launch,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
@@ -71,6 +80,8 @@ public final class InventoryReminders {
          .setCategory(Notification.CATEGORY_REMINDER).setVisibility(Notification.VISIBILITY_PRIVATE)
          .setPriority(Notification.PRIORITY_HIGH).setContentIntent(content).setOngoing(true).setAutoCancel(false);
         if(Build.VERSION.SDK_INT<26) b.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()).setVibrate(new long[]{0,700,300,700});
+        PendingIntent ack=PendingIntent.getBroadcast(c,ID,new Intent(c,PartnerAlertReceiver.class).setAction("cartlyft.ACK_OPENING"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",ack).build());
         Notification n=b.build(); n.flags|=Notification.FLAG_INSISTENT;
         try { manager(c).notify(ID,n); } catch(SecurityException denied) { /* Permission status is visible in the app. */ }
         schedule(c,true);

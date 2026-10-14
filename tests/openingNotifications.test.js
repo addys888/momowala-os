@@ -41,3 +41,17 @@ test('expired push subscriptions are retired without retry storms',async()=>{
  const calls=mock([fixture]);webpush.sendNotification=async()=>{throw Object.assign(new Error('gone'),{statusCode:410});};
  await deliverOpeningAlerts();assert.equal(calls.at(-1).body.p_dead,true);
 });
+
+test('native registration uses server identity, validates token and stores the binding',async()=>{
+ const {default: subscribe}=await import('../api/push-subscribe.js');
+ const writes=[];
+ global.fetch=async(url)=>url.endsWith('/app_identity')?{ok:true,json:async()=>({role:'staff',cartId:'test-a',staffId:101})}:{ok:true,json:async()=>null};
+ let r=res();await subscribe({method:'POST',headers:{'x-app-session':'11111111-1111-4111-8111-111111111111'},body:{cartId:'test-a',native:true,subscription:{endpoint:'fcm:bad',binding:crypto.randomUUID()}}},r);
+ assert.equal(r.code,400);
+ global.fetch=async(url,options)=>{
+  if(url.endsWith('/app_identity'))return {ok:true,json:async()=>({role:'staff',cartId:'test-a',staffId:101})};
+  writes.push(JSON.parse(options.body));return {ok:true};
+ };
+ r=res();await subscribe({method:'POST',headers:{'x-app-session':'11111111-1111-4111-8111-111111111111'},body:{cartId:'test-a',role:'owner',native:true,subscription:{endpoint:'fcm:'+'a'.repeat(40),binding:crypto.randomUUID()}}},r);
+ assert.equal(r.code,200);assert.equal(writes[0].role,'staff');assert.equal(writes[0].staff_id,101);assert.equal(writes[0].auth,null);
+});

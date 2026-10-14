@@ -1,3 +1,4 @@
+import { NativeNotifications } from './NativeNotifications';
 import React, { useEffect, useState } from 'react';
 import { pushSupported, enableReminders, reminderStatus, ensureSubscribed } from '../lib/push';
 import { colors } from '../core';
@@ -27,6 +28,7 @@ export function OrderAlertsPrompt({ cartId, role = 'owner' }) {
     return () => { alive = false; };
   }, [cartId, role]);
 
+  if (__ANDROID_APP__) return null;
   if (status === 'loading' || status === 'on' || status === 'unsupported' || !pushSupported()) return null;
   if (snoozed) return null;
 
@@ -90,6 +92,7 @@ export function RemindersButton({ cartId, role = 'owner' }) {
     return () => { alive = false; };
   }, [cartId, role]);
 
+  if (__ANDROID_APP__) return <NativeNotifications cartId={cartId} role={role} />;
   if (status === 'loading' || status === 'unsupported' || !pushSupported()) return null;
 
   const on = status === 'on';

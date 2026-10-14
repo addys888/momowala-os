@@ -1,3 +1,4 @@
+import { nativeCommand } from '../lib/nativeApp';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 
@@ -17,12 +18,13 @@ export function OpeningAlerts({ cartId, onOpenStock }) {
   const markRead=async id=>{
     const {error}=await supabase.rpc('app_read_opening_alert',{p_id:id});
     if(error){setError('Could not mark this alert as read.');return;}
+    nativeCommand('acknowledgePartner',{key:`opening-${id}`});
     setAlerts(items=>items.map(a=>a.id===id?{...a,read_at:new Date().toISOString()}:a));
   };
   return <section aria-label="Opening alerts" style={{background:'#fff',border:'1px solid #DCE4EC',borderRadius:16,padding:18,marginBottom:20}}>
     <h3 style={{fontSize:17,margin:'0 0 8px'}}>Opening alerts {alerts.some(a=>!a.read_at)&&<span style={{fontSize:12,color:'#B42318'}}>· {alerts.filter(a=>!a.read_at).length} unread</span>}</h3>
     <p style={{fontSize:12,color:'#617184',lineHeight:1.6}}>Daily loading confirmations and missed-opening alerts are saved here across your phones.</p>
-    {__ANDROID_APP__ && <p style={{fontSize:12,color:'#986400',marginTop:8}}>Background owner push is not connected in this build. Check this inbox while the app is open.</p>}
+    {__ANDROID_APP__ && <p style={{fontSize:12,color:'#986400',marginTop:8}}>Check Android alerts below for this phone’s background notification connection.</p>}
     {error && <p role="alert">{error}</p>}
     {!alerts.length && !error && <p style={{fontSize:13,marginTop:10}}>No opening alerts yet.</p>}
     {alerts.length>0 && <details><summary style={{padding:'12px 0',cursor:'pointer',fontWeight:700}}>View recent alerts</summary>{alerts.map(a=><article key={a.id} style={{padding:'12px 0',borderTop:'1px solid #E3E9EF'}}>

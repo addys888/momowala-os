@@ -1,3 +1,4 @@
+import { sendDevicePush } from '../../server/devicePush.js';
 import webpush from 'web-push';
 import { backendHeaders, cronAuthorized, SB_URL } from '../../server/auth.js';
 
@@ -12,18 +13,17 @@ export async function deliverOpeningAlerts() {
   try {
     // Always collect durable owner alerts, including when push isn't configured.
     const deliveries = await rpc('app_claim_opening_notifications');
-    if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
+    if ((!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) && !process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
       return { status: 503, error: 'Owner inbox updated; background push is not configured' };
     }
-    webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:reminders@momowala.co.in', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:reminders@momowala.co.in', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
     let sent = 0, failed = 0;
     // Bounded batches keep one unreachable device from delaying all owners.
     for (let i = 0; i < deliveries.length; i += 10) {
       await Promise.all(deliveries.slice(i, i + 10).map(async d => {
         let ok = false, dead = false;
         try {
-          await webpush.sendNotification({ endpoint: d.endpoint, keys: { p256dh: d.p256dh, auth: d.auth } },
-            JSON.stringify({ title: d.title, body: d.body, tag: `opening-${d.id}`, url: '/' }), { TTL: 3600, timeout: 8000 });
+          await sendDevicePush(d,{ title:d.title,body:d.body,tag:`opening-${d.id}`,url:'/',mode:d.mode,cartId:d.cartId,date:d.date });
           ok = true; sent++;
         } catch (e) { failed++; dead = [404, 410].includes(e.statusCode); }
         await rpc('app_finish_opening_notification', { p_id: d.id, p_endpoint: d.endpoint, p_lease: d.lease, p_sent: ok, p_dead: dead });

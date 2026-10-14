@@ -34,4 +34,20 @@ tasks.register('requireReleaseSigning') {
 }
 tasks.configureEach { if (name == 'validateSigningRelease') dependsOn 'requireReleaseSigning' }
 
-dependencies { implementation 'androidx.core:core:1.15.0' }
+dependencies {
+    implementation 'androidx.core:core:1.15.0'
+    implementation 'com.google.firebase:firebase-messaging:26.0.0'
+}
+// Firebase public Android configuration is fetched after project provisioning.
+def firebaseConfig = file('google-services.json')
+if (firebaseConfig.exists()) {
+    def config = new groovy.json.JsonSlurper().parse(firebaseConfig)
+    def client = config.client.find { it.client_info.android_client_info.package_name == 'com.cartlyft.momowala' }
+    if (client == null) throw new GradleException('Firebase config package does not match Cartlyft')
+    android.defaultConfig {
+        resValue 'string', 'google_app_id', client.client_info.mobilesdk_app_id
+        resValue 'string', 'gcm_defaultSenderId', config.project_info.project_number
+        resValue 'string', 'google_api_key', client.api_key[0].current_key
+        resValue 'string', 'project_id', config.project_info.project_id
+    }
+}

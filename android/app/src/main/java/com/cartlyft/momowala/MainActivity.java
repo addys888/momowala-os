@@ -131,6 +131,10 @@ public class MainActivity extends Activity {
                             case "notificationSettings":
                                 startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))); break;
                             case "inventoryStatus": break;
+                            case "nativePushStatus": result.confirm(PartnerMessagingService.status(MainActivity.this).toString()); return true;
+                            case "bindNativePush": PartnerAlerts.bind(MainActivity.this,data); break;
+                            case "acknowledgePartner": PartnerAlerts.acknowledge(MainActivity.this,data.getString("key")); break;
+                            case "acknowledgeInventory": InventoryReminders.acknowledge(MainActivity.this); break;
                             default: throw new IllegalArgumentException();
                         }
                         result.confirm(InventoryReminders.status(MainActivity.this).toString());

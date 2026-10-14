@@ -34,3 +34,7 @@ Cross-phone completion or manager reassignment only cancels an existing native l
 Production scheduler existence was checked read-only. After an approved rollout, confirm its endpoint invokes the new worker, inspect failures and oldest pending deliveries, register owner/manager browser subscriptions (old staff subscriptions lack `staff_id`), and test real devices. Check database advisors before production: the isolated advisor command previously failed TLS negotiation; local role/ACL tests do not replace the hosted advisory scan.
 
 Release requires explicit APK approval under AGENTS.md. Continuing development does not authorize publishing or replacing APK downloads.
+
+## Native implementation follow-up
+
+The native FCM receiver, sender, registration, acknowledgment and completion-control code have now been staged. See [native-notifications.md](native-notifications.md) for current verification and the unresolved Firebase account blocker; the earlier native gap above describes the state before this follow-up. Nothing has been activated in production.

@@ -18,6 +18,7 @@
     "@supabase/supabase-js": "^2.108.1",
     "abortcontroller-polyfill": "^1.7.8",
     "core-js": "^3.50.0",
+    "firebase-admin": "14.5.0",
     "lucide-react": "^1.17.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.6",

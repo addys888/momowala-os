@@ -306,3 +306,14 @@ test('notification leases prevent concurrent sends and retry only failed devices
   assert.equal(retry.length,1);assert.notEqual(retry[0].endpoint,d.endpoint);
   await sql('delete from push_subscriptions');
 });
+
+test('native completion delivery targets the submitting manager and owner with different modes', async()=>{
+ await sql("delete from opening_alerts; delete from push_subscriptions; insert into opening_alerts(cart_id,business_date,kind,staff_id,title,body) values('test-a',current_date,'completed',101,'Native completion','Loaded'); insert into push_subscriptions(endpoint,cart_id,role,staff_id,p256dh) values('fcm:manager','test-a','staff',101,'binding'),('fcm:owner','test-a','owner',null,'binding'),('fcm:other','test-b','owner',null,'binding')");
+ const raw=await sql(`begin; set local role anon; set local request.headers='{"x-backend-secret":"local-notification-secret"}'; select app_claim_opening_notifications(); commit;`);
+ const records=JSON.parse(raw.split('\n').filter(x=>x.startsWith('[')).at(-1)).filter(x=>x.title==='Native completion');
+ assert.equal(records.length,2);
+ assert.equal(records.find(x=>x.endpoint==='fcm:manager').mode,'stock_complete');
+ assert.equal(records.find(x=>x.endpoint==='fcm:owner').mode,'alert');
+ assert(records.every(x=>x.cartId==='test-a' && x.date));
+ await sql('delete from push_subscriptions');
+});

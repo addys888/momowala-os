@@ -40,6 +40,7 @@ public class PrintRoutingTest extends Instrumentation {
             navigate.invoke(activity, null, Uri.parse("https://example.com"), true);
             check(activity.sent != null, "Normal external links regressed");
             testReminders();
+            testPartnerAlerts();
             testUpdates();
             testPartnerIcon();
             result.putString("stream", "PASS: update manifest and tampered APK rejection; real scheduled notification, completion cancellation, logout-independent assignment;  RawBT intent, byte preservation, subframe guard, blocked schemes, HTTPS routing\n");
@@ -64,6 +65,10 @@ public class PrintRoutingTest extends Instrumentation {
             long deadline=android.os.SystemClock.elapsedRealtime()+15000;
             while(InventoryReminders.manager(context).getActiveNotifications().length==0 && android.os.SystemClock.elapsedRealtime()<deadline) Thread.sleep(250);
             check(InventoryReminders.manager(context).getActiveNotifications().length>0,"Scheduled alarm did not post notification");
+            InventoryReminders.acknowledge(context);
+            check(!InventoryReminders.prefs(context).contains("completedDate"),"Acknowledgment incorrectly completed stock");
+            InventoryReminders.fire(context);
+            check(InventoryReminders.manager(context).getActiveNotifications().length==0,"Acknowledged opening reminder rang again");
             config.put("completedDate",OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis())));
             InventoryReminders.configure(context,config);
             check(InventoryReminders.manager(context).getActiveNotifications().length==0,"Saved inventory did not cancel notification");
@@ -79,6 +84,39 @@ public class PrintRoutingTest extends Instrumentation {
             InventoryReminders.clear(context);
             check(!InventoryReminders.prefs(context).getBoolean("enabled",false),"Explicit unassign failed");
         } finally { InventoryReminders.clear(context); }
+    }
+    private void testPartnerAlerts() throws Exception {
+        android.content.Context c=getTargetContext();
+        String binding=java.util.UUID.randomUUID().toString(),key="test-event-42";
+        PartnerAlerts.bind(c,new org.json.JSONObject().put("binding",binding));
+        PartnerAlerts.show(c,binding,key,"Test opening alert","Manager has not loaded stock");
+        android.service.notification.StatusBarNotification posted=null;
+        for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())if(("partner:"+key).equals(n.getTag()))posted=n;
+        check(posted!=null,"Native partner alert missing");
+        check((posted.getNotification().flags & android.app.Notification.FLAG_INSISTENT)!=0,"Alert does not repeat sound");
+        check(posted.getNotification().vibrate!=null || android.os.Build.VERSION.SDK_INT>=26,"Alert has no vibration");
+        check(posted.getNotification().actions.length==1,"Acknowledge action missing");
+        posted.getNotification().actions[0].actionIntent.send();
+        long deadline=android.os.SystemClock.elapsedRealtime()+3000;
+        while(!PartnerAlerts.prefs(c).contains("ack:"+key) && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(50);
+        check(PartnerAlerts.prefs(c).contains("ack:"+key),"Action did not persist acknowledgment");
+        PartnerAlerts.show(c,binding,key,"Duplicate","Should stay silent");
+        for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())check(!("partner:"+key).equals(n.getTag()),"Duplicate alert rang after acknowledgment");
+        PartnerAlerts.show(c,"wrong-binding","wrong-account","Wrong account","Must be ignored");
+        for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())check(!"partner:wrong-account".equals(n.getTag()),"Old account message leaked");
+        java.text.SimpleDateFormat f=new java.text.SimpleDateFormat("HH:mm",java.util.Locale.US);f.setTimeZone(java.util.TimeZone.getTimeZone("Asia/Kolkata"));
+        String time=f.format(new java.util.Date(System.currentTimeMillis()+30*60000L));
+        String date=OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis()));
+        InventoryReminders.configure(c,new org.json.JSONObject().put("cartId","test-cart").put("openTime",time).put("expiresAt",System.currentTimeMillis()+3600000L));
+        java.util.Map<String,String> complete=new java.util.HashMap<>();
+        complete.put("binding",binding);complete.put("cartId","test-cart");complete.put("date",date);complete.put("mode","stock_complete");
+        PartnerMessagingService.handle(c,complete);
+        check(date.equals(InventoryReminders.prefs(c).getString("completedDate","")),"Cross-phone completion not recorded");
+        complete.put("mode","alert");complete.put("tag","delayed-reminder");
+        PartnerMessagingService.handle(c,complete);
+        for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())check(!"partner:delayed-reminder".equals(n.getTag()),"Delayed reminder rang after stock completion");
+        InventoryReminders.clear(c);
+        PartnerAlerts.prefs(c).edit().clear().commit();
     }
     private void testUpdates() throws Exception {
         org.json.JSONObject info=new org.json.JSONObject().put("versionCode",5).put("versionName","1.3.0").put("path","/downloads/cartlyft-1.3.0.apk").put("bytes",12).put("sha256",new String(new char[64]).replace('\0','a'));

@@ -1,3 +1,4 @@
+import { sendDevicePush } from '../server/devicePush.js';
 import { backendHeaders, dbHeaders } from '../server/auth.js';
 // Instant "new customer order" push. Called by the customer's browser the moment
 // a QR order is placed, so the cart's staff/owner phones ring within a second or
@@ -40,10 +41,7 @@ export async function sendOrderPush(cartId, order, itemCount) {
   let sent = 0, failed = 0;
   for (const s of subs || []) {
     try {
-      await webpush.sendNotification(
-        { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-        orderPushPayload({ ...order, item_count: itemCount }, s.role),
-      );
+      await sendDevicePush(s,JSON.parse(orderPushPayload({ ...order, item_count: itemCount }, s.role)));
       sent++;
     } catch { failed++; }
   }
@@ -53,14 +51,14 @@ export async function sendOrderPush(cartId, order, itemCount) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!SB_URL || !SB_KEY) return res.status(500).json({ error: 'missing Supabase env' });
-  if (!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) {
+  if ((!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) && !process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     return res.status(500).json({ error: 'missing VAPID env' });
   }
 
   const { cartId, orderId, itemCount } = req.body || {};
   if (!cartId || !orderId) return res.status(400).json({ error: 'Missing cartId or orderId' });
 
-  webpush.setVapidDetails(
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) webpush.setVapidDetails(
     process.env.VAPID_SUBJECT || 'mailto:reminders@momowala.co.in',
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY,

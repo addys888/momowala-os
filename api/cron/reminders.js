@@ -1,3 +1,4 @@
+import { sendDevicePush } from '../../server/devicePush.js';
 import { backendHeaders, cronAuthorized } from '../../server/auth.js';
 // Reminder cron. Runs every ~15 min (see vercel.json crons). For each active
 // cart it checks IST time against openTime/closeTime and sends a web-push to the
@@ -24,9 +25,9 @@ export default async function handler(req, res) {
   // `?key=<CRON_SECRET>` so an external scheduler can trigger it if needed.
   if (!cronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   if (!SB_URL || !SB_KEY) return res.status(500).json({ error: 'missing Supabase env' });
-  if (!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) return res.status(500).json({ error: 'missing VAPID env' });
+  if ((!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) && !process.env.FIREBASE_SERVICE_ACCOUNT_JSON) return res.status(500).json({ error: 'missing VAPID env' });
 
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:reminders@momowala.co.in', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) webpush.setVapidDetails(process.env.VAPID_SUBJECT || 'mailto:reminders@momowala.co.in', process.env.VAPID_PUBLIC_KEY, process.env.VAPID_PRIVATE_KEY);
 
   // Test fire: ?test=<cartId> sends a sample push to that cart's subscribers now,
   // bypassing the time window and dedupe. Secret-guarded (above). For setup only.
@@ -36,7 +37,7 @@ export default async function handler(req, res) {
     const payload = JSON.stringify({ title: '🔔 Cartlyft test', body: 'Reminders are working — you\'ll get load-stock & reconcile alerts.', tag: `test-${Date.now()}`, url: '/' });
     let ok = 0, bad = 0;
     for (const s of subs || []) {
-      try { await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload); ok++; }
+      try { await sendDevicePush(s,JSON.parse(payload)); ok++; }
       catch { bad++; }
     }
     return res.status(200).json({ test: true, cartId, subscriptions: (subs || []).length, sent: ok, failed: bad });
@@ -72,7 +73,7 @@ export default async function handler(req, res) {
 
     for (const s of targets) {
       try {
-        await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify(payload));
+        await sendDevicePush(s,payload);
         sent++;
       } catch (e) {
         failed++;

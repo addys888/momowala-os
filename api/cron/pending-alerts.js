@@ -30,11 +30,11 @@ export default async function handler(req, res) {
   if (!SB_URL || !SB_KEY) return res.status(500).json({ error: 'missing Supabase env' });
   // Existing minute scheduler also drives durable opening events, even with no pending orders.
   const opening = await deliverOpeningAlerts();
-  if (!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) {
+  if ((!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) && !process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     return res.status(500).json({ error: 'missing VAPID env' });
   }
 
-  webpush.setVapidDetails(
+  if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) webpush.setVapidDetails(
     process.env.VAPID_SUBJECT || 'mailto:reminders@momowala.co.in',
     process.env.VAPID_PUBLIC_KEY,
     process.env.VAPID_PRIVATE_KEY,
