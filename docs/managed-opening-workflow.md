@@ -1,3 +1,5 @@
+> Release update: 1.4.0 was published on 15 October 2026 with matching production database/server changes. See [release-1.4.0.md](release-1.4.0.md). Staging statements below describe pre-release history; physical-device and device-management limitations still apply.
+
 # Managed daily opening — unreleased
 
 Owners assign one active staff member per cart under **Staff → Registry & activity → Cart manager**. Only that staff ID can submit the daily opening inventory. Owners can replace the manager; other staff and owners see readiness without a submit button. Later top-ups remain owner stock operations. Disabling or deleting the manager removes loading access; owner must assign a replacement.

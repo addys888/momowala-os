@@ -1,3 +1,5 @@
+> Release update: 1.4.0 was published on 15 October 2026 with matching production database/server changes. See [release-1.4.0.md](release-1.4.0.md). Staging statements below describe pre-release history; physical-device and device-management limitations still apply.
+
 # Native partner notifications — connected and staged
 
 ## Implemented

@@ -16,4 +16,4 @@ const data=readFileSync(apk);
 writeFileSync(apk+'.sha256',createHash('sha256').update(data).digest('hex')+`  ${filename}\n`);
 console.log(`Signed APK: ${apk} (${(data.length/1024/1024).toFixed(2)} MB)`);
 
-writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Cartlyft Partner red icon, reconciliation backup recovery, safe sync retry and daily operations shortcuts. Cross-phone background updates are not yet available.'},null,2)+'\n');
+writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Manager-controlled daily stock loading, owner opening alerts, native background notifications with acknowledgment, and safer cross-phone data sync.'},null,2)+'\n');
