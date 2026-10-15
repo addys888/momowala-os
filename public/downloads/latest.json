@@ -1,8 +1,8 @@
 {
-  "versionCode": 6,
-  "versionName": "1.4.0",
-  "path": "/downloads/cartlyft-1.4.0.apk",
-  "bytes": 3834920,
-  "sha256": "ba57344b2685094e74b451ab31b75ded9bc1cecd518e79edd3df0b84f14dd4e7",
-  "notes": "Manager-controlled daily stock loading, owner opening alerts, native background notifications with acknowledgment, and safer cross-phone data sync."
+  "versionCode": 7,
+  "versionName": "1.5.0",
+  "path": "/downloads/cartlyft-1.5.0.apk",
+  "bytes": 3836564,
+  "sha256": "4dd177177149d1d45f079c4692d8af0b263da9824addbebaf6f98509777932da",
+  "notes": "Refreshed partner workspace, compact daily operations, clearer stock and menu controls, simplified leave tracking, and reports with collection charts and grouped recovery backups."
 }
