@@ -209,7 +209,7 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this).setTitle("Unassign this phone?").setMessage("Opening alarms will stop, including while logged out. Sign in to assign this phone again.")
                       .setPositiveButton("Unassign",(d,w)->InventoryReminders.clear(this)).setNegativeButton("Keep alarms",null).show(); break;
                 case "Check for updates": updater.check(); break;
-                default: new AlertDialog.Builder(this).setTitle("Cartlyft 1.3.0").setMessage("For Android 7 and newer.\n\nKeep the app open for order alerts. Background push notifications are not available in this APK.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
+                default: new AlertDialog.Builder(this).setTitle("Cartlyft Partner").setMessage("For Android 7 and newer.\n\nAllow notifications for background partner alerts. Acknowledge an alert to stop its sound and vibration. Phone volume, notification and battery settings apply.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
             }
         }).setNegativeButton("Close",null).show();
     }

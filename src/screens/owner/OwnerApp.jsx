@@ -1,17 +1,16 @@
 import { OpeningAlerts } from '../../components/OpeningAlerts';
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
-import { TODAY, WARE_TYPES, PAY_BADGE, adminBtn, brand, cartOpenState, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorLinksFor, vendorEnabledFor, wareLedger, orderStockDeltas } from '../../core';
+import { useState, useEffect } from 'react';
+import { ShoppingCart, Users, Clock, BarChart3, Settings, Home, IndianRupee, ArrowRight, Edit3, Boxes, FileText, CheckCircle2 } from 'lucide-react';
+import { setCartClosed, saveCartProfile, pushMenus } from '../../lib/store';
+import { TODAY, WARE_TYPES, PAY_BADGE, brand, cartOpenState, partnerColors as colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorLinksFor, vendorEnabledFor, wareLedger } from '../../core';
 import { CartProfileModal, MenuEditor } from '../MenuEditor';
 import { InventoryView } from './Inventory';
 import { Reconciliation } from './Reconciliation';
 import { Reports } from './Reports';
 import { StaffRegistry } from './StaffRegistry';
-import { Alert, BottomNav, CartIcon, MetricCard, OrderRow, SectionHeader, TopBar } from '../../components/shared';
+import { BottomNav, MetricCard, OrderRow, TopBar } from '../../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../../components/RemindersButton';
 import { PrepChecklist } from '../../components/PrepChecklist';
-import { printVendorBoard } from '../../lib/vendorBoard';
 import { useStore } from '../../store';
 
 function OwnerApp({ state, updateState, onExit, cartId }) {
@@ -33,10 +32,11 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   const saveProfile = (fields) => {
     // Printer config lives in the menus blob (synced via pushMenus, clobber-safe)
     // — split it out from the cart-table fields.
-    const { printerEnabled, printerFooter, printerAutoPrint, zomatoUrl, swiggyUrl, ...cartFields } = fields;
+    const { printerEnabled, printerFooter, printerAutoPrint, zomatoUrl, swiggyUrl, vendors, ...cartFields } = fields;
     const updated = { ...cart, ...cartFields };
     const newMenus = { ...state.menus, [cartId]: { ...menuFor(state, cartId),
       printer: { enabled: !!printerEnabled, footer: (printerFooter || '').trim(), autoPrint: !!printerAutoPrint },
+      vendors: vendors || menuFor(state, cartId).vendors,
       vendorLinks: { zomato: (zomatoUrl || '').trim(), swiggy: (swiggyUrl || '').trim() },
     } };
     if (!updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c), menus: newMenus })) return;
@@ -49,23 +49,6 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
     updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: next } : c) });
     // Persist immediately (not via the debounced batch) so it survives a refresh.
     setCartClosed(cartId, next);
-  };
-  // Owner flips one aggregator (Zomato/Swiggy) on or off. It's a menu-config
-  // write, so it goes through pushMenus (immediate, never the background sync).
-  const toggleVendor = (v) => {
-    const menus = {
-      ...state.menus,
-      [cartId]: {
-        ...menuFor(state, cartId),
-        vendors: {
-          zomato: vendorEnabledFor(state, cartId, 'zomato'),
-          swiggy: vendorEnabledFor(state, cartId, 'swiggy'),
-          [v]: !vendorEnabledFor(state, cartId, v),
-        },
-      },
-    };
-    updateState({ menus });
-    pushMenus(menus, cartId);
   };
   // Hard-reset / recount correction for a ware's live "should remain". Posts an
   // append-only WARE_RESET adjustment (qty = target − current) so the balance
@@ -103,19 +86,22 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   }, 0);
 
   return (
-    <div style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
+    <div className="partner-app" style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
       <TopBar title={`${cart?.name ?? 'Cart'} · Owner`} onExit={onExit} />
 
-      {showProfile && <CartProfileModal cart={cart} printer={printerCfgFor(state, cartId)} vendorLinks={vendorLinksFor(state, cartId)} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
+      {showProfile && <CartProfileModal cart={cart} printer={printerCfgFor(state, cartId)} vendorLinks={vendorLinksFor(state, cartId)} vendors={onlineVendorsFor(state,cartId)?{zomato:vendorEnabledFor(state,cartId,'zomato'),swiggy:vendorEnabledFor(state,cartId,'swiggy')}:undefined} onSave={saveProfile} onClose={() => setShowProfile(false)} />}
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {/* Nags until this device has push on — otherwise the owner's phone stays
             silent for incoming customer orders and daily reminders. */}
         <OrderAlertsPrompt cartId={cartId} role="owner" />
-        {tab === 'dashboard' && <OpeningAlerts key={cartId} cartId={cartId} onOpenStock={()=>setTab('inventory')} />}
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onToggleVendor={toggleVendor} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onSeeUncollected={goOrders} onResetWare={resetWare} updateState={updateState} />}
+        {__ANDROID_APP__ && <RemindersButton cartId={cartId} role="owner" />}
+
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onSeeUncollected={goOrders} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} initialDate={ordersDate} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
+        {tab === 'inventory' && <details className="partner-card"><summary>Opening history & alerts</summary><OpeningAlerts key={cartId} cartId={cartId}/></details>}
+        {tab === 'inventory' && <details className="partner-card"><summary>Serving supplies · spot check</summary>{WARE_TYPES.map(w=>{const l=wareLedger(state,cartId,TODAY)[w.key];return <div className="stock-item" key={w.key}><span>{w.label}</span><strong>{l.expected}</strong>{!l.closed&&<button className="quiet-button" onClick={()=>resetWare(w.key)}>Recount</button>}</div>;})}</details>}
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} initialDate={reconcileDate} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
@@ -171,7 +157,7 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-        <div style={{ fontSize: 20, fontWeight: 800 }}>Orders</div>
+        <div style={{ fontSize: 20, fontWeight: 650 }}>Orders</div>
         {isToday && <button onClick={doRefresh} disabled={refreshing} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 20, padding: '6px 12px', fontSize: 12, fontWeight: 700, color: brand.navy, cursor: refreshing ? 'wait' : 'pointer' }}>🔄 {refreshing ? '…' : 'Refresh'}</button>}
       </div>
 
@@ -215,9 +201,9 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
             return (
               <div key={o.id} style={{ padding: '11px 14px', borderBottom: `1px solid ${colors.border}`, opacity: cancelledRow ? 0.55 : 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-                  <div style={{ fontWeight: 800, fontSize: 14, textDecoration: cancelledRow ? 'line-through' : 'none' }}>#{o.token} <span style={{ fontWeight: 400, color: colors.muted, fontSize: 12 }}>· {o.time}{o.staff ? ` · ${o.staff}` : ''}</span></div>
+                  <div style={{ fontWeight: 650, fontSize: 14, textDecoration: cancelledRow ? 'line-through' : 'none' }}>#{o.token} <span style={{ fontWeight: 400, color: colors.muted, fontSize: 12 }}>· {o.time}{o.staff ? ` · ${o.staff}` : ''}</span></div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                    <span style={{ fontWeight: 800 }}>₹{o.total}</span>
+                    <span style={{ fontWeight: 650 }}>₹{o.total}</span>
                     <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: badge.bg, color: badge.fg }}>{o.payment === 'pending' ? 'UNPAID' : o.payment === 'split' ? `SPLIT · 💵${o.split?.cash || 0}+📱${o.split?.upi || 0}` : o.payment.toUpperCase()}</span>
                   </div>
                 </div>
@@ -231,15 +217,12 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
   );
 }
 
-function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onToggleVendor, onReconcile, onSeeOrders, onSeeUncollected, onResetWare, updateState }) {
+function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onReconcile, onSeeOrders, onSeeUncollected, updateState }) {
   // Day-close nudge: the plate/cash/stock theft audit only runs at day-close, so
   // a stretch of un-closed days means the audit is producing nothing. Warn when
   // today has sales but isn't closed, and count how long the streak has run.
   const cartCloses = (state.dayCloseLogs || []).filter(d => d.cartId === cartId);
   const closedToday = cartCloses.some(d => d.date === TODAY);
-  const lastCloseDate = cartCloses.map(d => d.date).sort().pop() || null;
-  const daysSinceClose = lastCloseDate ? Math.round((Date.parse(TODAY) - Date.parse(lastCloseDate)) / 86400000) : null;
-  const showCloseNudge = (todayOrders?.length || 0) > 0 && !closedToday;
   // Deep-link the nudge to the OLDEST unreconciled day (with orders) in the last
   // week, so tapping it opens Reconcile right on the day that needs back-filling.
   const shiftDayD = (d, n) => { const [y, m, dd] = d.split('-').map(Number); return new Date(Date.UTC(y, m - 1, dd + n)).toISOString().slice(0, 10); };
@@ -260,17 +243,10 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, on
   const agoSec = lastSync ? Math.max(0, Math.round((Date.now() - lastSync) / 1000)) : null;
   const agoLabel = agoSec === null ? 'syncing…' : agoSec < 60 ? `updated ${agoSec}s ago` : `updated ${Math.floor(agoSec / 60)}m ago`;
 
-  const pendingCount = todayOrders.filter(o => o.payment === 'pending').length;
   // Uncollected (unpaid) orders across ALL days — money not yet collected and not
   // counted in revenue. Surfaced so nothing rolls past its day unseen.
   const uncollected = (state?.orders || []).filter(o => o.cartId === cartId && o.payment === 'pending').sort((a, b) => a.id - b.id);
   const uncollectedTotal = uncollected.reduce((s, o) => s + o.total, 0);
-  // Ware audit: how many small plates / large plates / glasses should
-  // physically be on the cart right now, given what the owner supplied and
-  // what punched orders served.
-  const ware = wareLedger(state, cartId, TODAY);
-  const activeWare = WARE_TYPES.filter(w => ware[w.key].supplied > 0 || ware[w.key].opening > 0);
-  const lowTypes = stockTypes.filter(st => (inv[st.key]?.freezer ?? 0) < 100);
   const openState = cartOpenState(cart);
 
   // Per-day revenue (reconciled if the day was closed, else system) for trends.
@@ -287,29 +263,8 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, on
   const last7 = [...Array(7)].map((_, i) => new Date(baseMs - (6 - i) * 86400000).toISOString().split('T')[0]);
   const series = last7.map(dayRev);
   const maxRev = Math.max(...series, 1);
-  const yesterdayRev = series[5];
-  const deltaPct = yesterdayRev > 0 ? Math.round(((todayRevenue - yesterdayRev) / yesterdayRev) * 100) : null;
   const todayExpenses = (state?.expenses || []).filter(e => e.cartId === cartId && e.date === TODAY).reduce((s, e) => s + e.amount, 0);
   const todayNet = todayRevenue - todayExpenses;
-
-  // Stock run-out estimate: today's selling pace vs remaining (freezer + cart).
-  const menuItems = (menuFor(state, cartId).items) || [];
-  const soldToday = todayOrders.filter(isPaid).reduce((acc, o) => {
-    const d = orderStockDeltas(o.items, menuItems);
-    Object.keys(d).forEach(k => { acc[k] = (acc[k] || 0) + d[k]; });
-    return acc;
-  }, {});
-  const openMin = cart?.openTime ? (() => { const [h, m] = cart.openTime.split(':').map(Number); return h * 60 + (m || 0); })() : null;
-  const nowMin = istNowMinutes();
-  const hoursOpen = openMin != null && nowMin > openMin ? (nowMin - openMin) / 60 : (Object.keys(soldToday).length ? 3 : null);
-  const runOut = stockTypes.map(st => {
-    const remaining = (inv[st.key]?.freezer || 0) + (inv[st.key]?.cart || 0);
-    const sold = soldToday[st.key] || 0;
-    const rate = hoursOpen && hoursOpen > 0 ? sold / hoursOpen : 0; // pcs/hr
-    const hrsLeft = remaining === 0 ? 0 : (rate > 0 ? remaining / rate : null);
-    return { key: st.key, label: st.label, remaining, hrsLeft };
-  });
-  const showRunOut = openState.open && runOut.some(r => r.hrsLeft !== null);
 
   const shareToday = async () => {
     const text =
@@ -322,307 +277,33 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, on
     window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
   };
 
-  return (
-    <div>
-      {/* 1) Cart profile banner — slim, full width */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '10px 12px', marginBottom: 10 }}>
-        <CartIcon cart={cart} size={40} radius={10} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 14.5 }}>{cart?.name}</div>
-          <div style={{ fontSize: 11.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>📍 {cart?.location || '—'} · 🕒 {cart?.timing || '—'}</div>
-        </div>
-        <button onClick={onEditProfile} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Edit3 size={13}/> Edit</button>
-      </div>
-
-      <section aria-label="Daily operations" style={{background:'#fff',border:`1px solid ${colors.border}`,borderRadius:12,padding:14,marginBottom:12}}>
-        <div style={{fontWeight:800,fontSize:14,marginBottom:8}}>Daily operations</div>
-        <div style={{fontSize:13,color:colors.muted,lineHeight:1.7}}>Hours (IST): <strong>{cart?.openTime || 'Not set'} – {cart?.closeTime || 'Not set'}</strong><br/>Staff inventory reminder: 30 minutes before opening, when enabled on their phone.</div>
-        <div style={{display:'flex',gap:8,flexWrap:'wrap',marginTop:12}}>
-          <button style={{...adminBtn,minHeight:44}} onClick={onEditProfile}>Cart settings & hours</button>
-          <button style={{...adminBtn,minHeight:44}} onClick={onOpeningStock}>Opening stock</button>
-          <button style={{...adminBtn,minHeight:44}} onClick={onSeeOrders}>Live orders</button>
-        </div>
-      </section>
-
-      {/* 2) Open/closed + reminders share one compact row */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
-        <div style={{ flex: '1 1 190px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${openState.open ? '#BFE3BF' : '#F3C2C2'}`, borderRadius: 12, padding: '10px 12px' }}>
-          <span style={{ width: 9, height: 9, borderRadius: '50%', background: openState.open ? colors.green : colors.red, flexShrink: 0 }} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontWeight: 800, fontSize: 12.5, color: openState.open ? '#0F7B0F' : colors.red, lineHeight: 1.1 }}>{openState.open ? 'Open' : 'Closed'}</div>
-            <div style={{ fontSize: 10.5, color: colors.muted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{cart?.closedManually ? 'You closed it' : openState.open ? 'Taking orders' : openState.reason}</div>
-          </div>
-          <button onClick={onToggleOpen} style={{ background: cart?.closedManually ? colors.green : colors.red, color: '#fff', border: 'none', padding: '7px 12px', borderRadius: 20, fontWeight: 800, fontSize: 12, cursor: 'pointer', flexShrink: 0, whiteSpace: 'nowrap' }}>
-            {cart?.closedManually ? 'Open' : 'Close'}
-          </button>
-        </div>
-        <RemindersButton cartId={cartId} role="owner" />
-        {/* Pack-for-today tile — its expanded checklist wraps full-width below */}
-        <PrepChecklist state={state} updateState={updateState} cartId={cartId} />
-      </div>
-
-      {showCloseNudge && (
-        <button onClick={() => onReconcile(nudgeDate)} style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: (daysSinceClose == null || daysSinceClose >= 2) ? '#FDE8EA' : '#FFF3E0', border: `1px solid ${(daysSinceClose == null || daysSinceClose >= 2) ? '#F5B5BC' : '#F5CFA4'}`, borderRadius: 12, padding: '12px 14px', marginBottom: 16, cursor: 'pointer' }}>
-          <AlertTriangle size={20} color={(daysSinceClose == null || daysSinceClose >= 2) ? '#C81E1E' : '#B5460B'} />
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13.5, fontWeight: 800, color: (daysSinceClose == null || daysSinceClose >= 2) ? '#C81E1E' : '#B5460B' }}>
-              {daysSinceClose == null ? 'Day-end audit never run' : daysSinceClose === 0 ? "Today isn't closed yet" : `${daysSinceClose} day${daysSinceClose !== 1 ? 's' : ''} since last day-close`}
-            </div>
-            <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 1 }}>The plate, glass, cash and stock theft audit only runs at day-close. Tap to reconcile →</div>
-          </div>
-        </button>
-      )}
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 10 }}>
-        <SectionHeader title="Today's Snapshot" subtitle={istDateLabel(new Date(), { weekday: 'long', day: 'numeric', month: 'long' })} />
-        <button onClick={doRefresh} disabled={refreshing} title="Pull the latest orders now"
-          style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 20, padding: '6px 12px', fontSize: 11.5, fontWeight: 700, color: colors.muted, cursor: refreshing ? 'wait' : 'pointer', whiteSpace: 'nowrap', marginBottom: 14, flexShrink: 0 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: colors.green, display: 'inline-block' }} />
-          live · {refreshing ? 'refreshing…' : agoLabel} 🔄
-        </button>
-      </div>
-
-      {/* Hero metric */}
-      <div style={{ background: colors.ink, color: colors.primary, padding: '18px 20px', borderRadius: 16, marginBottom: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div style={{ fontSize: 12, opacity: 0.7, letterSpacing: 1, marginBottom: 4 }}>REVENUE TODAY · CASH + UPI</div>
-          {deltaPct !== null && (
-            <span style={{ fontSize: 12, fontWeight: 800, color: deltaPct >= 0 ? '#7CE38B' : '#FF8A8A', background: 'rgba(255,255,255,0.1)', borderRadius: 20, padding: '3px 10px' }}>
-              {deltaPct >= 0 ? '▲' : '▼'} {Math.abs(deltaPct)}% vs yest
-            </span>
-          )}
-        </div>
-        <div style={{ fontSize: 42, fontWeight: 900, lineHeight: 1 }}>₹{todayRevenue.toLocaleString('en-IN')}</div>
-        <div style={{ fontSize: 13, marginTop: 8, opacity: 0.8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-          <span>{todayOrders.filter(isPaid).length} orders{stockTypes.length > 0 ? ` · ${piecesSold} pieces sold` : ''}</span>
-          <button onClick={onSeeOrders} style={{ background: 'rgba(255,255,255,0.15)', border: 'none', color: '#fff', borderRadius: 20, padding: '3px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>See live orders →</button>
-        </div>
-        <div style={{ display: 'flex', gap: 16, marginTop: 12, paddingTop: 12, borderTop: '1px solid rgba(255,214,10,0.2)', fontSize: 13 }}>
-          <div><span style={{ opacity: 0.7 }}>Expenses </span><strong>₹{todayExpenses.toLocaleString('en-IN')}</strong></div>
-          <div><span style={{ opacity: 0.7 }}>Net profit </span><strong style={{ color: todayNet >= 0 ? '#7CE38B' : '#FF8A8A' }}>₹{todayNet.toLocaleString('en-IN')}</strong></div>
-        </div>
-      </div>
-
-      {/* 7-day revenue trend */}
-      <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 16, padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>LAST 7 DAYS</div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 6, height: 80 }}>
-          {series.map((v, i) => {
-            const isToday = i === 6;
-            return (
-              <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                <div style={{ fontSize: 9, color: colors.muted, fontWeight: 700 }}>{v > 0 ? `${Math.round(v / 1000 * 10) / 10}k` : ''}</div>
-                <div style={{ width: '100%', maxWidth: 26, height: Math.max(4, (v / maxRev) * 56), background: isToday ? colors.ink : '#E8E5DC', borderRadius: 5 }} />
-                <div style={{ fontSize: 9.5, color: isToday ? colors.ink : colors.muted, fontWeight: isToday ? 800 : 600 }}>{istDateLabel(last7[i], { weekday: 'short' }).slice(0, 2)}</div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Split metrics — the online card only shows for carts that opted into
-          Zomato/Swiggy (or that have online money today from before opting out). */}
-      {(() => { const showOnline = onlineVendorsFor(state, cartId) || onlineRevenue > 0; return (
-      <div style={{ display: 'grid', gridTemplateColumns: showOnline ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10, marginBottom: 12 }}>
-        <MetricCard label="Cash" value={`₹${cashRevenue}`} icon={<IndianRupee size={16}/>} color={colors.green} />
-        <MetricCard label="UPI" value={`₹${upiRevenue}`} icon={<Smartphone size={16}/>} color={colors.ink} />
-        {showOnline && <MetricCard label="🛵 Online" value={`₹${onlineRevenue}`} icon={<Smartphone size={16}/>} color={colors.accent} />}
-      </div>
-      ); })()}
-
-      {/* UNCOLLECTED — money punched but never settled, across ALL days. Kept
-          deliberately OUT of today's revenue (which only counts paid orders
-          dated today); this is a separate "owed to the cart" figure so parked
-          orders can't quietly rot. Anything not from today is flagged red. */}
-      {(() => {
-        const pend = (state?.orders || []).filter(o => o.cartId === cartId && o.payment === 'pending');
-        if (!pend.length) return null;
-        const total = pend.reduce((s, o) => s + (o.total || 0), 0);
-        const stale = pend.filter(o => o.date !== TODAY);
-        const staleTotal = stale.reduce((s, o) => s + (o.total || 0), 0);
-        // Land on the OLDEST unsettled day — the feed shows one date at a time,
-        // so opening "today" would hide exactly the orders being warned about.
-        const oldest = pend.reduce((a, o) => (o.date < a ? o.date : a), pend[0].date);
-        return (
-          <button onClick={() => (onSeeUncollected ? onSeeUncollected(oldest) : onSeeOrders?.())}
-            style={{ width: '100%', textAlign: 'left', display: 'flex', alignItems: 'center', gap: 12, background: stale.length ? '#FFF1F1' : '#FFF8E1', border: `1.5px solid ${stale.length ? '#E4A0A0' : '#E0B100'}`, borderRadius: 14, padding: '12px 14px', marginBottom: 12, cursor: 'pointer' }}>
-            <span style={{ fontSize: 20 }}>{stale.length ? '⚠️' : '⏳'}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: 0.5, color: colors.muted }}>UNCOLLECTED · NOT IN TODAY'S REVENUE</div>
-              <div style={{ fontSize: 18, fontWeight: 900, color: colors.ink }}>
-                ₹{total.toLocaleString('en-IN')} <span style={{ fontSize: 12, fontWeight: 700, color: colors.muted }}>· {pend.length} order{pend.length > 1 ? 's' : ''}</span>
-              </div>
-              {stale.length > 0 && (
-                <div style={{ fontSize: 11.5, fontWeight: 700, color: colors.red, marginTop: 2 }}>
-                  ₹{staleTotal.toLocaleString('en-IN')} from {stale.length} order{stale.length > 1 ? 's' : ''} older than today — settle or cancel
-                </div>
-              )}
-            </div>
-            <span style={{ fontSize: 12, fontWeight: 800, color: brand.navy, flexShrink: 0 }}>View →</span>
-          </button>
-        );
-      })()}
-
-      {/* Per-vendor switches — owner turns Zomato/Swiggy on or off for their
-          cart (staff buttons + report cards follow). Admin's opt-in gates the
-          whole row. */}
-      {onlineVendorsFor(state, cartId) && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '10px 12px', marginBottom: 12 }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, flex: 1 }}>🛵 ONLINE VENDORS</span>
-          {[['zomato', 'Zomato', '#E23744'], ['swiggy', 'Swiggy', '#FC8019']].map(([key, lab, col]) => {
-            const on = vendorEnabledFor(state, cartId, key);
-            return (
-              <button key={key} onClick={() => onToggleVendor(key)}
-                style={{ border: `1.5px solid ${on ? col : colors.border}`, background: on ? col : '#fff', color: on ? '#fff' : colors.muted, borderRadius: 20, padding: '5px 12px', fontSize: 12, fontWeight: 800, cursor: 'pointer' }}>
-                {lab} {on ? 'On' : 'Off'}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Printable "we're on Zomato/Swiggy" QR board. Only offered once a listing
-          link is saved (Edit cart → Also listed on). */}
-      {(() => {
-        const vl = vendorLinksFor(state, cartId);
-        const avail = [['zomato', 'Zomato', '#E23744'], ['swiggy', 'Swiggy', '#FC8019']].filter(([k]) => vl[k]);
-        if (!avail.length || !cart) return null;
-        return (
-          <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '10px 12px', marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: colors.muted, letterSpacing: 0.5, marginBottom: 8 }}>🪧 PRINT QR BOARD FOR THE CART</div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              {avail.map(([key, lab, col]) => (
-                <button key={key} onClick={() => printVendorBoard(cart, key)}
-                  style={{ flex: 1, border: `1.5px solid ${col}`, background: '#fff', color: col, borderRadius: 10, padding: '9px 10px', fontSize: 12.5, fontWeight: 800, cursor: 'pointer' }}>
-                  🖨️ {lab} board
-                </button>
-              ))}
-            </div>
-            <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 7, lineHeight: 1.4 }}>
-              The QR points at your own link, so if {avail[0][1]} ever changes the listing URL you just update it here — printed boards keep working.
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* Share today's summary */}
-      <button onClick={shareToday} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, background: '#fff', border: `1px solid ${colors.border}`, color: brand.navy, padding: 12, borderRadius: 12, fontWeight: 700, fontSize: 13.5, cursor: 'pointer', marginBottom: 16 }}>
-        📤 Share today's summary
-      </button>
-
-      {/* Stock run-out estimate (today's selling pace) */}
-      {showRunOut && (
-        <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 14, marginBottom: 16 }}>
-          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>WILL LAST (AT TODAY'S PACE)</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {runOut.map(r => {
-              const out = r.remaining === 0;
-              const txt = out ? 'Out of stock' : r.hrsLeft === null ? 'No sales yet' : r.hrsLeft >= 6 ? 'Plenty (6h+)' : `~${r.hrsLeft.toFixed(1)} hrs left`;
-              const col = out || (r.hrsLeft !== null && r.hrsLeft < 1) ? colors.red : (r.hrsLeft !== null && r.hrsLeft < 2) ? '#B5460B' : colors.muted;
-              return (
-                <div key={r.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 14 }}>
-                  <span style={{ fontWeight: 600 }}>{r.label} <span style={{ color: colors.muted, fontSize: 12 }}>· {r.remaining} pcs</span></span>
-                  <span style={{ fontWeight: 800, color: col }}>{txt}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Uncollected orders — all days, not just today. Unpaid orders aren't in
-          revenue until settled; this makes sure none stay hidden if they roll
-          past their day. Staff collect them in the Pending tab. */}
-      {uncollected.length > 0 && (
-        <div style={{ background: '#fff', border: `1px solid ${colors.accent}`, borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: '#FFF4E5' }}>
-            <div style={{ fontWeight: 800, fontSize: 14, color: '#B5460B' }}>⏳ {uncollected.length} uncollected order{uncollected.length > 1 ? 's' : ''}</div>
-            <div style={{ fontWeight: 900, fontSize: 15, color: '#B5460B' }}>₹{uncollectedTotal.toLocaleString('en-IN')}</div>
-          </div>
-          {uncollected.map(o => (
-            <div key={o.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderTop: `1px solid ${colors.border}` }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 13.5 }}>#{o.token} · ₹{o.total}</div>
-                <div style={{ fontSize: 11.5, color: colors.muted }}>{o.date !== TODAY ? `${o.date} · ` : ''}{o.time}{o.staff ? ` · ${o.staff}` : ''}{o.source === 'staff-entry' ? ' · counter' : ' · QR'}</div>
-              </div>
-              <span style={{ fontSize: 10, padding: '3px 9px', background: '#FFF1E7', color: '#FF4D00', borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>UNPAID</span>
-            </div>
-          ))}
-          <div style={{ fontSize: 11, color: colors.muted, padding: '8px 14px', borderTop: `1px solid ${colors.border}` }}>Staff collect these in the Pending tab. Revenue updates only after payment.</div>
-        </div>
-      )}
-
-      {/* Stock alerts — compact one-line chip */}
-      {lowTypes.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FFF4E5', border: '1px solid #FFD9A0', borderRadius: 10, padding: '8px 12px', marginBottom: 12, fontSize: 12.5 }}>
-          <AlertTriangle size={15} color="#B5460B" style={{ flexShrink: 0 }} />
-          <span style={{ fontWeight: 800, color: '#B5460B' }}>Low freezer stock:</span>
-          <span style={{ color: colors.ink, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{lowTypes.map(st => st.label).join(', ')}</span>
-        </div>
-      )}
-
-      {stockTypes.length > 0 && <>
-      <SectionHeader title="Live Inventory" />
-      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, overflow: 'hidden' }}>
-        <div style={{ display: 'flex', padding: '10px 16px', background: '#FAF8F2', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: colors.muted }}>
-          <div style={{ flex: 1 }}>ITEM</div>
-          <div style={{ width: 88, textAlign: 'right' }}>❄️ FREEZER</div>
-          <div style={{ width: 88, textAlign: 'right' }}>🛒 ON CART</div>
-        </div>
-        {stockTypes.map(st => {
-          const b = inv[st.key] || { freezer: 0, cart: 0 };
-          const low = b.freezer < 100;
-          return (
-            <div key={st.key} style={{ display: 'flex', alignItems: 'center', padding: '13px 16px', borderTop: `1px solid ${colors.border}` }}>
-              <div style={{ flex: 1, fontWeight: 700, fontSize: 14 }}>{st.label}</div>
-              <div style={{ width: 88, textAlign: 'right' }}>
-                <span style={{ fontWeight: 800, fontSize: 16, color: low ? colors.red : colors.ink }}>{b.freezer}</span>
-                <span style={{ fontSize: 11, color: colors.muted }}> pcs</span>
-                {low && <span style={{ display: 'block', fontSize: 10, color: colors.red, fontWeight: 700 }}>LOW</span>}
-              </div>
-              <div style={{ width: 88, textAlign: 'right' }}>
-                <span style={{ fontWeight: 800, fontSize: 16 }}>{b.cart}</span>
-                <span style={{ fontSize: 11, color: colors.muted }}> pcs</span>
-              </div>
-            </div>
-          );
-        })}
-        {stockTypes.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13, borderTop: `1px solid ${colors.border}` }}>No stock types yet.</div>}
-      </div>
-      </>}
-
-      {/* Ware audit — live "should remain" per serving type so the owner can
-          spot-check the physical stacks anytime; a shortfall means unpunched
-          servings (half → 6" plate, full → 7" plate, mocktail → glass). */}
-      {activeWare.length > 0 && (
-        <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, overflow: 'hidden' }}>
-          <div style={{ padding: '10px 16px', background: '#FAF8F2', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: colors.muted }}>🍽️ PLATES / GLASSES SHOULD REMAIN</div>
-          {activeWare.map(w => { const l = ware[w.key]; return (
-            <div key={w.key} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', borderTop: `1px solid ${colors.border}` }}>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: 13.5 }}>{w.label}</div>
-                <div style={{ fontSize: 11, color: colors.muted }}>{l.closed ? '✓ reconciled — day closed' : `${l.opening > 0 ? `${l.opening} carried + ` : ''}${l.supplied} given − ${l.used} served`}</div>
-              </div>
-              {!l.closed && onResetWare && (
-                <button onClick={() => onResetWare(w.key)} title="Recount / hard-reset this count" style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 8, padding: '4px 9px', fontSize: 11, fontWeight: 700, color: colors.muted, cursor: 'pointer', whiteSpace: 'nowrap' }}>↺ Reset</button>
-              )}
-              <div style={{ fontSize: 20, fontWeight: 900, color: l.expected < 0 ? colors.red : colors.ink, minWidth: 30, textAlign: 'right' }}>{l.expected}</div>
-            </div>
-          ); })}
-        </div>
-      )}
-
-      <SectionHeader title="Recent Orders" />
-      <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {todayOrders.slice(-5).reverse().map(o => (
-          <OrderRow key={o.id} order={o} />
-        ))}
-        {todayOrders.length === 0 && (
-          <div style={{ padding: 32, textAlign: 'center', color: colors.muted, fontSize: 14 }}>No orders yet today</div>
-        )}
-      </div>
+  return <div className="owner-dashboard">
+    <div className="dashboard-heading">
+      <div><span className="eyebrow">{istDateLabel(new Date(), {weekday:'short',day:'numeric',month:'short'})}</span><h1>Overview</h1></div>
+      <button className="quiet-button" onClick={onEditProfile}><Settings size={17}/> Cart settings</button>
     </div>
-  );
+    <div className="store-status">
+      <span className={openState.open?'status-dot open':'status-dot'}/><strong>{openState.open?'Open':'Closed'}</strong>
+      <button role="switch" aria-label="Allow orders during opening hours" aria-checked={openState.open} disabled={!openState.open&&!cart?.closedManually} title={!openState.open&&!cart?.closedManually?'Outside scheduled opening hours':'Pause or resume orders'} className="store-switch" onClick={onToggleOpen}><span/></button>
+      <details className="hours-info"><summary aria-label="Opening hours and availability">ⓘ</summary><div>Hours: {cart?.openTime || 'Not set'}–{cart?.closeTime || 'Not set'} IST.<br/>{cart?.closedManually?'Manually paused.':'Orders follow these opening hours.'}</div></details>
+      <button className="sync-button" disabled={refreshing} onClick={doRefresh}>{refreshing?'Refreshing…':agoLabel} ↻</button>
+    </div>
+    <OpeningAlerts cartId={cartId} compact openTime={cart?.openTime} onOpenStock={onOpeningStock}/>
+    <section className="revenue-overview">
+      <span>Collected today · Cash + UPI</span><strong>₹{todayRevenue.toLocaleString('en-IN')}</strong>
+      <div>{todayOrders.filter(isPaid).length} paid orders · {piecesSold} pieces</div>
+      <div className="revenue-detail"><span>Cash <b>₹{cashRevenue.toLocaleString('en-IN')}</b></span><span>UPI <b>₹{upiRevenue.toLocaleString('en-IN')}</b></span><span>Expenses <b>₹{todayExpenses.toLocaleString('en-IN')}</b></span></div>
+    </section>
+    <section className="partner-card"><div className="card-heading"><h2>Daily operations</h2><span>{closedToday?'Reconciled':'In progress'}</span></div>
+      <div className="operation-grid"><button onClick={onOpeningStock}><Boxes size={20}/><span>Opening stock<small>Manager & quantities</small></span><ArrowRight size={16}/></button><button onClick={()=>onReconcile(nudgeDate)}><CheckCircle2 size={20}/><span>Close the day<small>{closedToday?'View saved report':'Cash & stock check'}</small></span><ArrowRight size={16}/></button></div>
+      <PrepChecklist state={state} updateState={updateState} cartId={cartId}/>
+    </section>
+    {uncollected.length>0 && <button className="attention-row" onClick={()=>onSeeUncollected(uncollected.map(o=>o.date).sort()[0])}><Clock size={18}/>{uncollected.length} unpaid orders · ₹{uncollectedTotal.toLocaleString('en-IN')}<ArrowRight size={16}/></button>}
+    <section className="partner-card"><div className="card-heading"><h2>Sales trend</h2><span>Last 7 days</span></div><div className="mini-trend" role="img" aria-label="Cash and UPI revenue over the last seven days">{series.map((v,i)=><div key={last7[i]}><small>₹{v.toLocaleString('en-IN')}</small><i style={{height:Math.max(3,v/maxRev*64)}}/><span>{istDateLabel(last7[i],{weekday:'short'})}</span></div>)}</div></section>
+    {stockTypes.length>0 && <section className="partner-card"><div className="card-heading"><h2>Live stock</h2><button className="text-button" onClick={onOpeningStock}>Manage →</button></div><div className="stock-table-heading"><span>Item</span><span>Freezer</span><span>On cart</span></div>{stockTypes.map(st=>{const b=inv?.[st.key] || {freezer:0,cart:0};return <div className="stock-item" key={st.key}><div><strong>{st.label}</strong><small className={b.cart===0?'warning-text':''}>{b.cart===0?'Cart empty':b.freezer<100?'Low freezer stock':'Available'}</small></div><span>{b.freezer}<small>pcs</small></span><span>{b.cart}<small>pcs</small></span></div>;})}</section>}
+    <section className="partner-card"><div className="card-heading"><h2>Recent orders</h2><button className="text-button" onClick={onSeeOrders}>View all →</button></div>{todayOrders.slice(-3).reverse().map(o=><OrderRow key={o.id} order={o}/>)}{!todayOrders.length&&<p className="empty-state">Today’s orders will appear here.</p>}</section>
+    <button className="quiet-button share-summary" onClick={shareToday}>Share today’s summary</button>
+  </div>;
 }
 
 

@@ -1,8 +1,9 @@
+import { printVendorBoard } from '../lib/vendorBoard';
 import { requestHeaders } from '../lib/supabase';
 import React, { useState, useEffect } from 'react';
 import { Plus, Trash2, Edit3, AlertTriangle } from 'lucide-react';
-import { pushMenus } from '../lib/store';
-import { adminBtn, brand, colors, editInput, editLabel, fileToBase64, groupByCat, menuFor, menuLabelFor, isSingleItem, itemPieces, TYPE_CHIP } from '../core';
+
+import { adminBtn, brand, partnerColors as colors, editInput, editLabel, fileToBase64, groupByCat, menuFor, menuLabelFor, isSingleItem, itemPieces, TYPE_CHIP } from '../core';
 import { printTest } from '../lib/escpos';
 import { EditModalShell, SectionHeader } from '../components/shared';
 
@@ -146,8 +147,9 @@ function MenuEditor({ state, updateState, cartId, cart }) {
 
   return (
     <div>
-      <SectionHeader title="Menu Setup" subtitle={cart?.name} />
+      <SectionHeader title="Menu" subtitle={cart?.name} />
 
+      <details className="menu-import"><summary>Import from a menu photo</summary>
       <input ref={fileRef} type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={onPhoto} />
       <button onClick={() => fileRef.current?.click()} disabled={busy}
         style={{ width: '100%', background: brand.teal, color: '#fff', padding: 16, borderRadius: 12, border: 'none', fontWeight: 700, fontSize: 14, cursor: busy ? 'wait' : 'pointer', marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: busy ? 0.7 : 1 }}>
@@ -156,6 +158,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       <div style={{ fontSize: 11, color: colors.muted, textAlign: 'center', marginBottom: 12 }}>Multi-page menu? Select all the photos at once — they're read together.</div>
       {aiNote && <div style={{ background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: brand.text, marginBottom: 16 }}>{aiNote}</div>}
 
+      </details>
       <SectionNameControl emoji={label.emoji} name={label.label} onSave={(emoji, name) => setMenu({ ...menu, itemEmoji: emoji, itemLabel: name })} />
 
       <MenuSection title={`${label.emoji} ${label.label}`} hint="Prices + optional pieces" grouped
@@ -218,19 +221,19 @@ function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedup
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>
           {r.primary}
-          {r.dup && <span style={{ fontSize: 10, fontWeight: 800, color: '#8A6D00', background: '#FCEAB0', borderRadius: 6, padding: '2px 6px' }}>DUPLICATE</span>}
+          {r.dup && <span style={{ fontSize: 10, fontWeight: 650, color: '#8A6D00', background: '#FCEAB0', borderRadius: 6, padding: '2px 6px' }}>DUPLICATE</span>}
         </div>
         <div style={{ fontSize: 12, color: colors.muted }}>{r.secondary}</div>
       </div>
-      <button onClick={() => onEdit(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={14}/></button>
-      <button onClick={() => onRemove(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
+      <button aria-label={`Edit ${r.name}`} onClick={() => onEdit(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={14}/></button>
+      <button aria-label={`Remove ${r.name}`} onClick={() => onRemove(r.id)} style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 7, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={14} color={colors.red}/></button>
     </div>
   );
   const groups = grouped ? groupByCat(rows.map(r => ({ ...r, cat: r.group }))) : null;
   return (
     <div style={{ marginBottom: 18 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <div><div style={{ fontWeight: 800, fontSize: 16 }}>{title}</div><div style={{ fontSize: 11, color: colors.muted }}>{hint}</div></div>
+        <div><div style={{ fontWeight: 650, fontSize: 16 }}>{title}</div><div style={{ fontSize: 11, color: colors.muted }}>{hint}</div></div>
         <button onClick={onAdd} style={{ ...adminBtn, color: brand.navy, display: 'flex', alignItems: 'center', gap: 4 }}><Plus size={14}/> Add</button>
       </div>
       {dupCount > 0 && (
@@ -243,7 +246,7 @@ function MenuSection({ title, hint, rows, grouped = false, dupCount = 0, onDedup
       {grouped && rows.length > 0 ? (
         groups.map(g => (
           <div key={g.cat} style={{ marginBottom: 10 }}>
-            <div style={{ fontSize: 11, fontWeight: 800, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '0 2px 6px' }}>{catStyles[g.cat]?.icon ? `${catStyles[g.cat].icon} ` : ''}{g.cat}</div>
+            <div style={{ fontSize: 11, fontWeight: 650, color: colors.muted, letterSpacing: 0.5, textTransform: 'uppercase', margin: '0 2px 6px' }}>{catStyles[g.cat]?.icon ? `${catStyles[g.cat].icon} ` : ''}{g.cat}</div>
             <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>{g.items.map(rowEl)}</div>
           </div>
         ))
@@ -388,7 +391,7 @@ function SimpleItemModal({ initial, section, onSave, onClose }) {
 // Owner edits their cart's display + contact details (same fields as onboarding,
 // minus login credentials, which stay admin-managed).
 
-function CartProfileModal({ cart, printer = {}, vendorLinks = {}, onSave, onClose }) {
+function CartProfileModal({ cart, printer = {}, vendorLinks = {}, vendors, onSave, onClose }) {
   const [f, setF] = useState({
     name: cart?.name || '', emoji: cart?.emoji || '🛒', logo: cart?.logo || '', tagline: cart?.tagline || '',
     cuisine: cart?.cuisine || '', location: cart?.location || '', timing: cart?.timing || '',
@@ -397,6 +400,7 @@ function CartProfileModal({ cart, printer = {}, vendorLinks = {}, onSave, onClos
     openTime: cart?.openTime || '', closeTime: cart?.closeTime || '',
     printerEnabled: !!printer.enabled, printerFooter: printer.footer || '', printerAutoPrint: !!printer.autoPrint,
     zomatoUrl: vendorLinks.zomato || '', swiggyUrl: vendorLinks.swiggy || '',
+    vendors: vendors || null,
   });
   const [error, setError] = useState('');
   const logoRef = React.useRef(), qrRef = React.useRef();
@@ -418,10 +422,13 @@ function CartProfileModal({ cart, printer = {}, vendorLinks = {}, onSave, onClos
       openTime: f.openTime || null, closeTime: f.closeTime || null,
       printerEnabled: !!f.printerEnabled, printerFooter: f.printerFooter.trim(), printerAutoPrint: !!f.printerAutoPrint,
       zomatoUrl: f.zomatoUrl.trim(), swiggyUrl: f.swiggyUrl.trim(),
+      ...(f.vendors ? {vendors:f.vendors}:{}),
     });
   };
   return (
     <EditModalShell title="Edit cart details" onClose={onClose} onSave={submit} error={error}>
+      {f.vendors && <fieldset className="vendor-settings"><legend>Online channels</legend>{['zomato','swiggy'].map(v=><label key={v}><input type="checkbox" checked={!!f.vendors[v]} onChange={e=>setF(p=>({...p,vendors:{...p.vendors,[v]:e.target.checked}}))}/>{v==='zomato'?'Zomato':'Swiggy'}</label>)}</fieldset>}
+      {vendors && (vendorLinks.zomato || vendorLinks.swiggy) && <details className="menu-import"><summary>Print online ordering QR</summary>{['zomato','swiggy'].filter(v=>vendorLinks[v]).map(v=><button type="button" className="quiet-button" key={v} onClick={()=>printVendorBoard(cart,v)}>Print {v} board</button>)}<p>Uses your saved listing links.</p></details>}
       {/* Logo / icon */}
       <div style={editLabel}>CART LOGO</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
@@ -477,9 +484,9 @@ function CartProfileModal({ cart, printer = {}, vendorLinks = {}, onSave, onClos
       </div>
 
       <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 12px', paddingTop: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: brand.navy, marginBottom: 2 }}>🛵 Also listed on</div>
+        <div style={{ fontSize: 13, fontWeight: 650, color: brand.navy, marginBottom: 2 }}>🛵 Also listed on</div>
         <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10 }}>
-          Paste your listing links. Customers see an “Order on Zomato” button on your menu page, and you can print a QR board from the dashboard.
+          Paste your listing links. Customers see an “Order on Zomato” button on your menu page, and you can print a QR board here after saving your links.
         </div>
         <div style={editLabel}>ZOMATO LINK</div>
         <input value={f.zomatoUrl} onChange={set('zomatoUrl')} placeholder="https://zomato.onelink.me/..." style={editInput} />
@@ -488,7 +495,7 @@ function CartProfileModal({ cart, printer = {}, vendorLinks = {}, onSave, onClos
       </div>
 
       <div style={{ borderTop: `1px solid ${brand.border}`, margin: '4px 0 12px', paddingTop: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: brand.navy, marginBottom: 2 }}>🖨️ Receipt printer</div>
+        <div style={{ fontSize: 13, fontWeight: 650, color: brand.navy, marginBottom: 2 }}>🖨️ Receipt printer</div>
         <div style={{ fontSize: 11.5, color: colors.muted, marginBottom: 10 }}>Prints a 58mm bill via the RawBT app on this phone (install it + set your printer as default). Shows a Print button to staff.</div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 14, marginBottom: 10, cursor: 'pointer' }}>
           <input type="checkbox" checked={!!f.printerEnabled} onChange={e => setF(p => ({ ...p, printerEnabled: e.target.checked }))} style={{ width: 18, height: 18, accentColor: brand.navy }} /> Enable receipt printing

@@ -32,6 +32,9 @@ public final class PartnerMessagingService extends FirebaseMessagingService {
     static org.json.JSONObject status(android.content.Context c) throws Exception {
         boolean configured=com.google.firebase.FirebaseApp.initializeApp(c)!=null;
         if(configured)com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token->c.getSharedPreferences("fcm",MODE_PRIVATE).edit().putString("token",token).apply());
-        return new org.json.JSONObject().put("configured",configured).put("token",c.getSharedPreferences("fcm",MODE_PRIVATE).getString("token",""));
+        PartnerAlerts.channel(c);
+        boolean notifications=PartnerAlerts.manager(c).areNotificationsEnabled();
+        if(android.os.Build.VERSION.SDK_INT>=26) notifications &= PartnerAlerts.manager(c).getNotificationChannel(PartnerAlerts.CHANNEL).getImportance()!=android.app.NotificationManager.IMPORTANCE_NONE;
+        return new org.json.JSONObject().put("notifications",notifications).put("configured",configured).put("token",c.getSharedPreferences("fcm",MODE_PRIVATE).getString("token",""));
     }
 }

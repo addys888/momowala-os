@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX, ChevronDown, ChevronRight } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, adminBtn, brand, colors, cashPart, upiPart, dayCloseWare, editInput, editLabel, isOnline, isPaid, istDateLabel, localDate, menuFor, vendorEnabledFor, wareForOrder } from '../../core';
-import { Reconciliation } from './Reconciliation';
+import { recordedAverageOrder } from '../../lib/reportMetrics';
+import { useState } from 'react';
+import { TrendingUp, Plus, Check, Clock, IndianRupee, Trash2, Edit3, ChevronDown, ChevronRight } from 'lucide-react';
+
+import { TODAY, WARE_TYPES, brand, partnerColors as colors, cashPart, upiPart, dayCloseWare, editInput, editLabel, isOnline, isPaid, istDateLabel, localDate, menuFor, vendorEnabledFor } from '../../core';
+
 import { EditModalShell, MetricCard, SectionHeader } from '../../components/shared';
 
 const EXPENSE_CATEGORIES = ['Frozen momo stock', 'Vegetables / paneer', 'Oil & consumables', 'Gas / fuel', 'Packaging', 'Rent / pitch', 'Other'];
@@ -259,8 +260,10 @@ function Reports({ state, updateState, cartId }) {
   const prevOrders = state.orders.filter(o => o.cartId === cartId && o.date >= prevFrom && o.date <= prevTo && isPaid(o)).length;
   const prevSpend = (state.expenses || []).filter(e => e.cartId === cartId && e.date >= prevFrom && e.date <= prevTo).reduce((s, e) => s + e.amount, 0);
   const prevNet = prevRevenue - prevSpend;
-  const avgOrder = ordersCount ? Math.round(revenue / ordersCount) : 0;
-  const prevAvg = prevOrders ? Math.round(prevRevenue / prevOrders) : 0;
+  const counterOrders=orders.filter(o=>!isOnline(o));
+  const avgOrder = recordedAverageOrder(counterOrders);
+  const priorCounterOrders=state.orders.filter(o=>o.cartId===cartId&&o.date>=prevFrom&&o.date<=prevTo&&isPaid(o)&&!isOnline(o));
+  const prevAvg=recordedAverageOrder(priorCounterOrders);
   const pct = (c, p) => p > 0 ? Math.round(((c - p) / p) * 100) : null;
   const payTotal = cash + upi + online;
   const pmix = payTotal > 0 ? { cash: Math.round(cash / payTotal * 100), upi: Math.round(upi / payTotal * 100), online: Math.round(online / payTotal * 100) } : { cash: 0, upi: 0, online: 0 };
@@ -306,19 +309,19 @@ function Reports({ state, updateState, cartId }) {
 
   return (
     <div>
-      <SectionHeader title="Records" subtitle="Sales · expenses · wastage" />
+      <SectionHeader title="Reports" subtitle="Performance & financial records" />
 
       {/* Earnings | Expenses sub-tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-        {[['revenue', '📈 Earnings'], ['expense', '💸 Expenses']].map(([k, lab]) => (
-          <button key={k} onClick={() => setView(k)} style={{ flex: 1, padding: '11px 0', background: view === k ? colors.ink : '#fff', color: view === k ? colors.primary : colors.ink, border: `1px solid ${view === k ? colors.ink : colors.border}`, borderRadius: 12, fontSize: 14, fontWeight: 800, cursor: 'pointer' }}>{lab}</button>
+        {[['revenue', 'Overview'], ['expense', 'Expenses']].map(([k, lab]) => (
+          <button key={k} onClick={() => setView(k)} style={{ flex: 1, padding: '11px 0', background: view === k ? colors.ink : '#fff', color: view === k ? colors.primary : colors.ink, border: `1px solid ${view === k ? colors.ink : colors.border}`, borderRadius: 12, fontSize: 14, fontWeight: 650, cursor: 'pointer' }}>{lab}</button>
         ))}
       </div>
 
       {view === 'revenue' && (<>
       {/* Period toggle */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
-        {[['today', 'Today'], ['week', 'Week'], ['month', 'Month'], ['day', '📅 Pick day']].map(([k, lab]) => (
+        {[['today', 'Today'], ['week', 'Week'], ['month', 'Month'], ['day', 'Pick date']].map(([k, lab]) => (
           <button key={k} onClick={() => setPeriod(k)} style={{ flex: 1, padding: '9px 0', background: period === k ? colors.ink : '#fff', color: period === k ? colors.primary : colors.ink, border: `1px solid ${period === k ? colors.ink : colors.border}`, borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>{lab}</button>
         ))}
       </div>
@@ -334,47 +337,32 @@ function Reports({ state, updateState, cartId }) {
       {/* KPI tiles — headline metrics with period-over-period deltas */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
         {[
-          { lab: '💰 Revenue', val: `₹${revenue.toLocaleString('en-IN')}`, d: pct(revenue, prevRevenue), hero: true },
-          { lab: '🧾 Orders', val: `${ordersCount}`, d: pct(ordersCount, prevOrders) },
-          { lab: '🛍️ Avg order', val: `₹${avgOrder}`, d: pct(avgOrder, prevAvg) },
-          { lab: '📈 Net profit', val: `₹${net.toLocaleString('en-IN')}`, d: pct(net, prevNet) },
+          { lab: 'Collections', val: `₹${revenue.toLocaleString('en-IN')}`, d: pct(revenue, prevRevenue), hero: true },
+          { lab: 'Orders', val: `${ordersCount}`, d: pct(ordersCount, prevOrders) },
+          { lab: 'Recorded avg order', val: counterOrders.length?`₹${avgOrder}`:'—', d: avgOrder==null?null:pct(avgOrder, prevAvg) },
+          { lab: 'Net after expenses', val: `₹${net.toLocaleString('en-IN')}`, d: pct(net, prevNet) },
         ].map((k, i) => (
           <div key={i} style={{ background: k.hero ? colors.ink : '#fff', color: k.hero ? colors.primary : colors.ink, border: k.hero ? 'none' : `1px solid ${colors.border}`, borderRadius: 12, padding: 14 }}>
             <div style={{ fontSize: 11.5, color: k.hero ? colors.primary : colors.muted, opacity: k.hero ? 0.7 : 1, fontWeight: 600 }}>{k.lab}</div>
-            <div style={{ fontSize: 23, fontWeight: 900, marginTop: 5, letterSpacing: -0.5 }}>{k.val}</div>
+            <div style={{ fontSize: 23, fontWeight: 700, marginTop: 5, letterSpacing: -0.5 }}>{k.val}</div>
             <div style={{ marginTop: 4 }}>
               {k.d == null
                 ? <span style={{ fontSize: 10.5, color: k.hero ? colors.primary : colors.muted, opacity: 0.55 }}>— no prior data</span>
-                : <span style={{ fontSize: 11.5, fontWeight: 800, color: k.d >= 0 ? (k.hero ? '#7CE38B' : '#0F7B0F') : (k.hero ? '#FF8A8A' : '#C81E1E') }}>{k.d >= 0 ? '▲' : '▼'} {Math.abs(k.d)}% vs prev {{ today: 'day', week: 'week', month: 'month', day: 'day' }[period]}</span>}
+                : <span style={{ fontSize: 11.5, fontWeight: 650, color: k.d >= 0 ? (k.hero ? '#7CE38B' : '#0F7B0F') : (k.hero ? '#FF8A8A' : '#C81E1E') }}>{k.d >= 0 ? '▲' : '▼'} {Math.abs(k.d)}% vs prev {{ today: 'day', week: 'week', month: 'month', day: 'day' }[period]}</span>}
             </div>
           </div>
         ))}
       </div>
 
-      {/* Payment mix */}
-      {payTotal > 0 && (
-        <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-            <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>💳 PAYMENT MIX</div>
-            <div style={{ fontSize: 11, color: colors.muted }}>₹{payTotal.toLocaleString('en-IN')} total</div>
-          </div>
-          <div style={{ display: 'flex', height: 10, borderRadius: 6, overflow: 'hidden', gap: 2 }}>
-            {cash > 0 && <div style={{ width: `${pmix.cash}%`, background: '#1D9E75' }} />}
-            {upi > 0 && <div style={{ width: `${pmix.upi}%`, background: '#378ADD' }} />}
-            {online > 0 && <div style={{ width: `${pmix.online}%`, background: '#D85A30' }} />}
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginTop: 10, fontSize: 12 }}>
-            <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#1D9E75', marginRight: 6 }} />Cash ₹{cash.toLocaleString('en-IN')} · {pmix.cash}%</span>
-            <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#378ADD', marginRight: 6 }} />UPI ₹{upi.toLocaleString('en-IN')} · {pmix.upi}%</span>
-            {online > 0 && <span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: '#D85A30', marginRight: 6 }} />Online ₹{online.toLocaleString('en-IN')} · {pmix.online}%</span>}
-          </div>
-        </div>
-      )}
+      <section className="partner-card"><div className="card-heading"><h2>Collection mix</h2><span>{from} – {to}</span></div>
+        {payTotal>0 ? <div className="payment-chart"><svg viewBox="0 0 120 120" role="img" aria-label={`Cash ${pmix.cash}%, UPI ${pmix.upi}%, online ${pmix.online}%`}><circle cx="60" cy="60" r="44" fill="none" stroke="#edf0f4" strokeWidth="16"/>{[{value:cash,color:'#146b58',offset:0},{value:upi,color:'#386cb0',offset:cash},{value:online,color:'#bf7b32',offset:cash+upi}].map((v,i)=><circle key={i} cx="60" cy="60" r="44" fill="none" stroke={v.color} strokeWidth="16" pathLength="100" strokeDasharray={`${v.value/payTotal*100} ${100-v.value/payTotal*100}`} strokeDashoffset={-v.offset/payTotal*100} transform="rotate(-90 60 60)"/>)}<text x="60" y="57" textAnchor="middle" fontSize="10" fill="#64748b">Collections</text><text x="60" y="73" textAnchor="middle" fontSize="12" fontWeight="600">₹{payTotal.toLocaleString('en-IN')}</text></svg><div>{[['Cash',cash,'#146b58'],['UPI',upi,'#386cb0'],['Online',online,'#bf7b32']].map(([label,value,color])=><div className="chart-legend" key={label}><i style={{background:color}}/><span>{label}</span><strong>₹{value.toLocaleString('en-IN')}</strong></div>)}</div></div>:<p className="empty-state">No collections in this period.</p>}
+        <p className="chart-caption">Cash and UPI use saved counts for reconciled days, live orders otherwise. Online sales await platform settlement.</p>
+      </section>
 
       {/* Earnings chart — daily / weekly / monthly in-hand revenue trend */}
       <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>📈 EARNINGS TREND</div>
+          <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>EARNINGS TREND</div>
           <div style={{ display: 'flex', gap: 4, background: '#F1EFE8', borderRadius: 20, padding: 3 }}>
             {[['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']].map(([k, lab]) => (
               <button key={k} onClick={() => setChartMode(k)} style={{ border: 'none', background: chartMode === k ? '#fff' : 'transparent', color: chartMode === k ? colors.ink : colors.muted, borderRadius: 16, padding: '4px 10px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>{lab}</button>
@@ -391,12 +379,12 @@ function Reports({ state, updateState, cartId }) {
           <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 10 }}>🏆 TOP SELLERS · {label.toUpperCase()}</div>
           {topSellers.map((t, i) => (
             <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 0', borderBottom: i < topSellers.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: colors.muted, width: 16 }}>{i + 1}</span>
+              <span style={{ fontSize: 12, fontWeight: 650, color: colors.muted, width: 16 }}>{i + 1}</span>
               <span style={{ flex: 1, fontSize: 13, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
               <div style={{ width: '38%', height: 8, background: '#F1EFE8', borderRadius: 4, overflow: 'hidden' }}>
                 <div style={{ width: `${Math.max(6, Math.round(t.rev / maxItemRev * 100))}%`, height: '100%', background: colors.ink, borderRadius: 4 }} />
               </div>
-              <span style={{ fontSize: 12.5, fontWeight: 800, minWidth: 52, textAlign: 'right' }}>₹{t.rev.toLocaleString('en-IN')}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 650, minWidth: 52, textAlign: 'right' }}>₹{t.rev.toLocaleString('en-IN')}</span>
             </div>
           ))}
         </div>
@@ -414,13 +402,13 @@ function Reports({ state, updateState, cartId }) {
         return (
         <div style={{ display: 'grid', gridTemplateColumns: showZ && showS ? '1fr 1fr' : '1fr', gap: 10, marginBottom: 12 }}>
           {showZ && <div style={{ background: '#FDE8EA', border: '1px solid #F5B5BC', borderRadius: 12, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, color: '#E23744', fontWeight: 800 }}>🛵 ZOMATO — {label.toUpperCase()}</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: '#E23744' }}>₹{zTot.toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 11, color: '#E23744', fontWeight: 650 }}>🛵 ZOMATO — {label.toUpperCase()}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#E23744' }}>₹{zTot.toLocaleString('en-IN')}</div>
             <div style={{ fontSize: 11, color: colors.muted }}>{zomatoOrders.length} order{zomatoOrders.length !== 1 ? 's' : ''} · payout weekly</div>
           </div>}
           {showS && <div style={{ background: '#FFF0E0', border: '1px solid #F5CFA4', borderRadius: 12, padding: '12px 14px' }}>
-            <div style={{ fontSize: 11, color: '#C56A00', fontWeight: 800 }}>🛵 SWIGGY — {label.toUpperCase()}</div>
-            <div style={{ fontSize: 20, fontWeight: 900, color: '#C56A00' }}>₹{sTot.toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 11, color: '#C56A00', fontWeight: 650 }}>🛵 SWIGGY — {label.toUpperCase()}</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#C56A00' }}>₹{sTot.toLocaleString('en-IN')}</div>
             <div style={{ fontSize: 11, color: colors.muted }}>{swiggyOrders.length} order{swiggyOrders.length !== 1 ? 's' : ''} · payout weekly</div>
           </div>}
         </div>
@@ -446,10 +434,10 @@ function Reports({ state, updateState, cartId }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: '#FFF3E0', borderRadius: 10, padding: '10px 12px', marginBottom: 12 }}>
               <Clock size={16} color="#B5460B" />
               <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 800, color: '#B5460B' }}>{pendingWeeks.length} week{pendingWeeks.length !== 1 ? 's' : ''} to validate</div>
+                <div style={{ fontSize: 12.5, fontWeight: 650, color: '#B5460B' }}>{pendingWeeks.length} week{pendingWeeks.length !== 1 ? 's' : ''} to validate</div>
                 <div style={{ fontSize: 11, color: '#B5460B', opacity: 0.85 }}>awaiting payout match</div>
               </div>
-              <div style={{ fontSize: 15, fontWeight: 900, color: '#B5460B' }}>₹{pendingTotal.toLocaleString('en-IN')}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: '#B5460B' }}>₹{pendingTotal.toLocaleString('en-IN')}</div>
             </div>
           )}
 
@@ -465,7 +453,7 @@ function Reports({ state, updateState, cartId }) {
                 <div onClick={() => setOpenMonths(p => ({ ...p, [mo.key]: !isOpen }))} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 2px', cursor: 'pointer' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     {isOpen ? <ChevronDown size={16} color={colors.muted} /> : <ChevronRight size={16} color={colors.muted} />}
-                    <span style={{ fontSize: 14, fontWeight: 800 }}>{istDateLabel(mo.key + '-01', { month: 'long', year: 'numeric' })}</span>
+                    <span style={{ fontSize: 14, fontWeight: 650 }}>{istDateLabel(mo.key + '-01', { month: 'long', year: 'numeric' })}</span>
                   </div>
                   <span style={{ fontSize: 12.5, color: colors.muted }}>₹{moTotal.toLocaleString('en-IN')} · {mo.weeks.length} wk{mo.weeks.length !== 1 ? 's' : ''}</span>
                 </div>
@@ -505,7 +493,7 @@ function Reports({ state, updateState, cartId }) {
         <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(catRows.length, 3)}, 1fr)`, gap: 10, marginBottom: 16 }}>
           {catRows.map(c => (
             <div key={c.key} style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '14px 12px', textAlign: 'center' }}>
-              <div style={{ fontSize: 22, fontWeight: 900 }}>{c.pcs}</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{c.pcs}</div>
               <div style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>{c.label}</div>
             </div>
           ))}
@@ -537,7 +525,7 @@ function Reports({ state, updateState, cartId }) {
       {/* Wastage — owner day-wise view #1 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>WASTAGE — {label.toUpperCase()}</div>
-        {wasted > 0 && <div style={{ fontSize: 12, fontWeight: 800, color: colors.red }}>{wasted} pcs</div>}
+        {wasted > 0 && <div style={{ fontSize: 12, fontWeight: 650, color: colors.red }}>{wasted} pcs</div>}
       </div>
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden', marginBottom: 16 }}>
         {wastage.slice().reverse().map(w => (
@@ -555,7 +543,7 @@ function Reports({ state, updateState, cartId }) {
         <div style={{ display: 'grid', gridTemplateColumns: wareGaps.length > 0 ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
           {[['💵 Cash', cashGap, '₹'], ['📱 UPI', upiGap, '₹'], ['🥟 Stock', stockGap, ' pcs'], ...wareGaps.map(w => [`${w.key === 'glass' ? '🥤 Glasses' : `🍽️ ${w.short} plates`}`, w.gap, ' pcs'])].map(([lab, val, unit]) => (
             <div key={lab} style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 8px', textAlign: 'center' }}>
-              <div style={{ fontSize: 17, fontWeight: 900, color: diffColor(val) }}>{val === 0 ? '✓' : `${val > 0 ? '+' : '−'}${unit === '₹' ? '₹' : ''}${Math.abs(val)}${unit === '₹' ? '' : unit}`}</div>
+              <div style={{ fontSize: 17, fontWeight: 700, color: diffColor(val) }}>{val === 0 ? '✓' : `${val > 0 ? '+' : '−'}${unit === '₹' ? '₹' : ''}${Math.abs(val)}${unit === '₹' ? '' : unit}`}</div>
               <div style={{ fontSize: 10.5, color: colors.muted, fontWeight: 600, marginTop: 2 }}>{lab}</div>
             </div>
           ))}
@@ -568,6 +556,7 @@ function Reports({ state, updateState, cartId }) {
         <div style={{ fontSize: 11, color: colors.muted, marginBottom: 16, marginTop: -6 }}>− = short / missing vs system · + = extra · ✓ = matched, across {periodCloses.length} day-close{periodCloses.length > 1 ? 's' : ''}.</div>
       </>)}
 
+      <details className="partner-card"><summary>Daily records · {historyDates.length} dates</summary>
       {/* Day-close history */}
       <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>DAY-CLOSE HISTORY</div>
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
@@ -580,7 +569,7 @@ function Reports({ state, updateState, cartId }) {
               <div key={date} style={{ padding: 14, borderBottom: `1px solid ${colors.border}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                   <div style={{ fontWeight: 700 }}>{istDateLabel(date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-                  <div style={{ fontWeight: 800 }}>₹{sys.revenue.toLocaleString('en-IN')}</div>
+                  <div style={{ fontWeight: 650 }}>₹{sys.revenue.toLocaleString('en-IN')}</div>
                 </div>
                 <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>📦 {sys.orders} orders · 🥟 {sys.pieces} pcs · system</div>
                 <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: '#FFF4E5', color: '#B5460B' }}>Not reconciled</span>
@@ -596,11 +585,11 @@ function Reports({ state, updateState, cartId }) {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                 <div style={{ fontWeight: 700 }}>{istDateLabel(d.date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontWeight: 800 }}>₹{collected.toLocaleString('en-IN')}</div>
+                  <div style={{ fontWeight: 650 }}>₹{collected.toLocaleString('en-IN')}</div>
                   {system !== collected && <div style={{ fontSize: 10.5, color: colors.muted }}>system ₹{system.toLocaleString('en-IN')}</div>}
                 </div>
               </div>
-              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>{d.unrecorded ? 'no orders punched · money entered by hand' : `📦 ${d.totalOrders} orders · 🥟 ${d.piecesSold} pcs · counted money`}</div>
+              <div style={{ fontSize: 11, color: colors.muted, marginBottom: 6 }}>{d.unrecorded ? 'no orders punched · money entered by hand' : `📦 ${d.totalOrders ?? '—'} orders · ${d.piecesSold ?? '—'} pcs · counted money`}</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                 {/* A hand-entered day has nothing to compare against — showing
                     "✓ matched" chips would claim a check that never happened. */}
@@ -626,6 +615,7 @@ function Reports({ state, updateState, cartId }) {
         })}
         {historyDates.length === 0 && <div style={{ padding: 24, textAlign: 'center', color: colors.muted, fontSize: 13 }}>No sales history yet.</div>}
       </div>
+      </details>
       </>)}
 
       {view === 'expense' && (<>
@@ -640,10 +630,10 @@ function Reports({ state, updateState, cartId }) {
         <div style={{ background: colors.ink, color: colors.primary, padding: 20, borderRadius: 14, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div>
             <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1.5 }}>{monthLabel.toUpperCase()} · TOTAL SPEND</div>
-            <div style={{ fontSize: 34, fontWeight: 900 }}>₹{monthTotal.toLocaleString('en-IN')}</div>
+            <div style={{ fontSize: 34, fontWeight: 700 }}>₹{monthTotal.toLocaleString('en-IN')}</div>
             <div style={{ fontSize: 12, opacity: 0.8, marginTop: 2 }}>{monthExpenses.length} entr{monthExpenses.length === 1 ? 'y' : 'ies'} · {expDates.length} day{expDates.length !== 1 ? 's' : ''}</div>
           </div>
-          <button onClick={() => setShowExpense(true)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '10px 14px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}><Plus size={15}/> Add</button>
+          <button onClick={() => setShowExpense(true)} style={{ background: colors.primary, color: colors.ink, border: 'none', padding: '10px 14px', borderRadius: 10, fontWeight: 650, fontSize: 13, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}><Plus size={15}/> Add</button>
         </div>
         {showExpense && <ExpenseModal onSubmit={addExpense} onClose={() => setShowExpense(false)} />}
 
@@ -652,11 +642,11 @@ function Reports({ state, updateState, cartId }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
             <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 14px' }}>
               <div style={{ fontSize: 11, color: colors.muted, fontWeight: 700 }}>💳 Cart (Kotak/UPI)</div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: colors.green }}>₹{cartMonth.toLocaleString('en-IN')}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: colors.green }}>₹{cartMonth.toLocaleString('en-IN')}</div>
             </div>
             <div style={{ background: axisMonth > 0 ? '#FFF4E5' : '#fff', border: `1px solid ${axisMonth > 0 ? '#F0C27B' : colors.border}`, borderRadius: 12, padding: '12px 14px' }}>
               <div style={{ fontSize: 11, color: colors.muted, fontWeight: 700 }}>🏦 Axis credit (borrowed)</div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: axisMonth > 0 ? '#B5460B' : colors.muted }}>₹{axisMonth.toLocaleString('en-IN')}</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: axisMonth > 0 ? '#B5460B' : colors.muted }}>₹{axisMonth.toLocaleString('en-IN')}</div>
               {axisAllTime > 0 && <div style={{ fontSize: 10.5, color: colors.muted, marginTop: 2 }}>all-time: ₹{axisAllTime.toLocaleString('en-IN')}</div>}
             </div>
           </div>
@@ -669,17 +659,17 @@ function Reports({ state, updateState, cartId }) {
           return (
             <div key={date} style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                <div style={{ fontSize: 12, fontWeight: 800, color: brand.navy }}>{istDateLabel(date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
-                <div style={{ fontSize: 12, fontWeight: 800, color: colors.red }}>₹{dayTotal.toLocaleString('en-IN')}</div>
+                <div style={{ fontSize: 12, fontWeight: 650, color: brand.navy }}>{istDateLabel(date, { weekday: 'short', day: 'numeric', month: 'short' })}</div>
+                <div style={{ fontSize: 12, fontWeight: 650, color: colors.red }}>₹{dayTotal.toLocaleString('en-IN')}</div>
               </div>
               <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
                 {dayItems.map(e => (
                   <div key={e.id} style={{ padding: '12px 14px', borderBottom: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>{e.category}{e.fund === 'personal' && <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.5, padding: '2px 6px', borderRadius: 6, background: '#FFF4E5', color: '#B5460B' }}>🏦 AXIS</span>}</div>
+                      <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 6 }}>{e.category}{e.fund === 'personal' && <span style={{ fontSize: 9, fontWeight: 650, letterSpacing: 0.5, padding: '2px 6px', borderRadius: 6, background: '#FFF4E5', color: '#B5460B' }}>🏦 AXIS</span>}</div>
                       {e.note && <div style={{ fontSize: 12, color: colors.muted }}>{e.note}</div>}
                     </div>
-                    <div style={{ fontWeight: 800 }}>₹{e.amount}</div>
+                    <div style={{ fontWeight: 650 }}>₹{e.amount}</div>
                     <button onClick={() => setEditExpenseItem(e)} title="Edit" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={13} color={brand.navy}/></button>
                     <button onClick={() => setDelExpense(e)} title="Delete" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
                   </div>

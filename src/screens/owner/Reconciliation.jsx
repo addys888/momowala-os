@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { TODAY, WARE_TYPES, brand, colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, stockOversell, wareLedger } from '../../core';
+import { useState, useEffect } from 'react';
+import { Clock, AlertCircle, AlertTriangle, CheckCircle2 } from 'lucide-react';
+
+import { WARE_TYPES, brand, partnerColors as colors, cashPart, upiPart, isOnline, isPaid, istDateLabel, istNowMinutes, localDate, menuFor, stockOversell, wareLedger } from '../../core';
 import { ReconciliationRecovery } from '../../components/ReconciliationRecovery';
 import { useStore } from '../../store';
 import { pendingOperations } from '../../lib/store';
@@ -129,23 +129,10 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
 
   return (
     <div>
-      <SectionHeader title="Reconciliation" subtitle="Close the day — cash, stock, plates & glasses" />
+      <SectionHeader title="Reconciliation" subtitle="Daily cash and stock close" />
       <ReconciliationRecovery cartId={cartId} />
 
-      {/* Day picker — reconcile today, or backfill a forgotten day (last 7). */}
-      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, marginBottom: 14 }}>
-        {dayList.map(d => {
-          const sel = d.date === date;
-          const dot = d.closed ? colors.green : d.holiday ? colors.muted : d.hasOrders ? colors.red : colors.border;
-          const badge = d.closed ? (d.manual ? '✎' : '✓') : d.holiday ? '🏖️' : d.hasOrders ? '•' : '';
-          return (
-            <button key={d.date} onClick={() => setDate(d.date)} style={{ flexShrink: 0, background: sel ? colors.ink : '#fff', color: sel ? colors.primary : colors.ink, border: `1px solid ${sel ? colors.ink : colors.border}`, borderRadius: 10, padding: '7px 12px', cursor: 'pointer', textAlign: 'center', minWidth: 62 }}>
-              <div style={{ fontSize: 12, fontWeight: 800 }}>{dayLabel(d.date)}</div>
-              <div style={{ fontSize: 10, marginTop: 2, color: sel ? colors.primary : (d.hasOrders && !d.closed && !d.holiday ? colors.red : colors.muted) }}>{badge} {d.closed ? (d.manual ? 'by hand' : 'done') : d.holiday ? 'closed' : d.hasOrders ? 'pending' : '—'}</div>
-            </button>
-          );
-        })}
-      </div>
+      <div className="date-toolbar"><button className="quiet-button" aria-label="Previous business date" onClick={()=>setDate(new Date(Date.parse(date+'T12:00:00Z')-86400000).toISOString().slice(0,10))}>‹</button><label>Business date<input aria-label="Reconciliation date" type="date" value={date} max={businessDate} onInput={e=>e.target.value&&setDate(e.target.value)} onChange={e=>e.target.value&&setDate(e.target.value)}/></label><button className="quiet-button" onClick={()=>setDate(businessDate)}>Today</button><span>{thisClose?'Saved report':'Not reconciled'}</span></div>
 
       {isCurrentDay && countdown && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FFF3E0', border: '1px solid #F5CFA4', borderRadius: 10, padding: '8px 12px', marginBottom: 14, fontSize: 12.5, color: '#B5460B', fontWeight: 700 }}>
@@ -156,29 +143,31 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
       {isHoliday ? (
         <div style={{ background: '#F1EFE8', borderRadius: 16, padding: 28, textAlign: 'center', color: colors.muted }}>
           <div style={{ fontSize: 30 }}>🏖️</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: colors.ink, marginTop: 6 }}>{dayLabel(date)} — cart was closed</div>
+          <div style={{ fontSize: 18, fontWeight: 650, color: colors.ink, marginTop: 6 }}>{dayLabel(date)} — cart was closed</div>
           <div style={{ fontSize: 13, marginTop: 4 }}>Marked as a no-business day. Nothing to reconcile.</div>
         </div>
       ) : alreadyClosed ? (
-        <div style={{ background: colors.green, color: '#fff', padding: 28, borderRadius: 16, textAlign: 'center' }}>
-          <CheckCircle2 size={44} style={{ marginBottom: 10 }} />
-          <div style={{ fontSize: 20, fontWeight: 800 }}>{pendingClose?'Saved on this phone · sync pending':`${dayLabel(date)} closed`}</div>
+        <div className="partner-card" style={{color:colors.ink}}>
+          <CheckCircle2 size={24} color={colors.green} style={{ marginBottom: 10 }} />
+          <div style={{ fontSize: 20, fontWeight: 650 }}>{pendingClose?'Saved on this phone · sync pending':`${dayLabel(date)} closed`}</div>
           <div style={{ fontSize: 13, opacity: 0.9, marginTop: 4 }}>
             {pendingClose ? 'Keep this app online until the sync warning clears. This report is not yet confirmed on the server.' : thisClose.unrecorded
               ? `Sales entered by hand — ₹${((thisClose.physicalCash || 0) + (thisClose.phonePeAmount || 0)).toLocaleString('en-IN')} recorded for the day.`
               : 'Reconciliation saved. Pick another day above if needed.'}
           </div>
+          <div className="inventory-summary" style={{marginTop:18}}>{[['Cash',thisClose.physicalCash],['UPI',thisClose.phonePeAmount],['Collected',(thisClose.physicalCash || 0)+(thisClose.phonePeAmount || 0)]].map(([label,value])=><div key={label}><span>{label}</span><strong style={{fontSize:18}}>₹{Number(value || 0).toLocaleString('en-IN')}</strong></div>)}</div>
+          {!!thisClose.stock?.length && <details><summary>Saved stock counts</summary>{thisClose.stock.map((row,i)=><div className="stock-item" key={row.key || i}><strong>{row.label || row.key}</strong><span>{row.actual ?? '—'}</span><small>counted</small></div>)}</details>}
         </div>
       ) : (noOrders && !isCurrentDay && !manual) ? (
         <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 16, padding: 24, textAlign: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>No orders on {dayLabel(date)}</div>
           <div style={{ fontSize: 12.5, color: colors.muted, margin: '6px 0 18px' }}>Which was it? Either way the day stops being flagged as forgotten.</div>
           <div style={{ display: 'grid', gap: 10 }}>
-            <button onClick={() => setManual(true)} style={{ background: colors.ink, color: colors.primary, border: 'none', borderRadius: 12, padding: '13px 18px', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+            <button onClick={() => setManual(true)} style={{ background: colors.ink, color: colors.primary, border: 'none', borderRadius: 12, padding: '13px 18px', fontWeight: 650, fontSize: 14, cursor: 'pointer' }}>
               💰 Cart ran — enter the day's sales
               <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.75, marginTop: 3 }}>Nothing was billed in the app; type the money by hand</div>
             </button>
-            <button onClick={markHoliday} style={{ background: '#fff', color: colors.ink, border: `1px solid ${colors.border}`, borderRadius: 12, padding: '13px 18px', fontWeight: 800, fontSize: 14, cursor: 'pointer' }}>
+            <button onClick={markHoliday} style={{ background: '#fff', color: colors.ink, border: `1px solid ${colors.border}`, borderRadius: 12, padding: '13px 18px', fontWeight: 650, fontSize: 14, cursor: 'pointer' }}>
               🏖️ Cart was closed (holiday)
               <div style={{ fontSize: 11, fontWeight: 600, color: colors.muted, marginTop: 3 }}>No business that day</div>
             </button>
@@ -190,7 +179,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, background: '#EAF0FF', border: '1px solid #BFD0F0', borderRadius: 10, padding: '9px 12px', marginBottom: 14, fontSize: 12, color: brand.navy }}>
           <AlertCircle size={15} style={{ flexShrink: 0, marginTop: 1 }} />
           {unrecorded ? (
-            <span>Recording {dayLabel(date)}'s sales by hand — nothing was punched, so there's no system figure to check against. What you enter becomes the day's revenue. <button onClick={() => setManual(false)} style={{ background: 'none', border: 'none', padding: 0, color: brand.navy, font: 'inherit', fontWeight: 800, textDecoration: 'underline', cursor: 'pointer' }}>Not what happened?</button></span>
+            <span>Recording {dayLabel(date)}'s sales by hand — nothing was punched, so there's no system figure to check against. What you enter becomes the day's revenue. <button onClick={() => setManual(false)} style={{ background: 'none', border: 'none', padding: 0, color: brand.navy, font: 'inherit', fontWeight: 650, textDecoration: 'underline', cursor: 'pointer' }}>Not what happened?</button></span>
           ) : (
             <span>Backfilling {dayLabel(date)}. Cash/UPI + plate/glass audit apply; momo-stock count is skipped (that day's leftover has since moved).</span>
           )}
@@ -203,18 +192,18 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
         {unrecorded ? (
           <div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Revenue (Cash + UPI)</div>
-            <div style={{ fontSize: 24, fontWeight: 800 }}>₹{(parseInt(physicalCash) || 0) + (parseInt(phonePeAmount) || 0)}</div>
+            <div style={{ fontSize: 24, fontWeight: 650 }}>₹{(parseInt(physicalCash) || 0) + (parseInt(phonePeAmount) || 0)}</div>
             <div style={{ fontSize: 11, opacity: 0.75, marginTop: 6 }}>No orders were punched, so order count and pieces sold stay blank for this day.</div>
           </div>
         ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Total Orders</div>
-            <div style={{ fontSize: 24, fontWeight: 800 }}>{dayOrders.length}</div>
+            <div style={{ fontSize: 24, fontWeight: 650 }}>{dayOrders.length}</div>
           </div>
           <div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Revenue (Cash + UPI)</div>
-            <div style={{ fontSize: 24, fontWeight: 800 }}>₹{cashRevenue + upiRevenue}</div>
+            <div style={{ fontSize: 24, fontWeight: 650 }}>₹{cashRevenue + upiRevenue}</div>
           </div>
         </div>
         )}
@@ -299,7 +288,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
         </div>
       )}
       <button onClick={closeDay} disabled={!canClose}
-        style={{ width: '100%', background: canClose ? colors.ink : colors.border, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 800, fontSize: 16, cursor: canClose ? 'pointer' : 'not-allowed', marginTop: 10 }}>
+        style={{ width: '100%', background: canClose ? colors.ink : colors.border, color: colors.primary, padding: 18, borderRadius: 12, border: 'none', fontWeight: 650, fontSize: 16, cursor: canClose ? 'pointer' : 'not-allowed', marginTop: 10 }}>
         {isCurrentDay ? 'Close Day & Save Report' : unrecorded ? `Save ${dayLabel(date)}'s sales` : `Save ${dayLabel(date)} reconciliation`}
       </button>
       </>)}

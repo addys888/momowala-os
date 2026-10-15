@@ -1,9 +1,9 @@
 import { OpeningManager } from '../../components/OpeningManager';
 import { StaffAttendance } from './StaffAttendance';
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob } from '../../lib/store';
-import { PAY_BADGE, TODAY, brand, colors, isPaid } from '../../core';
+import { useState } from 'react';
+import { Plus, X, Clock, AlertCircle, ArrowRight, Trash2, Edit3, Eye, EyeOff, FileText, Lock } from 'lucide-react';
+import { authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff } from '../../lib/store';
+import { PAY_BADGE, TODAY, brand, partnerColors as colors, isPaid } from '../../core';
 import { MetricCard, OrderItemLines, SectionHeader } from '../../components/shared';
 import { useStore } from '../../store';
 
@@ -77,8 +77,8 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
             return (
               <div key={o.id} style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, padding: 14, opacity: cancelled ? 0.7 : 1 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
-                  <div style={{ fontWeight: 800, fontSize: 16 }}>#{o.token} <span style={{ fontWeight: 500, fontSize: 12, color: colors.muted }}>· {o.time}</span></div>
-                  <div style={{ fontWeight: 800, fontSize: 16, textDecoration: cancelled ? 'line-through' : 'none', color: cancelled ? colors.muted : colors.ink }}>₹{o.total}</div>
+                  <div style={{ fontWeight: 650, fontSize: 16 }}>#{o.token} <span style={{ fontWeight: 500, fontSize: 12, color: colors.muted }}>· {o.time}</span></div>
+                  <div style={{ fontWeight: 650, fontSize: 16, textDecoration: cancelled ? 'line-through' : 'none', color: cancelled ? colors.muted : colors.ink }}>₹{o.total}</div>
                 </div>
                 <OrderItemLines items={o.items} muted={cancelled} />
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
@@ -99,7 +99,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
       <SectionHeader title="Staff Registry" subtitle={`${cart?.name} · only registered staff can log in`} />
 
       <div role="tablist" aria-label="Staff sections" style={{ display: 'flex', marginBottom: 18 }}>
-        {[['registry','Registry & activity'],['attendance','Attendance & leave']].map(([id,label]) => <button key={id} role="tab" aria-selected={subtab === id} onClick={() => setSubtab(id)} style={{ flex: 1, padding: 12, minHeight: 48, border: `1px solid ${colors.border}`, background: subtab === id ? brand.navy : '#fff', color: subtab === id ? '#fff' : brand.navy, fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}
+        {[['registry','Registry & activity'],['attendance','Leave & holidays']].map(([id,label]) => <button key={id} role="tab" aria-selected={subtab === id} onClick={() => setSubtab(id)} style={{ flex: 1, padding: 12, minHeight: 48, border: `1px solid ${colors.border}`, background: subtab === id ? brand.navy : '#fff', color: subtab === id ? '#fff' : brand.navy, fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}
       </div>
       {subtab === 'attendance' ? <StaffAttendance key={cartId} staff={staff} cartId={cartId} /> : <>
       <OpeningManager key={cartId} cartId={cartId} cart={cart} staff={staff} />
@@ -122,7 +122,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
       <div style={{ background: brand.navy, color: '#fff', borderRadius: 12, padding: 16, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: 1, fontWeight: 700, color: brand.amber }}>CART OWNER</div>
-          <div style={{ fontWeight: 800, fontSize: 16 }}>{cart?.ownerMobile}</div>
+          <div style={{ fontWeight: 650, fontSize: 16 }}>{cart?.ownerMobile}</div>
           <div style={{ fontSize: 11, opacity: 0.7 }}>Tap to change your password</div>
         </div>
         <button onClick={changeOwnerPassword} style={{ background: 'rgba(255,255,255,0.12)', color: '#fff', border: `1px solid rgba(255,255,255,0.4)`, padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Change Password</button>
@@ -176,7 +176,7 @@ function AddStaffModal({ existing, ownerMobile, onAdd, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Register New Staff</div>
+        <div style={{ fontSize: 20, fontWeight: 650, marginBottom: 4 }}>Register New Staff</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>You set their password now. Share it with them — they log in with their mobile number and this password.</div>
 
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>NAME</div>
@@ -221,7 +221,7 @@ function EditStaffModal({ staff, existing, ownerMobile, onSave, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>Edit Staff</div>
+        <div style={{ fontSize: 20, fontWeight: 650, marginBottom: 4 }}>Edit Staff</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Update the name or login mobile. The password stays the same — they log in with the new number and their existing password. Use the 🔒 button to reset the password.</div>
 
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>NAME</div>

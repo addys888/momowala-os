@@ -88,7 +88,7 @@ function TopBar({ title, onExit, exitMessage = "Log out and exit? You’ll need 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
         <CartlyftMark size={30} />
         <div>
-          <div style={{ fontSize: 10, opacity: 0.75, letterSpacing: 1.5, fontWeight: 700, color: brand.amber }}>CARTLYFT QSR OS</div>
+          <div style={{ fontSize: 10, opacity: 0.75, letterSpacing: 1.5, fontWeight: 700, color: '#D6E0ED' }}>CARTLYFT PARTNER</div>
           <div style={{ fontWeight: 700, fontSize: 15, overflowWrap: 'anywhere' }}>{title}</div>
         </div>
       </div>
@@ -183,8 +183,8 @@ function OrderRow({ order }) {
 function SectionHeader({ title, subtitle }) {
   return (
     <div style={{ marginBottom: 12, marginTop: 8 }}>
-      <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1.5, fontWeight: 700 }}>{subtitle?.toUpperCase()}</div>
-      <div style={{ fontSize: 20, fontWeight: 800, color: colors.ink }}>{title}</div>
+      <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 0, fontWeight: 500 }}>{subtitle}</div>
+      <div style={{ fontSize: 22, fontWeight: 650, color: colors.ink }}>{title}</div>
     </div>
   );
 }

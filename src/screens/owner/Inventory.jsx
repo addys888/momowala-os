@@ -1,8 +1,8 @@
 import { OpeningInventory } from '../../components/OpeningInventory';
-import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
-import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
-import { storage, loadCloudState, mergeStates, syncToCloud, hashPassword, nextOrderToken, authLogin, authSetPassword, authChangeOwnerPassword, authSetStaffPassword, authRegisterStaff, authAdminResetOwner, insertCart, setCartClosed, saveCartProfile, loadCartOrders, mergeOrders, applyInventory, setCartConsumables, pushInventoryBlob, pushMenus } from '../../lib/store';
-import { TODAY, WARE_TYPES, adminBtn, brand, colors, editInput, editLabel, istTime, menuFor, stockModeFor, warePacksFor, wareLedger, slugify } from '../../core';
+import { useState } from 'react';
+import { Plus, AlertCircle, Trash2, Edit3 } from 'lucide-react';
+import { pushMenus } from '../../lib/store';
+import { TODAY, WARE_TYPES, adminBtn, brand, partnerColors as colors, editInput, editLabel, istTime, menuFor, stockModeFor, warePacksFor, wareLedger, slugify } from '../../core';
 import { EditModalShell, SectionHeader } from '../../components/shared';
 
 function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
@@ -175,13 +175,14 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
 
   return (
     <div>
+      <div className="inventory-summary">{[['Freezer',stockTypes.reduce((n,t)=>n+(inv?.[t.key]?.freezer || 0),0)],['On cart',stockTypes.reduce((n,t)=>n+(inv?.[t.key]?.cart || 0),0)],['Tracked items',stockTypes.length]].map(([label,value])=><div key={label}><span>{label}</span><strong>{value.toLocaleString('en-IN')}</strong></div>)}</div>
       <OpeningInventory key={cartId} cartId={cartId} cart={state.carts.find(c=>c.id===cartId)} stockTypes={stockTypes} inventory={inv} onReady={setOpeningReady} />
-      <SectionHeader title="Inventory Control" subtitle={mode === 'momo' ? 'Stock In · Cart Loading · Consumables' : 'Consumables & supplies'} />
+      <SectionHeader title="Stock" subtitle={mode === 'momo' ? 'Stock In · Cart Loading · Consumables' : 'Consumables & supplies'} />
 
       {/* Stock-tracking mode — controls whether the staged freezer/cart + plate
           audit flow shows, or just the generic consumables model. */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {[{ v: 'simple', t: 'Simple' }, { v: 'momo', t: 'Staged + plates' }].map(o => (
+        {[{ v: 'simple', t: 'Supplies only' }, { v: 'momo', t: 'Freezer → cart' }].map(o => (
           <button key={o.v} onClick={() => mode !== o.v && setStockMode(o.v)}
             style={{ flex: 1, padding: '8px 10px', borderRadius: 10, fontSize: 12.5, fontWeight: 700, cursor: 'pointer',
               border: `2px solid ${mode === o.v ? brand.navy : colors.border}`,
@@ -224,7 +225,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
         if (!todaySupplies.length) return null;
         return (
           <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16, overflow: 'hidden' }}>
-            <div style={{ padding: '10px 16px', background: '#FAF8F2', fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, color: colors.muted }}>TODAY'S PLATE / GLASS HANDOVERS</div>
+            <div style={{ padding: '10px 16px', background: '#FAF8F2', fontSize: 10.5, fontWeight: 650, letterSpacing: 0.8, color: colors.muted }}>TODAY'S PLATE / GLASS HANDOVERS</div>
             {todaySupplies.map(l => {
               const w = WARE_TYPES.find(t => t.key === l.item);
               return (
@@ -268,7 +269,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
           <div key={key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: `1px solid ${colors.border}` }}>
             <div style={{ fontSize: 14, fontWeight: 600, textTransform: item.name ? 'none' : 'capitalize' }}>{item.name || key}</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ fontWeight: 800 }}>{(item.stock ?? 0).toFixed(item.unit === 'L' ? 2 : 0)} <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>{item.unit}</span></div>
+              <div style={{ fontWeight: 650 }}>{(item.stock ?? 0).toFixed(item.unit === 'L' ? 2 : 0)} <span style={{ fontSize: 11, color: colors.muted, fontWeight: 600 }}>{item.unit}</span></div>
               <button onClick={() => setEditCons({ key, name: item.name || key, unit: item.unit || '', stock: item.stock ?? 0 })} title="Edit" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Edit3 size={13}/></button>
               <button onClick={() => removeConsumable(key)} title="Remove" style={{ background: '#fff', border: `1px solid ${colors.border}`, padding: 6, borderRadius: 8, cursor: 'pointer', display: 'flex' }}><Trash2 size={13} color={colors.red}/></button>
             </div>
@@ -354,8 +355,8 @@ function MoveStockConfirm({ move, bucket, onConfirm, onClose }) {
     >
       <div style={{ fontSize: 14, marginBottom: 14 }}>Move <strong>{qty} pcs</strong> {load ? 'from Freezer → Cart' : 'from Cart → Freezer'}?</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-        <div style={cell}><div style={cap}>FREEZER</div><div style={{ fontWeight: 800 }}>{bucket.freezer} → {Math.max(0, freezerAfter)}</div></div>
-        <div style={cell}><div style={cap}>ON CART</div><div style={{ fontWeight: 800 }}>{bucket.cart} → {Math.max(0, cartAfter)}</div></div>
+        <div style={cell}><div style={cap}>FREEZER</div><div style={{ fontWeight: 650 }}>{bucket.freezer} → {Math.max(0, freezerAfter)}</div></div>
+        <div style={cell}><div style={cap}>ON CART</div><div style={{ fontWeight: 650 }}>{bucket.cart} → {Math.max(0, cartAfter)}</div></div>
       </div>
     </EditModalShell>
   );
@@ -409,7 +410,7 @@ function AdjustStockModal({ label, current, onApply, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, color: brand.navy }}>Adjust {label}</div>
+        <div style={{ fontSize: 20, fontWeight: 650, marginBottom: 4, color: brand.navy }}>Adjust {label}</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Freezer now: <strong>{current}</strong> pcs → after: <strong>{after}</strong> pcs</div>
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
@@ -452,7 +453,7 @@ function StockTypesModal({ stockTypes, onSave, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 440, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4, color: brand.navy }}>Stock types</div>
+        <div style={{ fontSize: 20, fontWeight: 650, marginBottom: 4, color: brand.navy }}>Stock types</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>The freezer items this cart tracks (e.g. Veg Momo, Paneer Momo). Menu items link to these for stock counting.</div>
         {rows.map((r, i) => (
           <div key={r.key} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 10 }}>
@@ -487,7 +488,7 @@ function StockInModal({ stockTypes = [], onAdd, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 420, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>New Stock Delivery</div>
+        <div style={{ fontSize: 20, fontWeight: 650, marginBottom: 4 }}>New Stock Delivery</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Enter the pieces received for each momo type. Leave a type blank if none came in.</div>
 
         {stockTypes.map(st => (
@@ -504,7 +505,7 @@ function StockInModal({ stockTypes = [], onAdd, onClose }) {
 
         <div style={{ background: colors.paper, borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <span style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>TOTAL ADDED</span>
-          <span style={{ fontSize: 16, fontWeight: 900 }}>{totalPcs} pcs · {Math.floor(totalPcs / 50)} packets</span>
+          <span style={{ fontSize: 16, fontWeight: 700 }}>{totalPcs} pcs · {Math.floor(totalPcs / 50)} packets</span>
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
@@ -530,7 +531,7 @@ function WareSupplyModal({ packSizes, onAdd, onClose }) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(10,47,92,0.45)', backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }} onClick={onClose}>
       <div style={{ background: '#fff', borderRadius: 18, padding: 24, width: '100%', maxWidth: 440, maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(10,47,92,0.35)' }} onClick={e => e.stopPropagation()}>
-        <div style={{ fontSize: 20, fontWeight: 800, marginBottom: 4 }}>🍽️ Give Plates / Glasses to Staff</div>
+        <div style={{ fontSize: 20, fontWeight: 650, marginBottom: 4 }}>🍽️ Give Plates / Glasses to Staff</div>
         <div style={{ fontSize: 12, color: colors.muted, marginBottom: 16 }}>Half momo → 6" plate · Full momo → 7" plate · Mocktail → 350ml glass. The counts independently check that every serving was punched. Leave a row blank if none given.</div>
 
         <div style={{ display: 'flex', gap: 10, marginBottom: 4, fontSize: 11, color: colors.muted, fontWeight: 700 }}>
@@ -548,7 +549,7 @@ function WareSupplyModal({ packSizes, onAdd, onClose }) {
 
         <div style={{ background: colors.paper, borderRadius: 10, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '6px 0 16px' }}>
           <span style={{ fontSize: 12, color: colors.muted, fontWeight: 700 }}>TOTAL HANDED OVER</span>
-          <span style={{ fontSize: 15, fontWeight: 900 }}>{entries.filter(e => e.packets > 0).map(e => `${WARE_TYPES.find(w => w.key === e.key).short} ${e.packets * e.perPacket}`).join(' · ') || 0}</span>
+          <span style={{ fontSize: 15, fontWeight: 700 }}>{entries.filter(e => e.packets > 0).map(e => `${WARE_TYPES.find(w => w.key === e.key).short} ${e.packets * e.perPacket}`).join(' · ') || 0}</span>
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
