@@ -1,8 +1,8 @@
 {
-  "versionCode": 7,
-  "versionName": "1.5.0",
-  "path": "/downloads/cartlyft-1.5.0.apk",
-  "bytes": 3836564,
-  "sha256": "4dd177177149d1d45f079c4692d8af0b263da9824addbebaf6f98509777932da",
-  "notes": "Refreshed partner workspace, compact daily operations, clearer stock and menu controls, simplified leave tracking, and reports with collection charts and grouped recovery backups."
+  "versionCode": 8,
+  "versionName": "1.6.0",
+  "path": "/downloads/cartlyft-1.6.0.apk",
+  "bytes": 3968795,
+  "sha256": "4e7a3c0a090d48c800b982148b509f69ccd1013a841bbf600be9445dffe8b9ca",
+  "notes": "Pre-login update checks, lightweight loading, recoverable order sync, and a distinct Cartlyft ringtone with repeating vibration until acknowledgment."
 }

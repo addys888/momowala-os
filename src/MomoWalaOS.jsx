@@ -1,15 +1,18 @@
-import { useState, useEffect, useRef } from 'react';
+import { nativeCommand } from './lib/nativeApp';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
-import { loadInventory, committedOrder, trackChanges, pendingOperations, discardFailedOperations, outbox, validateSession, revokeSession, storage, loadCloudState, mergeStates, loadCartOrders, mergeOrders } from './lib/store';
-import { AdminApp } from './screens/Admin';
+import { loadInventory, committedOrder, trackChanges, pendingOperations, savedOrders, restoreSavedOrders, outbox, validateSession, revokeSession, storage, loadCloudState, mergeStates, loadCartOrders, mergeOrders } from './lib/store';
 import { TODAY, localDate, getInitialState, normalize } from './core';
-import { CartListing, CartMenu } from './screens/Customer';
 import { AdminLogin, TeamLogin } from './screens/Login';
-import { OwnerApp } from './screens/owner/OwnerApp';
-import { StaffApp } from './screens/Staff';
 import { StoreContext, useStore } from './store';
 import { AppLaunch } from './components/AppLaunch';
+
+const AdminApp = lazy(() => import('./screens/Admin').then(m => ({ default: m.AdminApp })));
+const CartListing = lazy(() => import('./screens/Customer').then(m => ({ default: m.CartListing })));
+const CartMenu = lazy(() => import('./screens/Customer').then(m => ({ default: m.CartMenu })));
+const OwnerApp = lazy(() => import('./screens/owner/OwnerApp').then(m => ({ default: m.OwnerApp })));
+const StaffApp = lazy(() => import('./screens/Staff').then(m => ({ default: m.StaffApp })));
 
 const liveSession = (s) => (s?.token && s.expiresAt > Date.now()) ? s : null;
 
@@ -24,6 +27,12 @@ export default function App() {
   };
   const [hydrated, setHydrated] = useState(false);
   const [syncOps, setSyncOps] = useState(() => pendingOperations());
+  const [showPending, setShowPending] = useState(false);
+  useEffect(() => {
+    if (!syncOps.length) { setShowPending(false); return; }
+    const timer = setTimeout(() => setShowPending(true), 5000);
+    return () => clearTimeout(timer);
+  }, [syncOps.length]);
   // session: null | { role, cartId?, name?, expiresAt } — persisted with the server expiry
   const [session, setSession] = useState(() => liveSession(storage.get('session', null)));
 
@@ -122,7 +131,7 @@ export default function App() {
   const [lastSync, setLastSync] = useState(null);
   const pollRef = useRef(null);
   useEffect(() => {
-    if (!session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) { pollRef.current = null; return; }
+    if (!hydrated || !session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) { pollRef.current = null; return; }
     let alive = true, inFlight = false, fullSyncAt = Date.now();
     const tick = async (force = false) => {
       // Never stack requests: on slow 4G a poll can outlast the 12s interval, and
@@ -173,7 +182,7 @@ export default function App() {
       window.removeEventListener('focus', resume);
       window.removeEventListener('online', resume);
     };
-  }, [session]);
+  }, [session?.token, hydrated]);
   const refreshNow = async () => { if (pollRef.current) await pollRef.current(); };
   const refreshSavedData = async () => {
     const token = storage.get('session', null)?.token;
@@ -201,6 +210,17 @@ export default function App() {
   }, [state]);
 
   useEffect(() => { storage.set('session', session); }, [session]);
+
+  // Acceptance/payment on this phone or a synced phone stops the matching
+  // native loop; opening a screen alone never acknowledges anything.
+  useEffect(() => {
+    if (!__ANDROID_APP__ || !session?.cartId) return;
+    const keys = new Set(nativeCommand('orderAlertKeys')?.keys || []);
+    for (const order of state.orders) {
+      const key = `order-${order.id}`;
+      if (order.cartId === session.cartId && keys.has(key) && (order.acknowledgedAt || order.payment !== 'pending')) nativeCommand('acknowledgePartner', { key });
+    }
+  }, [state.orders, session?.cartId]);
 
   // Respect the expiry issued by the database.
   useEffect(() => {
@@ -234,17 +254,18 @@ export default function App() {
   if (!hydrated) return <AppLaunch />;
   return (
     <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow, refreshSavedData }}>
-      {syncOps.length > 0 && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
+      {syncOps.length > 0 && (showPending || syncOps.some(o => o.error)) && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
         {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} change(s) saved on this device, waiting to sync.`}
         {syncOps.some(o => o.error) && <button style={{ marginLeft: 8, padding: '8px 12px', borderRadius: 8 }} onClick={async () => {
           try { await outbox.retryFailed(); } catch { alert('Could not retry. Your changes remain saved on this device.'); }
         }}>Retry sync</button>}
-        {syncOps.some(o => o.error) && <button onClick={() => {
-          if (confirm('Set rejected changes aside in a recovery copy and reload server data? They will not be saved to the server. Owner reconciliation backups remain available under Reconcile → Recover saved reports.')) { try { discardFailedOperations(); window.location.reload(); } catch { alert('Could not save a recovery copy. Nothing was removed. Free storage and retry.'); } }
-        }}>Set aside & reload</button>}
       </div>}
+      {session?.cartId && savedOrders(session.cartId).length > 0 && <details style={{padding:12}}><summary>Recover orders saved on this phone</summary><p>Retry previously set-aside orders using their original IDs. Existing successful submissions will not be duplicated.</p><button onClick={async () => {
+        try { await restoreSavedOrders(session.cartId); await refreshSavedData(); alert('Saved orders synced. Recovery copies are retained.'); }
+        catch (error) { alert(error.message); }
+      }}>Recover saved orders</button></details>}
       <BrowserRouter>
-        <Routes>
+        <Suspense fallback={<AppLaunch />}><Routes>
           {/* Public — customer */}
           <Route path="/" element={<MarketplaceRoute />} />
           <Route path="/c/:cartId" element={<CartMenuRoute />} />
@@ -256,7 +277,7 @@ export default function App() {
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<RequireRole role="admin"><AdminRoute /></RequireRole>} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        </Routes></Suspense>
       </BrowserRouter>
     </StoreContext.Provider>
   );

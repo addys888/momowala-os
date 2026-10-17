@@ -1,3 +1,4 @@
+import { nativeCommand } from './lib/nativeApp';
 import { IST_TZ, localDate, istTime, istNowMinutes, istDateLabel } from './lib/time';
 
 import { storage, applyInventory, setCartConsumables } from './lib/store';
@@ -617,13 +618,15 @@ function playOrderAlert() {
 // a noisy street-food environment.
 let _alarmTimer = null;
 
-function startOrderAlarm() {
+function startOrderAlarm(orderId) {
+  if (__ANDROID_APP__) { if(orderId) nativeCommand('showOrderAlert',{key:`order-${orderId}`}); return; }
   stopOrderAlarm();
   playOrderAlert();                       // first ring: chime + vibrate + voice
   _alarmTimer = setInterval(orderChime, 2500);
 }
 
 function stopOrderAlarm() {
+  if (__ANDROID_APP__) return; // Native playback ends only on explicit acknowledgment/completion.
   if (_alarmTimer) { clearInterval(_alarmTimer); _alarmTimer = null; }
   try { navigator.vibrate?.(0); } catch { /* ignore */ }
   try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }

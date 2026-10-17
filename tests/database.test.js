@@ -317,3 +317,21 @@ test('native completion delivery targets the submitting manager and owner with d
  assert(records.every(x=>x.cartId==='test-a' && x.date));
  await sql('delete from push_subscriptions');
 });
+
+test('legacy orders table gains split without changing existing order records', async () => {
+  const {readFile}=await import('node:fs/promises');
+  const migration=await readFile(new URL('../supabase/migrations/20261016090000_orders_split_compatibility.sql',import.meta.url),'utf8');
+  const result=await sql(`begin;
+    create temporary table saved_orders as select id,total,payment from orders;
+    alter table orders drop column split;
+    ${migration}
+    select count(*) from saved_orders s full join orders o using(id) where s.id is null or o.id is null or s.total is distinct from o.total or s.payment is distinct from o.payment;
+    select count(*) from information_schema.columns where table_schema='public' and table_name='orders' and column_name='split' and data_type='jsonb';
+    rollback;`);
+  assert.match(result,/\n0\n1\nROLLBACK$/);
+});
+
+test('update policy is readable but cannot be modified by an app client', async () => {
+  assert.equal(await request('select minimum_version_code from android_update_policy'),'0');
+  await assert.rejects(request('update android_update_policy set minimum_version_code=9999',owner),/permission denied/);
+});

@@ -44,7 +44,7 @@ function LoginFields({ mobile, setMobile, mobileLocked, pw, setPw, pw2, setPw2, 
           onKeyDown={e => e.key === 'Enter' && onSubmit()} placeholder="••••" style={inputStyle} />
       </>)}
       {error && <div style={{ display: 'flex', gap: 8, alignItems: 'center', background: '#FFE7E7', color: colors.red, padding: 10, borderRadius: 8, fontSize: 13, fontWeight: 600, marginBottom: 12 }}><AlertCircle size={15} /> {error}</div>}
-      <button onClick={onSubmit} disabled={busy} style={{ width: '100%', padding: 15, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 15, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>{cta}</button>
+      <button onClick={onSubmit} disabled={busy} aria-busy={busy} style={{ width: '100%', padding: 15, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, fontSize: 15, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.7 : 1 }}>{busy ? <span className="app-spinner app-spinner-button" role="status" aria-label="Signing in" /> : cta}</button>
     </div>
   );
 }

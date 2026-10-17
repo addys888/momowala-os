@@ -40,9 +40,14 @@ public class PrintRoutingTest extends Instrumentation {
             }
             navigate.invoke(activity, null, Uri.parse("https://example.com"), true);
             check(activity.sent != null, "Normal external links regressed");
+            PartnerAlerts.manager(getTargetContext()).cancelAll();
+            AlertPlaybackService.pending(getTargetContext()).edit().clear().commit();
+            Thread.sleep(300);
             testReminders();
             testPartnerAlerts();
             testUpdates();
+            testRequiredUpdateGate();
+            testStartupBeforeLogin();
             testPartnerIcon();
             if(liveFcm) {
                 org.json.JSONObject status=PartnerMessagingService.status(getTargetContext());
@@ -86,15 +91,15 @@ public class PrintRoutingTest extends Instrumentation {
             InventoryReminders.schedule(context,false);
             // Delivery is asynchronous; allow emulator scheduling latency.
             long deadline=android.os.SystemClock.elapsedRealtime()+15000;
-            while(InventoryReminders.manager(context).getActiveNotifications().length==0 && android.os.SystemClock.elapsedRealtime()<deadline) Thread.sleep(250);
-            check(InventoryReminders.manager(context).getActiveNotifications().length>0,"Scheduled alarm did not post notification");
+            while(alertCount(context)==0 && android.os.SystemClock.elapsedRealtime()<deadline) Thread.sleep(250);
+            check(alertCount(context)>0,"Scheduled alarm did not post notification");
             InventoryReminders.acknowledge(context);
             check(!InventoryReminders.prefs(context).contains("completedDate"),"Acknowledgment incorrectly completed stock");
             InventoryReminders.fire(context);
-            check(InventoryReminders.manager(context).getActiveNotifications().length==0,"Acknowledged opening reminder rang again");
+            check(alertCount(context)==0,"Acknowledged opening reminder rang again");
             config.put("completedDate",OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis())));
             InventoryReminders.configure(context,config);
-            check(InventoryReminders.manager(context).getActiveNotifications().length==0,"Saved inventory did not cancel notification");
+            check(alertCount(context)==0,"Saved inventory did not cancel notification");
             InventoryReminders.prefs(context).edit().putLong("expiresAt",0).commit();
             InventoryReminders.fire(context);
             check(InventoryReminders.prefs(context).getBoolean("enabled",false),"Session expiry incorrectly removed device assignment");
@@ -108,21 +113,52 @@ public class PrintRoutingTest extends Instrumentation {
             check(!InventoryReminders.prefs(context).getBoolean("enabled",false),"Explicit unassign failed");
         } finally { InventoryReminders.clear(context); }
     }
+    private int alertCount(android.content.Context context) {
+        int count=0;for(android.service.notification.StatusBarNotification n:InventoryReminders.manager(context).getActiveNotifications())if(n.getId()!=4202)count++;
+        return count;
+    }
     private void testPartnerAlerts() throws Exception {
         android.content.Context c=getTargetContext();
         String binding=java.util.UUID.randomUUID().toString(),key="test-event-42";
         PartnerAlerts.bind(c,new org.json.JSONObject().put("binding",binding));
         PartnerAlerts.show(c,binding,key,"Test opening alert","Manager has not loaded stock");
         android.service.notification.StatusBarNotification posted=null;
-        for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())if(("partner:"+key).equals(n.getTag()))posted=n;
+        long postDeadline=android.os.SystemClock.elapsedRealtime()+4000;
+        while(posted==null && android.os.SystemClock.elapsedRealtime()<postDeadline) {
+            for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())if(("partner:"+key).equals(n.getTag()))posted=n;
+            if(posted==null)Thread.sleep(50);
+        }
         check(posted!=null,"Native partner alert missing");
-        check((posted.getNotification().flags & android.app.Notification.FLAG_INSISTENT)!=0,"Alert does not repeat sound");
-        check(posted.getNotification().vibrate!=null || android.os.Build.VERSION.SDK_INT>=26,"Alert has no vibration");
+        check(AlertPlaybackService.pending(c).contains("partner:"+key),"Alert was not registered for persistent playback");
+        android.media.MediaPlayer tone=android.media.MediaPlayer.create(c,com.cartlyft.momowala.R.raw.cartlyft_attention);
+        check(tone!=null && tone.getDuration()>=2400,"Bundled Cartlyft tone cannot be decoded");tone.release();
+        PartnerAlerts.show(c,binding,"test-second","Second order","Keep ringing until this is acknowledged");
+        // Expanding the notification tray must not be an acknowledgment.
+        try(android.os.ParcelFileDescriptor ignored=getUiAutomation().executeShellCommand("cmd statusbar expand-notifications")) { }
+        Thread.sleep(300);
+        check(AlertPlaybackService.pending(c).contains("partner:"+key),"Opening notification tray acknowledged an order");
+        java.lang.reflect.Field instanceField=AlertPlaybackService.class.getDeclaredField("instance");instanceField.setAccessible(true);
+        java.lang.reflect.Field playerField=AlertPlaybackService.class.getDeclaredField("player");playerField.setAccessible(true);
+        long soundDeadline=android.os.SystemClock.elapsedRealtime()+5000;
+        boolean playing=false;
+        while(android.os.SystemClock.elapsedRealtime()<soundDeadline) {
+            Object service=instanceField.get(null);
+            android.media.MediaPlayer actual=service==null?null:(android.media.MediaPlayer)playerField.get(service);
+            if(actual!=null && actual.isPlaying() && actual.isLooping()){playing=true;break;}Thread.sleep(100);
+        }
+        check(playing,"Cartlyft tone is not looping after notification tray expansion");
+        try(android.os.ParcelFileDescriptor ignored=getUiAutomation().executeShellCommand("cmd statusbar collapse")) { }
         check(posted.getNotification().actions.length==1,"Acknowledge action missing");
         posted.getNotification().actions[0].actionIntent.send();
         long deadline=android.os.SystemClock.elapsedRealtime()+3000;
         while(!PartnerAlerts.prefs(c).contains("ack:"+key) && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(50);
         check(PartnerAlerts.prefs(c).contains("ack:"+key),"Action did not persist acknowledgment");
+        check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Acknowledgment did not stop its playback");
+        check(AlertPlaybackService.pending(c).contains("partner:test-second"),"Acknowledging one order silenced another");
+        PartnerAlerts.acknowledge(c,"test-second");
+        long stopDeadline=android.os.SystemClock.elapsedRealtime()+3000;
+        while(instanceField.get(null)!=null && android.os.SystemClock.elapsedRealtime()<stopDeadline)Thread.sleep(50);
+        check(instanceField.get(null)==null,"Playback service did not stop after final acknowledgment");
         PartnerAlerts.show(c,binding,key,"Duplicate","Should stay silent");
         for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())check(!("partner:"+key).equals(n.getTag()),"Duplicate alert rang after acknowledgment");
         PartnerAlerts.show(c,"wrong-binding","wrong-account","Wrong account","Must be ignored");
@@ -141,9 +177,79 @@ public class PrintRoutingTest extends Instrumentation {
         InventoryReminders.clear(c);
         PartnerAlerts.prefs(c).edit().clear().commit();
     }
+    private Activity launchScreen() {
+        ActivityMonitor monitor=addMonitor(MainActivity.class.getName(),null,false);
+        try {
+            runOnMainSync(()->getTargetContext().startActivity(new Intent(getTargetContext(),MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
+            Activity screen=monitor.waitForActivityWithTimeout(5000);
+            check(screen!=null,"Activity did not start");return screen;
+        } finally {removeMonitor(monitor);}
+    }
+    private void testRequiredUpdateGate() throws Exception {
+        Activity screen=launchScreen();
+        final Throwable[] failure={null};
+        runOnMainSync(()->{
+            try {
+                AppUpdater updater=new AppUpdater(screen);
+                Method show=AppUpdater.class.getDeclaredMethod("showRequired",org.json.JSONObject.class); show.setAccessible(true);
+                java.lang.reflect.Field field=AppUpdater.class.getDeclaredField("gate"); field.setAccessible(true);
+                int next=getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionCode+1;
+                org.json.JSONObject info=new org.json.JSONObject().put("versionCode",next).put("minimumVersionCode",next).put("versionName","99.0.0").put("path","/downloads/cartlyft-99.0.0.apk").put("bytes",12).put("sha256",new String(new char[64]).replace('\0','a'));
+                show.invoke(updater,info);
+                android.app.Dialog gate=(android.app.Dialog)field.get(updater);
+                check(gate!=null && gate.isShowing(),"Required update did not block the app");
+                gate.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN,android.view.KeyEvent.KEYCODE_BACK));
+                gate.dispatchKeyEvent(new android.view.KeyEvent(android.view.KeyEvent.ACTION_UP,android.view.KeyEvent.KEYCODE_BACK));
+                check(gate.isShowing(),"Back dismissed required update");
+                show.invoke(updater,info.put("minimumVersionCode",0));
+                check(!gate.isShowing(),"Withdrawn requirement still blocks app");
+            } catch(Throwable e) { failure[0]=e; }
+            finally { screen.finish(); }
+        });
+        if(failure[0]!=null)throw new AssertionError("Update gate regression",failure[0]);
+    }
+    private void testStartupBeforeLogin() throws Exception {
+        android.content.SharedPreferences cache=getTargetContext().getSharedPreferences("update_policy",0);
+        String saved=cache.getString("policy",null);
+        int current=getTargetContext().getPackageManager().getPackageInfo(getTargetContext().getPackageName(),0).versionCode;
+        org.json.JSONObject policy=new org.json.JSONObject().put("versionCode",current+1).put("minimumVersionCode",current+1).put("versionName","99.0.0").put("path","/downloads/cartlyft-99.0.0.apk").put("bytes",12).put("sha256",new String(new char[64]).replace('\0','a'));
+        cache.edit().putString("policy",policy.toString()).commit();
+        Activity screen=launchScreen();
+        final Throwable[] failure={null};
+        try {
+            runOnMainSync(()->{
+                try {
+                    java.lang.reflect.Field webField=MainActivity.class.getDeclaredField("web");webField.setAccessible(true);
+                    check(((WebView)webField.get(screen)).getUrl()==null,"Login loaded before required-update check");
+                    java.lang.reflect.Field updaterField=MainActivity.class.getDeclaredField("updater");updaterField.setAccessible(true);
+                    AppUpdater updater=(AppUpdater)updaterField.get(screen);
+                    java.lang.reflect.Field gateField=AppUpdater.class.getDeclaredField("gate");gateField.setAccessible(true);
+                    check(gateField.get(updater)!=null,"Cached mandatory update did not block pre-login startup");
+                } catch(Throwable error) {failure[0]=error;}
+            });
+            if(failure[0]!=null)throw new AssertionError("Pre-login startup regression",failure[0]);
+            // A fresh policy request must finish before the login callback can run.
+            cache.edit().remove("policy").commit();
+            java.util.concurrent.CountDownLatch release=new java.util.concurrent.CountDownLatch(1);
+            java.util.concurrent.atomic.AtomicBoolean opened=new java.util.concurrent.atomic.AtomicBoolean(false);
+            org.json.JSONObject allowed=new org.json.JSONObject(policy.toString()).put("versionCode",current).put("minimumVersionCode",0);
+            runOnMainSync(()->new AppUpdater(screen,()->{release.await(3,java.util.concurrent.TimeUnit.SECONDS);return allowed;}).start(()->opened.set(true)));
+            check(!opened.get(),"Startup did not wait for the version check");release.countDown();
+            long deadline=android.os.SystemClock.elapsedRealtime()+4000;
+            while(!opened.get() && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(50);
+            check(opened.get(),"Current version did not continue to login");
+        } finally {
+            runOnMainSync(screen::finish);
+            if(saved==null)cache.edit().remove("policy").commit();else cache.edit().putString("policy",saved).commit();
+        }
+    }
     private void testUpdates() throws Exception {
         org.json.JSONObject info=new org.json.JSONObject().put("versionCode",5).put("versionName","1.3.0").put("path","/downloads/cartlyft-1.3.0.apk").put("bytes",12).put("sha256",new String(new char[64]).replace('\0','a'));
         AppUpdater.validateManifest(info);
+        AppUpdater.validateManifest(new org.json.JSONObject(info.toString()).put("minimumVersionCode",5));
+        for(int minimum:new int[]{-1,6}) {
+            try { AppUpdater.validateManifest(new org.json.JSONObject(info.toString()).put("minimumVersionCode",minimum)); throw new AssertionError("Unpublished required version accepted"); } catch(java.io.IOException expected) { }
+        }
         for(String path:new String[]{"https://evil.example/update.apk","/downloads/../private.apk","/downloads/cartlyft-1.3.0.apk?redirect=evil"}) {
             try { AppUpdater.validateManifest(new org.json.JSONObject(info.toString()).put("path",path));throw new AssertionError("Unsafe update path accepted"); } catch(java.io.IOException expected) { }
         }

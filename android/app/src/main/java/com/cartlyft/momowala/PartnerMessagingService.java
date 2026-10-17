@@ -17,7 +17,7 @@ public final class PartnerMessagingService extends FirebaseMessagingService {
                 String previous=InventoryReminders.prefs(c).getString("completedDate","");
                 if(date.compareTo(previous)>0)InventoryReminders.prefs(c).edit().putString("completedDate",date).apply();
                 String time=InventoryReminders.prefs(c).getString("openTime","");
-                if(!time.isEmpty() && date.equals(OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis()))))InventoryReminders.manager(c).cancel(InventoryReminders.ID);
+                if(!time.isEmpty() && date.equals(OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis()))))InventoryReminders.cancelAlert(c);
                 InventoryReminders.schedule(c,false);
             }
             for(java.util.Map.Entry<String,?> e:PartnerAlerts.prefs(c).getAll().entrySet())

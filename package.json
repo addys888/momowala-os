@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test": "node --test tests/outbox.test.js tests/api.test.js tests/compat.test.js tests/staffAttendance.test.js tests/openingInventory.test.js tests/recovery.test.js tests/orderSync.test.js tests/openingNotifications.test.js tests/reportMetrics.test.js",
+    "test": "node --test tests/outbox.test.js tests/api.test.js tests/compat.test.js tests/staffAttendance.test.js tests/openingInventory.test.js tests/recovery.test.js tests/orderSync.test.js tests/openingNotifications.test.js tests/reportMetrics.test.js tests/appUpdate.test.js",
     "test:db": "node --test tests/database.test.js",
     "test:db:setup": "node scripts/setup-test-db.mjs",
     "build:android": "node scripts/build-android.mjs",

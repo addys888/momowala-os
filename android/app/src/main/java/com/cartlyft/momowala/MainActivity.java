@@ -48,13 +48,19 @@ public class MainActivity extends Activity {
         root.addView(failure);
         try {
             web = createWebView();
-            root.addView(web, new LinearLayout.LayoutParams(-1, 0, 1));
+            FrameLayout content=new FrameLayout(this);
+            content.addView(web,new FrameLayout.LayoutParams(-1,-1));
+            ProgressBar checking=new ProgressBar(this);
+            checking.setContentDescription("Checking for updates");
+            content.addView(checking,new FrameLayout.LayoutParams(dp(28),dp(28),android.view.Gravity.CENTER));
+            root.addView(content,new LinearLayout.LayoutParams(-1,0,1));
             setContentView(root);
             String agent = web.getSettings().getUserAgentString();
             java.util.regex.Matcher version = java.util.regex.Pattern.compile("Chrome/(\\d+)").matcher(agent);
             if (version.find() && Integer.parseInt(version.group(1)) < 51) {
+                checking.setVisibility(View.GONE);
                 showFailure("Update Android System WebView or Chrome from the Play Store, then reopen Cartlyft.");
-            } else web.loadUrl(ORIGIN + "/login");
+            } else updater.start(() -> { checking.setVisibility(View.GONE);web.loadUrl(ORIGIN + "/login"); });
         } catch (RuntimeException e) {
             setContentView(root);
             showFailure("Android System WebView is unavailable. Enable or update it in Settings / Play Store, then reopen Cartlyft.");
@@ -70,7 +76,7 @@ public class MainActivity extends Activity {
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportMultipleWindows(true); s.setJavaScriptCanOpenWindowsAutomatically(true);
-        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.3.0");
+        s.setUserAgentString(s.getUserAgentString() + " CartlyftAndroid/1.6.0");
         CookieManager.getInstance().setAcceptThirdPartyCookies(view, false);
         view.setWebViewClient(new WebViewClient() {
             @Override public WebResourceResponse shouldInterceptRequest(WebView v, WebResourceRequest request) {
@@ -133,6 +139,15 @@ public class MainActivity extends Activity {
                             case "inventoryStatus": break;
                             case "nativePushStatus": result.confirm(PartnerMessagingService.status(MainActivity.this).toString()); return true;
                             case "bindNativePush": PartnerAlerts.bind(MainActivity.this,data); break;
+                            case "orderAlertKeys": {
+                                org.json.JSONArray keys=new org.json.JSONArray();
+                                for(String key:AlertPlaybackService.pending(MainActivity.this).getAll().keySet())if(key.startsWith("partner:order-"))keys.put(key.substring(8));
+                                result.confirm(new org.json.JSONObject().put("keys",keys).toString());return true;
+                            }
+                            case "showOrderAlert": {
+                                String key=data.getString("key");if(!key.matches("order-[0-9]+"))throw new IllegalArgumentException();
+                                PartnerAlerts.show(MainActivity.this,PartnerAlerts.prefs(MainActivity.this).getString("binding",""),key,"New Cartlyft order","Open Cartlyft to accept the order.");break;
+                            }
                             case "acknowledgePartner": PartnerAlerts.acknowledge(MainActivity.this,data.getString("key")); break;
                             case "acknowledgeInventory": InventoryReminders.acknowledge(MainActivity.this); break;
                             default: throw new IllegalArgumentException();

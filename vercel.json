@@ -50,5 +50,10 @@
         }
       ]
     }
-  ]
+  ],
+  "functions": {
+    "api/app-update.js": {
+      "includeFiles": "public/downloads/latest.json"
+    }
+  }
 }

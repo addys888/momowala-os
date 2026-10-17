@@ -14,12 +14,20 @@ export function requestHeaders() {
   } catch { /* private storage unavailable: authenticated writes fail closed */ }
   return headers;
 }
-const noStoreFetch = (input, init = {}) => {
+const noStoreFetch = async (input, init = {}) => {
   const headers = new Headers(init.headers);
   for (const [key, value] of Object.entries(requestHeaders())) {
     if (!headers.has(key)) headers.set(key, value);
   }
-  return fetch(input, { ...init, headers, cache: 'no-store' });
+  // Bound stalled mobile connections. A timed-out write stays in the outbox
+  // and retries with the same operation ID if the server already committed it.
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (init.signal?.aborted) abort();
+  init.signal?.addEventListener('abort', abort);
+  const timer = setTimeout(abort, 12000);
+  try { return await fetch(input, { ...init, headers, cache: 'no-store', signal: controller.signal }); }
+  finally { clearTimeout(timer); init.signal?.removeEventListener('abort', abort); }
 };
 export const supabase = url && anonKey
   ? createClient(url, anonKey, { global: { fetch: noStoreFetch } })

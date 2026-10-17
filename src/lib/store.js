@@ -2,7 +2,7 @@ import { operationChanges, reconciliationRow } from './operations.js';
 import { mergeOrderUpdates, readOrderPages } from './orderSync.js';
 import { supabase, requestHeaders } from './supabase';
 import { createOutbox } from './outbox';
-import { archiveRejected, reconciliationBackups } from './recovery';
+import { orderBackups, archiveRejected, reconciliationBackups } from './recovery';
 
 // ─── PASSWORD HASHING ───
 // Legacy hash compatibility for existing account helpers. Authentication and
@@ -509,3 +509,10 @@ export async function loadInventory() {
   return error || requestHeaders()['x-app-session'] !== startedSession ? null : data;
 }
 export function committedOrder(row) { return rowToOrder(row); }
+
+export function savedOrders(cartId) {
+  return orderBackups(storage.get('failedOperationsBackup', []), currentActor(), cartId);
+}
+export async function restoreSavedOrders(cartId) {
+  for (const op of savedOrders(cartId)) await outbox.restore(op);
+}

@@ -20,3 +20,11 @@ test('atomic day-close backup retains inventory commands and original operation 
   const bundled={...op,kind:'batch',payload:{commands:[{kind:'row',payload:op.payload},{kind:'inventory',payload:{cartId:'a',ops:{veg:{df:5,cset:0}}}}]}};
   assert.deepEqual(reconciliationBackups([bundled],op.actor,'a'),[bundled]);
 });
+
+test('order recovery preserves identity and atomic commands, scoped to original staff', async () => {
+  const {orderBackups}=await import('../src/lib/recovery.js');
+  const order={...op,actor:'staff:a:Akash',kind:'batch',payload:{commands:[{kind:'order',payload:{after:{id:45,cart_id:'a'}}},{kind:'consumables',payload:{cartId:'a'}}]}};
+  assert.deepEqual(orderBackups([order,order],order.actor,'a'),[order]);
+  assert.deepEqual(orderBackups([order],'staff:a:Other','a'),[]);
+  assert.deepEqual(orderBackups([order],order.actor,'b'),[]);
+});

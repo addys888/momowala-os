@@ -3,14 +3,14 @@ package com.cartlyft.momowala;
 import android.app.*;
 import android.content.*;
 import android.media.AudioAttributes;
-import android.media.RingtoneManager;
+
 import android.os.Build;
 import org.json.JSONObject;
 import java.util.*;
 
 /** Local schedule only: stores no session token, stock quantities or customer data. */
 public final class InventoryReminders {
-    static final String CHANNEL = "opening_inventory_v1";
+    static final String CHANNEL = "opening_inventory_v2";
     static final int ID = 4201;
     static android.content.SharedPreferences prefs(Context c) { return c.getSharedPreferences("inventory_reminder", Context.MODE_PRIVATE); }
     static AlarmManager alarms(Context c) { return (AlarmManager)c.getSystemService(Context.ALARM_SERVICE); }
@@ -19,8 +19,14 @@ public final class InventoryReminders {
         if(Build.VERSION.SDK_INT>=26) {
             NotificationChannel channel=new NotificationChannel(CHANNEL,"Opening inventory",NotificationManager.IMPORTANCE_HIGH);
             channel.setDescription("Reminder to load the cart 30 minutes before opening");
-            channel.enableVibration(true); channel.setVibrationPattern(new long[]{0,700,300,700});
-            channel.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build());
+            channel.enableVibration(true); channel.setVibrationPattern(AlertSound.VIBRATION);
+            channel.setSound(AlertSound.uri(c),AlertSound.attributes());
+            NotificationChannel old=manager(c).getNotificationChannel("opening_inventory_v1");
+            if(old!=null) {
+                channel.setImportance(old.getImportance());
+                if(old.getSound()==null)channel.setSound(null,AlertSound.attributes());
+                channel.enableVibration(old.shouldVibrate());
+            }
             manager(c).createNotificationChannel(channel);
         }
     }
@@ -31,7 +37,7 @@ public final class InventoryReminders {
         return new JSONObject().put("enabled",prefs(c).getBoolean("enabled",false)).put("cartId",prefs(c).getString("cartId","" )).put("notifications",notifications)
             .put("exact",Build.VERSION.SDK_INT<31 || alarms(c).canScheduleExactAlarms());
     }
-    static void configure(Context c,JSONObject data) throws Exception {
+    static synchronized void configure(Context c,JSONObject data) throws Exception {
         String cart=data.getString("cartId"), time=data.getString("openTime"); long expires=data.getLong("expiresAt");
         if(cart.length()>100 || !time.matches("(?:[01][0-9]|2[0-3]):[0-5][0-9]") || expires<=System.currentTimeMillis()) throw new IllegalArgumentException("Invalid schedule");
         boolean same=cart.equals(prefs(c).getString("cartId",""));
@@ -41,22 +47,23 @@ public final class InventoryReminders {
         String done=data.optString("completedDate","");
         if(done.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}")) e.putString("completedDate",done);
         e.apply();
-        if(OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis())).equals(done)) manager(c).cancel(ID);
+        if(OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis())).equals(done)) cancelAlert(c);
         schedule(c,false);
     }
-    static void acknowledge(Context c) {
+    static synchronized void cancelAlert(Context c) { manager(c).cancel(ID);AlertPlaybackService.remove(c,"inventory"); }
+    static synchronized void acknowledge(Context c) {
         String time=prefs(c).getString("openTime","");if(time.isEmpty())return;
         prefs(c).edit().putString("acknowledgedDate",OpeningSchedule.date(OpeningSchedule.businessOpening(time,System.currentTimeMillis()))).apply();
-        manager(c).cancel(ID);schedule(c,false);
+        cancelAlert(c);schedule(c,false);
     }
     static String quietDate(Context c) {
         String done=prefs(c).getString("completedDate",""),ack=prefs(c).getString("acknowledgedDate","");
         return done.compareTo(ack)>=0?done:ack;
     }
-    static void clear(Context c) { alarms(c).cancel(intent(c)); manager(c).cancel(ID); prefs(c).edit().clear().apply(); }
+    static synchronized void clear(Context c) { alarms(c).cancel(intent(c)); cancelAlert(c); prefs(c).edit().clear().apply(); }
     static void schedule(Context c,boolean repeat) {
         alarms(c).cancel(intent(c));
-        if(!prefs(c).getBoolean("enabled",false)) { manager(c).cancel(ID); return; }
+        if(!prefs(c).getBoolean("enabled",false)) { cancelAlert(c); return; }
         String time=prefs(c).getString("openTime",""); if(time.isEmpty())return;
         long now=System.currentTimeMillis();
         long next=OpeningSchedule.next(time,now,quietDate(c),repeat);
@@ -65,7 +72,7 @@ public final class InventoryReminders {
             else alarms(c).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,next,intent(c));
         } catch(SecurityException denied) { alarms(c).setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,next,intent(c)); }
     }
-    static void fire(Context c) {
+    static synchronized void fire(Context c) {
         long now=System.currentTimeMillis();
         if(!prefs(c).getBoolean("enabled",false)) { clear(c); return; }
         String time=prefs(c).getString("openTime",""); if(time.isEmpty()) return;
@@ -79,10 +86,15 @@ public final class InventoryReminders {
          .setContentText("Load today's stock into the cart. Tap to review and save quantities.")
          .setCategory(Notification.CATEGORY_REMINDER).setVisibility(Notification.VISIBILITY_PRIVATE)
          .setPriority(Notification.PRIORITY_HIGH).setContentIntent(content).setOngoing(true).setAutoCancel(false);
-        if(Build.VERSION.SDK_INT<26) b.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM),new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ALARM).build()).setVibrate(new long[]{0,700,300,700});
+        if(Build.VERSION.SDK_INT<26) b.setSound(AlertSound.uri(c),AlertSound.attributes()).setVibrate(AlertSound.VIBRATION);
         PendingIntent ack=PendingIntent.getBroadcast(c,ID,new Intent(c,PartnerAlertReceiver.class).setAction("cartlyft.ACK_OPENING"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",ack).build());
-        Notification n=b.build(); n.flags|=Notification.FLAG_INSISTENT;
+        boolean managed=AlertPlaybackService.start(c,"inventory",CHANNEL);
+        if(managed) {
+            if(Build.VERSION.SDK_INT>=26)b.setGroup("cartlyft-alerts").setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY);
+            else b.setSound(null).setVibrate(null);
+        }
+        Notification n=b.build();if(!managed)n.flags|=Notification.FLAG_INSISTENT;
         try { manager(c).notify(ID,n); } catch(SecurityException denied) { /* Permission status is visible in the app. */ }
         schedule(c,true);
     }

@@ -9,18 +9,12 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-.app-launch { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px 24px; background: #F5F7FA; color: #0A2F5C; font-family: system-ui, sans-serif; }
-.app-launch-brand { display: flex; align-items: center; gap: 14px; margin-bottom: 44px; font-size: 30px; font-weight: 750; letter-spacing: -1px; }
-.app-launch-card { width: 100%; max-width: 380px; padding: 28px; background: white; border: 1px solid #E3E9EF; border-radius: 20px; box-shadow: 0 12px 40px #0A2F5C08; }
-.app-launch-label { font-size: 10px; font-weight: 750; letter-spacing: 1.4px; color: #52687B; margin-bottom: 12px; }
-.app-launch h1 { font-size: 25px; font-weight: 700; margin-bottom: 10px; letter-spacing: -.5px; }
-.app-launch-card p { font-size: 14px; line-height: 1.6; color: #617184; min-height: 44px; }
-.app-launch-track { height: 4px; background: #E9F1F3; overflow: hidden; border-radius: 4px; margin-top: 24px; }
-.app-launch-track span { display: block; width: 35%; height: 100%; background: #008E83; animation: launch-progress 1.5s ease-in-out infinite alternate; }
-.app-launch-footer { font-size: 12px; color: #758393; margin-top: 32px; }
-.app-launch button { margin-top: 20px; min-height: 44px; padding: 10px 18px; background: #0A2F5C; border: 0; color: white; border-radius: 10px; font: inherit; }
-@keyframes launch-progress { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
-@media (prefers-reduced-motion: reduce) { .app-launch-track span { animation: none; width: 100%; opacity: .55; } }
+/* Shared lightweight startup, sign-in handoff and route loading indicator. */
+.app-loading { min-height: 50vh; display: grid; place-items: center; }
+.app-spinner { width: 24px; height: 24px; border: 2px solid #dce3e9; border-top-color: #243d51; border-radius: 50%; animation: app-spin .7s linear infinite; }
+@keyframes app-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .app-spinner { animation-duration: 2s; } }
+
 
 /* Partner workspace: restrained, compact, and readable on small Android screens. */
 .partner-app { color:#202c3b; --partner-line:#e3e8ee; --partner-muted:#64748b; }
@@ -66,3 +60,5 @@ body {
 @media(max-width:360px) { .operation-grid { grid-template-columns:1fr; }.dashboard-heading h1 { font-size:22px; }.payment-chart { gap:10px; }.chart-legend { flex-wrap:wrap; } }
 .menu-import { border:1px solid #e1e7ee;background:white;border-radius:10px;padding:12px;margin-bottom:16px;font-size:13px; }.menu-import summary { cursor:pointer;font-weight:600;padding:4px 0; }.menu-import[open] summary { margin-bottom:12px; }
 .partner-app details>summary { min-height:32px;line-height:1.5; }
+
+.app-spinner-button { display: inline-block; vertical-align: middle; width: 18px; height: 18px; border-color: #ffffff55; border-top-color: #fff; }

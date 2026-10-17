@@ -1,3 +1,4 @@
+import { nativeCommand } from '../lib/nativeApp';
 import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, X, Clock, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
@@ -23,6 +24,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const prevPendingRef = React.useRef(null);
   const soundOnRef = React.useRef(soundOn); // latest value for the (non-reactive) detect effect
   const toggleSound = () => {
+    if (__ANDROID_APP__) { nativeCommand('notificationSettings'); return; }
     const v = !soundOn;
     setSoundOn(v); soundOnRef.current = v; storage.set('alertSound', v);
     if (v) { unlockAudio(); playOrderAlert(); } // give an audible confirmation when turning on
@@ -48,7 +50,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   useEffect(() => {
     // Only CUSTOMER QR orders should trigger the incoming-order alert — not the
     // staff's own 'unpaid' counter orders (also stored as pending).
-    const pend = state.orders.filter(o => o.cartId === cartId && o.date === TODAY && o.payment === 'pending' && o.source !== 'staff-entry');
+    const pend = state.orders.filter(o => o.cartId === cartId && o.date === TODAY && o.payment === 'pending' && o.source !== 'staff-entry' && !o.acknowledgedAt);
     const ids = pend.map(o => o.id);
     if (prevPendingRef.current === null) { prevPendingRef.current = new Set(ids); return; } // skip first load
     const fresh = pend.find(o => !prevPendingRef.current.has(o.id));
@@ -56,7 +58,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     // Ring HARD until staff accepts or rejects — the alarm loops (chime +
     // vibration) rather than beeping once, so an order can't be missed at a busy
     // cart. Muting only silences the sound; the card still demands a decision.
-    if (fresh) { if (soundOnRef.current) startOrderAlarm(); setOrderAlert(fresh); }
+    if (fresh) { if (__ANDROID_APP__ || soundOnRef.current) startOrderAlarm(fresh.id); setOrderAlert(fresh); }
   }, [state.orders, cartId]);
 
   // Never leave the alarm ringing if the screen unmounts (logout, tab change).
@@ -230,9 +232,9 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-          <button onClick={toggleSound} title={soundOn ? 'Order sound on — tap to mute' : 'Order sound off — tap to unmute'}
+          <button onClick={toggleSound} title={__ANDROID_APP__ ? 'Android alert settings' : soundOn ? 'Order sound on — tap to mute' : 'Order sound off — tap to unmute'}
             style={{ display: 'flex', alignItems: 'center', gap: 6, background: soundOn ? colors.ink : '#fff', color: soundOn ? colors.primary : colors.muted, border: `1px solid ${soundOn ? colors.ink : colors.border}`, padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
-            {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} Order sound {soundOn ? 'On' : 'Off'}
+            {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} {__ANDROID_APP__ ? 'Alert settings' : `Order sound ${soundOn ? 'On' : 'Off'}`}
           </button>
         </div>
         {/* Shown on EVERY tab until this phone actually has push enabled — a
