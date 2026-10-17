@@ -62,3 +62,32 @@ body {
 .partner-app details>summary { min-height:32px;line-height:1.5; }
 
 .app-spinner-button { display: inline-block; vertical-align: middle; width: 18px; height: 18px; border-color: #ffffff55; border-top-color: #fff; }
+
+/* Android 7's original WebView predates CSS Grid and flex gap. Keep the
+   operational summaries usable even before System WebView is upgraded. */
+@supports not (display: grid) {
+  .app-loading { display:flex; align-items:center; justify-content:center; }
+  .partner-app .revenue-detail,
+  .partner-app .inventory-summary,
+  .partner-app .operation-grid,
+  .partner-app .payment-chart,
+  .partner-app .partner-grid { display:flex !important; flex-wrap:wrap; }
+  .partner-app .revenue-detail > *,
+  .partner-app .inventory-summary > *,
+  .partner-app .partner-grid > * { flex:1; min-width:0; margin:4px; }
+  .partner-app .partner-grid > * { flex-basis:120px; }
+  .partner-app .operation-grid > * { flex:1 1 130px; margin:4px; }
+  .partner-app .payment-chart > svg { width:110px; flex:0 0 110px; margin-right:12px; }
+  .partner-app .payment-chart > div { flex:1; min-width:0; }
+  .partner-app .stock-table-heading,
+  .partner-app .stock-item { display:flex; }
+  .partner-app .stock-table-heading > *,
+  .partner-app .stock-item > * { width:65px; margin-left:8px; }
+  .partner-app .stock-table-heading > :first-child,
+  .partner-app .stock-item > :first-child { flex:1; width:auto; min-width:0; margin-left:0; }
+}
+@supports not (gap: 1px) {
+  .partner-app .store-status > *,
+  .partner-app .chart-legend > *,
+  .partner-app .opening-flag > * { margin-right:6px; }
+}

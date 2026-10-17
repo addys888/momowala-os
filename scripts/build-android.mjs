@@ -16,4 +16,4 @@ const data=readFileSync(apk);
 writeFileSync(apk+'.sha256',createHash('sha256').update(data).digest('hex')+`  ${filename}\n`);
 console.log(`Signed APK: ${apk} (${(data.length/1024/1024).toFixed(2)} MB)`);
 
-writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Pre-login update checks, lightweight loading, recoverable order sync, and a distinct Cartlyft ringtone with repeating vibration until acknowledgment.'},null,2)+'\n');
+writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Pre-login update checks without repeat foreground prompts, duplicate-order prevention, safer save retries, corrected report navigation, and improved Android 7 layouts.'},null,2)+'\n');

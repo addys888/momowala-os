@@ -104,7 +104,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
       {subtab === 'attendance' ? <StaffAttendance key={cartId} staff={staff} cartId={cartId} /> : <>
       <OpeningManager key={cartId} cartId={cartId} cart={cart} staff={staff} />
       {/* Today summary across the cart */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+      <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
         <MetricCard label="Orders today" value={cartStats.paid} icon={<FileText size={16}/>} color={colors.green} />
         <MetricCard label="Pending" value={cartStats.pending} icon={<Clock size={16}/>} color={colors.accent} />
         <MetricCard label="Cancelled" value={cartStats.cancelled} icon={<X size={16}/>} color={colors.red} />

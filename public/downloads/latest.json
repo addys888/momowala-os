@@ -1,8 +1,8 @@
 {
-  "versionCode": 8,
-  "versionName": "1.6.0",
-  "path": "/downloads/cartlyft-1.6.0.apk",
-  "bytes": 3968795,
-  "sha256": "4e7a3c0a090d48c800b982148b509f69ccd1013a841bbf600be9445dffe8b9ca",
-  "notes": "Pre-login update checks, lightweight loading, recoverable order sync, and a distinct Cartlyft ringtone with repeating vibration until acknowledgment."
+  "versionCode": 9,
+  "versionName": "1.6.1",
+  "path": "/downloads/cartlyft-1.6.1.apk",
+  "bytes": 3969663,
+  "sha256": "13a0b9898b0268e0e768c90a5136b5b2becfe6c93701359c28464bdd43689d97",
+  "notes": "Pre-login update checks without repeat foreground prompts, duplicate-order prevention, safer save retries, corrected report navigation, and improved Android 7 layouts."
 }

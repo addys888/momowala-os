@@ -39,3 +39,9 @@ android/app/src/main/assets/web/
 *.jks
 *.keystore
 android/signing.properties
+
+# Local simulator logs
+.local-simulator/
+
+# Isolated instrumentation-only UI bundle
+android/app/src/androidTest/assets/flows/

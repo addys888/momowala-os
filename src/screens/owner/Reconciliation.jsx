@@ -162,7 +162,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
         <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 16, padding: 24, textAlign: 'center' }}>
           <div style={{ fontSize: 15, fontWeight: 700 }}>No orders on {dayLabel(date)}</div>
           <div style={{ fontSize: 12.5, color: colors.muted, margin: '6px 0 18px' }}>Which was it? Either way the day stops being flagged as forgotten.</div>
-          <div style={{ display: 'grid', gap: 10 }}>
+          <div className="partner-grid" style={{ display: 'grid', gap: 10 }}>
             <button onClick={() => setManual(true)} style={{ background: colors.ink, color: colors.primary, border: 'none', borderRadius: 12, padding: '13px 18px', fontWeight: 650, fontSize: 14, cursor: 'pointer' }}>
               💰 Cart ran — enter the day's sales
               <div style={{ fontSize: 11, fontWeight: 600, opacity: 0.75, marginTop: 3 }}>Nothing was billed in the app; type the money by hand</div>
@@ -196,7 +196,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
             <div style={{ fontSize: 11, opacity: 0.75, marginTop: 6 }}>No orders were punched, so order count and pieces sold stay blank for this day.</div>
           </div>
         ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
             <div style={{ fontSize: 11, opacity: 0.7 }}>Total Orders</div>
             <div style={{ fontSize: 24, fontWeight: 650 }}>{dayOrders.length}</div>

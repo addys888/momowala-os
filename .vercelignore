@@ -9,3 +9,6 @@ android/
 *.jks
 *.keystore
 # The signed APK is deliberately served from public/downloads/.
+
+.local-simulator/
+tests/

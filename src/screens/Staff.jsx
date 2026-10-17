@@ -15,6 +15,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
   const [placing, setPlacing] = useState(false); // in-flight guard for the pay buttons
+  const submittedCartRef = React.useRef(null); // Keep a committed basket from being submitted again before React renders.
   const placingRef = React.useRef(false); // synchronous guard — blocks rapid double-taps before re-render
   const settlingRef = React.useRef(new Set()); // per-order guard against double-settle on pending orders
   const [settling, setSettling] = useState(() => new Set());
@@ -96,7 +97,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     // last order save survived — producing the gaps (#047→#072) and silent
     // over-deduction. The ref blocks the second tap synchronously, before any
     // re-render can disable the button.
-    if (cart.length === 0 || placingRef.current) return;
+    if (cart.length === 0 || placingRef.current || submittedCartRef.current === cart) return;
     placingRef.current = true;
     setPlacing(true);
     try {
@@ -127,8 +128,10 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       // never a stale closure snapshot.
       if (!updateState(s => ({ inventory: { ...s.inventory, [cartId]: newInv }, orders: [...s.orders, order] }))) return;
 
+      submittedCartRef.current = cart;
       setCart([]);
       setJustPlaced({ token, total, payment, order });
+      return true;
     } finally {
       placingRef.current = false;
       setPlacing(false);
@@ -170,7 +173,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       const alreadyDeducted = order.source === 'staff-entry' || !!order.stockDeducted;
       const newInv = alreadyDeducted ? inv : deductInventory(inv, order.items, menu.items);
       const split = payment === 'split' ? { cash: extra?.cash || 0, upi: extra?.upi || 0 } : null;
-      setCartInv(newInv, {
+      return setCartInv(newInv, {
         orders: state.orders.map(o => o.id === orderId ? { ...o, payment, split, staff: staffName, settledAt: new Date().toISOString(), stockDeducted: true } : o),
       });
     } finally {
@@ -268,7 +271,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       {splitSettle && (
         <SplitPayModal
           total={splitSettle.total}
-          onConfirm={({ cash, upi }) => { settleOrder(splitSettle.id, 'split', { cash, upi }); setSplitSettle(null); }}
+          onConfirm={({ cash, upi }) => { if (settleOrder(splitSettle.id, 'split', { cash, upi })) setSplitSettle(null); }}
           onClose={() => setSplitSettle(null)}
         />
       )}
@@ -332,7 +335,7 @@ function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
       <div onClick={e => e.stopPropagation()} style={{ background: colors.ink, color: colors.primary, borderRadius: 20, padding: '32px 28px', textAlign: 'center', maxWidth: 320, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.35)' }}>
         <CheckCircle2 size={56} color={colors.primary} style={{ margin: '0 auto 12px' }} />
         <div style={{ fontSize: 18, fontWeight: 800 }}>{confirmed ? 'Order synced' : 'Order saved on this phone'}</div>
-        <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div>
+        {confirmed ? <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div> : <p role="status" style={{ fontSize: 14, lineHeight: 1.5, margin: '12px 0', opacity: 0.9 }}>Sync pending · Your order number appears after the server confirms it.</p>}
         <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : info.payment === 'zomato' ? '🛵 Zomato — weekly payout' : info.payment === 'swiggy' ? '🛵 Swiggy — weekly payout' : info.payment === 'split' ? '🔀 Split — cash + UPI' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
         {/* Single button: prints the customer bill (only when the printer is on and
             NOT already auto-printing) AND always advances. Printing is best-effort —
@@ -659,7 +662,7 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, foodLabel 
               {vendors.zomato && <button onClick={() => onPlaceOrder('zomato')} disabled={placing} style={{ flex: 1, background: '#E23744', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1, whiteSpace: 'nowrap' }}>{placing ? '…' : '🛵 Zomato'}</button>}
               {vendors.swiggy && <button onClick={() => onPlaceOrder('swiggy')} disabled={placing} style={{ flex: 1, background: '#FC8019', color: '#fff', border: 'none', padding: '10px 8px', borderRadius: 10, fontWeight: 800, fontSize: 13, cursor: placing ? 'wait' : 'pointer', opacity: placing ? 0.6 : 1, whiteSpace: 'nowrap' }}>{placing ? '…' : '🛵 Swiggy'}</button>}
             </div>
-            {showSplit && <SplitPayModal total={total} onConfirm={({ cash, upi }) => { setShowSplit(false); onPlaceOrder('split', { cash, upi }); }} onClose={() => setShowSplit(false)} />}
+            {showSplit && <SplitPayModal total={total} onConfirm={async ({ cash, upi }) => { if (await onPlaceOrder('split', { cash, upi })) setShowSplit(false); }} onClose={() => setShowSplit(false)} />}
             </>)}
           </div>
         </div>
@@ -693,7 +696,7 @@ function MyOrdersScreen({ orders, onSettle, onSplitSettle, onCancel, settling = 
       <SectionHeader title="My Shift Orders" subtitle={`${liveCount} order${liveCount !== 1 ? 's' : ''} so far`} />
 
       {/* Counts only — money totals live on the owner side so staff focus on punching, not reconciling the cash box. */}
-      <div style={{ display: 'grid', gridTemplateColumns: (onlineVendors || onlineCount > 0) ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10, marginBottom: 16 }}>
+      <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: (onlineVendors || onlineCount > 0) ? '1fr 1fr 1fr' : '1fr 1fr', gap: 10, marginBottom: 16 }}>
         <MetricCard label="Cash orders" value={`${cashCount}`} icon={<IndianRupee size={16}/>} color={colors.green} />
         <MetricCard label="UPI orders" value={`${upiCount}`} icon={<Smartphone size={16}/>} color={colors.ink} />
         {(onlineVendors || onlineCount > 0) && <MetricCard label="Online orders" value={`${onlineCount}`} icon={<Smartphone size={16}/>} color={colors.accent} />}
@@ -800,11 +803,11 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
   const [reason, setReason] = useState(WASTE_REASONS[0]);
   const [done, setDone] = useState('');
   const [err, setErr] = useState('');
-  const n = parseInt(qty) || 0;
+  const n = Number(qty);
   const onCart = inv[stockKey]?.cart ?? 0;
   const submit = () => {
     setErr('');
-    if (!stockKey || n <= 0) { setErr('Enter how many pieces.'); return; }
+    if (!stockKey || !Number.isSafeInteger(n) || n <= 0) { setErr('Enter a positive whole number of pieces.'); return; }
     // Can't waste more than is physically on the cart.
     if (n > onCart) { setErr(`Only ${onCart} ${stockTypes.find(s => s.key === stockKey)?.label || ''} pcs on the cart — can't log ${n}.`); return; }
     if (onLog(stockKey, n, reason) === false) return;

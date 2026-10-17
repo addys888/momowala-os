@@ -12,7 +12,10 @@
     "test:db": "node --test tests/database.test.js",
     "test:db:setup": "node scripts/setup-test-db.mjs",
     "build:android": "node scripts/build-android.mjs",
-    "check:android": "node scripts/check-android.mjs"
+    "check:android": "node scripts/check-android.mjs",
+    "simulator": "node scripts/simulator.mjs",
+    "simulator:android7": "node scripts/simulator.mjs --android7",
+    "test:ui:android": "node scripts/test-simulator-flows.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",

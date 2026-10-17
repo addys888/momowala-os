@@ -151,7 +151,9 @@ public class PrintRoutingTest extends Instrumentation {
         check(posted.getNotification().actions.length==1,"Acknowledge action missing");
         posted.getNotification().actions[0].actionIntent.send();
         long deadline=android.os.SystemClock.elapsedRealtime()+3000;
-        while(!PartnerAlerts.prefs(c).contains("ack:"+key) && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(50);
+        // The receiver commits acknowledgment and then removes playback in sequence.
+        // Wait for both effects; observing the first commit alone races the second.
+        while((!PartnerAlerts.prefs(c).contains("ack:"+key) || AlertPlaybackService.pending(c).contains("partner:"+key)) && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(50);
         check(PartnerAlerts.prefs(c).contains("ack:"+key),"Action did not persist acknowledgment");
         check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Acknowledgment did not stop its playback");
         check(AlertPlaybackService.pending(c).contains("partner:test-second"),"Acknowledging one order silenced another");
@@ -233,11 +235,18 @@ public class PrintRoutingTest extends Instrumentation {
             java.util.concurrent.CountDownLatch release=new java.util.concurrent.CountDownLatch(1);
             java.util.concurrent.atomic.AtomicBoolean opened=new java.util.concurrent.atomic.AtomicBoolean(false);
             org.json.JSONObject allowed=new org.json.JSONObject(policy.toString()).put("versionCode",current).put("minimumVersionCode",0);
-            runOnMainSync(()->new AppUpdater(screen,()->{release.await(3,java.util.concurrent.TimeUnit.SECONDS);return allowed;}).start(()->opened.set(true)));
+            java.util.concurrent.atomic.AtomicInteger requests=new java.util.concurrent.atomic.AtomicInteger();
+            AppUpdater isolated=new AppUpdater(screen,()->{requests.incrementAndGet();release.await(3,java.util.concurrent.TimeUnit.SECONDS);return allowed;});
+            runOnMainSync(isolated::foreground);
+            Thread.sleep(300);
+            check(requests.get()==0,"Returning to foreground triggered an unsolicited update check");
+            runOnMainSync(()->isolated.start(()->opened.set(true)));
             check(!opened.get(),"Startup did not wait for the version check");release.countDown();
             long deadline=android.os.SystemClock.elapsedRealtime()+4000;
             while(!opened.get() && android.os.SystemClock.elapsedRealtime()<deadline)Thread.sleep(50);
             check(opened.get(),"Current version did not continue to login");
+            runOnMainSync(isolated::foreground);
+            check(requests.get()==1,"Foreground repeated the completed startup check");
         } finally {
             runOnMainSync(screen::finish);
             if(saved==null)cache.edit().remove("policy").commit();else cache.edit().putString("policy",saved).commit();

@@ -25,7 +25,6 @@ final class AppUpdater {
     private boolean readyPrompted;
     private Dialog gate;
     private String gatedPolicy;
-    private long lastCheck;
     private Runnable startup;
     private int offeredVersion;
     interface PolicyReader { JSONObject read() throws Exception; }
@@ -45,12 +44,9 @@ final class AppUpdater {
         showRequired(info);
         finishStartup();
     }
-    void foreground() {
-        readyPrompted=false;
-        if(startup!=null && busy)return;
-        try { showRequired(new JSONObject(activity.getSharedPreferences("update_policy",0).getString("policy","{}"))); } catch(Exception ignored) {}
-        if(System.currentTimeMillis()-lastCheck>60000) check(false);
-    }
+    // Returning from login, notification settings or the installer must not
+    // fetch version policy again. Cold startup and the explicit menu own checks.
+    void foreground() { readyPrompted=false; }
     private boolean required(JSONObject info) {
         try { return info.optInt("minimumVersionCode",0)>activity.getPackageManager().getPackageInfo(activity.getPackageName(),0).versionCode; }
         catch(Exception ignored) { return false; }
@@ -95,7 +91,7 @@ final class AppUpdater {
     private void check(boolean explicit) {
         if(busy) { if(explicit)message("Checking your update…"); return; }
         if(explicit && prefs().contains("downloadId")) { resume(true); return; }
-        busy=true; lastCheck=System.currentTimeMillis(); if(explicit)message("Checking for updates…");
+        busy=true; if(explicit)message("Checking for updates…");
         new Thread(()->{
             try {
                 JSONObject info=policyReader.read();validateManifest(info);

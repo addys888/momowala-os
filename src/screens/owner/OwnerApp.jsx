@@ -25,7 +25,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   // wouldn't be visible at all, since the feed shows one date at a time).
   const [ordersDate, setOrdersDate] = useState(null);
   const goOrders = (date) => { setOrdersDate(date || TODAY); setTab('orders'); };
-  const navTab = (t) => { setReconcileDate(null); setTab(t); };
+  const navTab = (t) => { setReconcileDate(null); setOrdersDate(null); setTab(t); };
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
@@ -46,7 +46,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   };
   const toggleOpen = () => {
     const next = !cart?.closedManually;
-    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: next } : c) });
+    if (!updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: next } : c) })) return;
     // Persist immediately (not via the debounced batch) so it survives a refresh.
     setCartClosed(cartId, next);
   };
@@ -97,7 +97,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         <OrderAlertsPrompt cartId={cartId} role="owner" />
         {__ANDROID_APP__ && <RemindersButton cartId={cartId} role="owner" />}
 
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onReconcile={goReconcile} onSeeOrders={() => setTab('orders')} onSeeUncollected={goOrders} updateState={updateState} />}
+        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onReconcile={goReconcile} onSeeOrders={() => goOrders(TODAY)} onSeeUncollected={goOrders} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} initialDate={ordersDate} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'inventory' && <details className="partner-card"><summary>Opening history & alerts</summary><OpeningAlerts key={cartId} cartId={cartId}/></details>}
@@ -174,7 +174,7 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
         {isToday ? `${istDateLabel(new Date(), { weekday: 'long', day: 'numeric', month: 'short' })}${agoSec != null ? ` · live · updated ${agoSec}s ago` : ''}` : 'Past day — settled record'}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+      <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
         <MetricCard label="Orders" value={`${live.length}`} icon={<ShoppingCart size={16} />} color={colors.ink} />
         <MetricCard label="Last token" value={latestToken ? `#${String(latestToken).padStart(3, '0')}` : '—'} icon={<FileText size={16} />} color={colors.ink} />
         <MetricCard label="Collected · cash + UPI" value={`₹${inHand.toLocaleString('en-IN')}`} icon={<IndianRupee size={16} />} color={colors.green} />

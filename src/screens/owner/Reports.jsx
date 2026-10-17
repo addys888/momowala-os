@@ -283,7 +283,7 @@ function Reports({ state, updateState, cartId }) {
     if (!updateState({ expenses: [...(state.expenses || []), e] })) return;
     setShowExpense(false);
   };
-  const removeExpense = (id) => { updateState({ expenses: state.expenses.filter(e => e.id !== id) }); setDelExpense(null); };
+  const removeExpense = (id) => { if (!updateState({ expenses: state.expenses.filter(e => e.id !== id) })) return; setDelExpense(null); };
   const updateExpense = (id, category, amount, note, date = TODAY, fund = 'cart') => {
     if (!updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY, fund } : e) })) return;
     setEditExpenseItem(null);
@@ -335,7 +335,7 @@ function Reports({ state, updateState, cartId }) {
       {period !== 'day' && <div style={{ marginBottom: 6 }} />}
 
       {/* KPI tiles — headline metrics with period-over-period deltas */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+      <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
         {[
           { lab: 'Collections', val: `₹${revenue.toLocaleString('en-IN')}`, d: pct(revenue, prevRevenue), hero: true },
           { lab: 'Orders', val: `${ordersCount}`, d: pct(ordersCount, prevOrders) },
@@ -400,7 +400,7 @@ function Reports({ state, updateState, cartId }) {
         const showS = sTot > 0 || vendorEnabledFor(state, cartId, 'swiggy');
         if (!showZ && !showS) return null;
         return (
-        <div style={{ display: 'grid', gridTemplateColumns: showZ && showS ? '1fr 1fr' : '1fr', gap: 10, marginBottom: 12 }}>
+        <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: showZ && showS ? '1fr 1fr' : '1fr', gap: 10, marginBottom: 12 }}>
           {showZ && <div style={{ background: '#FDE8EA', border: '1px solid #F5B5BC', borderRadius: 12, padding: '12px 14px' }}>
             <div style={{ fontSize: 11, color: '#E23744', fontWeight: 650 }}>🛵 ZOMATO — {label.toUpperCase()}</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: '#E23744' }}>₹{zTot.toLocaleString('en-IN')}</div>
@@ -483,14 +483,14 @@ function Reports({ state, updateState, cartId }) {
           })}
         </div>
       )}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+      <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
         <MetricCard label="Expenses" value={`₹${spend.toLocaleString('en-IN')}`} icon={<IndianRupee size={16}/>} color={colors.red} />
         <MetricCard label="Net (sales − spend)" value={`₹${net.toLocaleString('en-IN')}`} icon={<TrendingUp size={16}/>} color={net >= 0 ? colors.green : colors.red} />
       </div>
       {/* Momos sold by category (pieces) — #5 */}
       {catRows.length > 0 && (<>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>MOMOS SOLD {label.toUpperCase()} (PIECES)</div>
-        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(catRows.length, 3)}, 1fr)`, gap: 10, marginBottom: 16 }}>
+        <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(catRows.length, 3)}, 1fr)`, gap: 10, marginBottom: 16 }}>
           {catRows.map(c => (
             <div key={c.key} style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '14px 12px', textAlign: 'center' }}>
               <div style={{ fontSize: 22, fontWeight: 700 }}>{c.pcs}</div>
@@ -540,7 +540,7 @@ function Reports({ state, updateState, cartId }) {
       {/* Reconciliation roll-up for the period (cash short/over, UPI, stock) */}
       {periodCloses.length > 0 && (<>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 8 }}>RECONCILIATION GAPS — {label.toUpperCase()}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: wareGaps.length > 0 ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: wareGaps.length > 0 ? '1fr 1fr' : '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
           {[['💵 Cash', cashGap, '₹'], ['📱 UPI', upiGap, '₹'], ['🥟 Stock', stockGap, ' pcs'], ...wareGaps.map(w => [`${w.key === 'glass' ? '🥤 Glasses' : `🍽️ ${w.short} plates`}`, w.gap, ' pcs'])].map(([lab, val, unit]) => (
             <div key={lab} style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 8px', textAlign: 'center' }}>
               <div style={{ fontSize: 17, fontWeight: 700, color: diffColor(val) }}>{val === 0 ? '✓' : `${val > 0 ? '+' : '−'}${unit === '₹' ? '₹' : ''}${Math.abs(val)}${unit === '₹' ? '' : unit}`}</div>
@@ -639,7 +639,7 @@ function Reports({ state, updateState, cartId }) {
 
         {/* Funding-source split: cart earnings vs personal (Axis) credit */}
         {monthTotal > 0 && (
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+          <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
             <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, padding: '12px 14px' }}>
               <div style={{ fontSize: 11, color: colors.muted, fontWeight: 700 }}>💳 Cart (Kotak/UPI)</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: colors.green }}>₹{cartMonth.toLocaleString('en-IN')}</div>
@@ -700,7 +700,7 @@ function ExpenseModal({ initial, onSubmit, onClose }) {
   const [date, setDate] = useState(initial?.date || TODAY);
   const [fund, setFund] = useState(initial?.fund || 'cart'); // 'cart' (Kotak/UPI) | 'personal' (Axis credit)
   const [error, setError] = useState('');
-  const submit = () => { const a = parseInt(amount) || 0; if (a <= 0) { setError('Enter an amount.'); return; } onSubmit(category, a, note.trim(), date, fund); };
+  const submit = () => { const a = Number(amount); if (!Number.isSafeInteger(a) || a <= 0) { setError('Enter a positive whole-rupee amount.'); return; } onSubmit(category, a, note.trim(), date, fund); };
   return (
     <EditModalShell title={initial ? 'Edit expense' : 'Add expense'} onClose={onClose} onSave={submit} error={error}>
       <div style={editLabel}>PAID FROM</div>

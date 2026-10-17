@@ -21,7 +21,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const setStockMode = (m) => {
     const menu = menuFor(state, cartId);
     const newMenus = { ...state.menus, [cartId]: { ...menu, stockMode: m } };
-    updateState({ menus: newMenus });
+    if (!updateState({ menus: newMenus })) return;
     pushMenus(newMenus, cartId);
   };
 
@@ -31,7 +31,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const newOps = {};
     next.forEach(st => { if (!newInv[st.key]) { newInv[st.key] = { freezer: 0, cart: 0 }; newOps[st.key] = { df: 0, dc: 0 }; } });
     const newMenus = { ...state.menus, [cartId]: { ...menu, stockTypes: next } };
-    updateState({
+    return updateState({
       menus: newMenus,
       inventory: { ...state.inventory, [cartId]: newInv },
     }, Object.keys(newOps).length ? [{ kind: 'inventory', payload: { cartId, ops: newOps, expected: inv } }] : []);
@@ -68,10 +68,10 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const savedPacks = warePacksFor(state, cartId);
     const packsChanged = WARE_TYPES.some(w => packSizes[w.key] !== savedPacks[w.key]);
     const newMenus = packsChanged ? { ...state.menus, [cartId]: { ...menu, warePacks: packSizes } } : null;
-    updateState({
+    if (!updateState({
       stockLogs: [...state.stockLogs, ...logs],
       ...(newMenus ? { menus: newMenus } : {}),
-    });
+    })) return;
     if (newMenus) pushMenus(newMenus, cartId);
     setShowPlates(false);
   };
@@ -354,7 +354,7 @@ function MoveStockConfirm({ move, bucket, onConfirm, onClose }) {
       error={!ok ? (qty <= 0 ? 'Enter a quantity.' : `Only ${src} pcs in ${load ? 'freezer' : 'cart'}.`) : ''}
     >
       <div style={{ fontSize: 14, marginBottom: 14 }}>Move <strong>{qty} pcs</strong> {load ? 'from Freezer → Cart' : 'from Cart → Freezer'}?</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+      <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div style={cell}><div style={cap}>FREEZER</div><div style={{ fontWeight: 650 }}>{bucket.freezer} → {Math.max(0, freezerAfter)}</div></div>
         <div style={cell}><div style={cap}>ON CART</div><div style={{ fontWeight: 650 }}>{bucket.cart} → {Math.max(0, cartAfter)}</div></div>
       </div>
@@ -467,7 +467,7 @@ function StockTypesModal({ stockTypes, onSave, onClose }) {
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
-          <button onClick={() => { onSave(rows.filter(r => r.label.trim()).map(r => ({ key: r.key, label: r.label.trim() }))); onClose(); }} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+          <button onClick={() => { if (onSave(rows.filter(r => r.label.trim()).map(r => ({ key: r.key, label: r.label.trim() }))) !== false) onClose(); }} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save</button>
         </div>
       </div>
     </div>
