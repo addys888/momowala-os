@@ -1,4 +1,3 @@
-import { nativeCommand } from '../lib/nativeApp';
 import { useState } from 'react';
 import { AlertCircle } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -49,7 +48,6 @@ function TeamLogin() {
       subtitle={setup ? `First time — set a password for ${m}` : 'Owners and staff sign in here'}
       footer={
         <div style={{ marginTop: 22, textAlign: 'center' }}>
-          {__ANDROID_APP__ && <button onClick={()=>nativeCommand('options')} style={{minHeight:44,padding:'10px 16px',marginBottom:12,border:'1px solid #CAD5E1',borderRadius:10,background:'#fff',color:brand.navy}}>App settings · Phone alarms</button>}
           {!__ANDROID_APP__ && <div style={{ marginBottom: 18 }}><a href="/install.html" style={{ color: brand.tealDark, fontWeight: 700, fontSize: 14 }}>Download Android app (Android 7+)</a></div>}
           <Link to="/" style={{ color: brand.tealDark, fontSize: 13, textDecoration: 'none', fontWeight: 600 }}>← Browse carts as a customer</Link>
           <div style={{ marginTop: 12 }}><Link to="/admin/login" style={{ color: brand.muted, fontSize: 12, textDecoration: 'none' }}>Cartlyft platform admin →</Link></div>
