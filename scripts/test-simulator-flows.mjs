@@ -14,12 +14,12 @@ const run=(cmd,args,options={})=>execFileSync(cmd,args,{stdio:'inherit',...optio
 const identity=execFileSync(adb,['-s',serial,'emu','avd','name'],{encoding:'utf8',timeout:5000});
 if(!identity.split(/\r?\n/).includes(expected))throw Error(`Start ${expected} first with npm run simulator${legacy?':android7':''}`);
 if(!process.argv.includes('--no-build')){
- run('npx',['vite','build','--config','tests/ui/vite.config.js']);
+ run('npx',['vite','build','--config','tests/ui/vite.config.js'],{env:{...process.env,STARTUP_TEST:process.argv.includes('--startup')?'1':'0'}});
  run('./gradlew',['assembleDebug','assembleDebugAndroidTest','-PflowTests'],{cwd:'android'});
 }
 for(const apk of ['debug/app-debug.apk','androidTest/debug/app-debug-androidTest.apk'])run(adb,['-s',serial,'install','-r',`android/app/build/outputs/apk/${apk}`]);
 const output=execFileSync(adb,['-s',serial,'shell','am','instrument','-w','com.cartlyft.momowala.test/com.cartlyft.momowala.TabFlowTest'],{encoding:'utf8',timeout:180000});
-const dir=`.local-simulator/flows-${legacy?'android7':'android15'}`;mkdirSync(dir,{recursive:true});
+const dir=`.local-simulator/${process.argv.includes('--startup')?'startup':'flows'}-${legacy?'android7':'android15'}`;mkdirSync(dir,{recursive:true});
 writeFileSync(join(dir,'results.json'),output);
 console.log(output);
 const files=execFileSync(adb,['-s',serial,'shell','run-as','com.cartlyft.momowala','ls','files'],{encoding:'utf8'}).trim().split(/\r?\n/).filter(s=>/^(owner|staff)-[a-z-]+\.png$/.test(s));

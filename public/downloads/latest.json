@@ -1,8 +1,8 @@
 {
-  "versionCode": 10,
-  "versionName": "1.6.2",
-  "path": "/downloads/cartlyft-1.6.2.apk",
-  "bytes": 3969559,
-  "sha256": "29dd06839f7c0b56b6045aeb0c8971fc17c56158740f33ed42697fe854b99303",
-  "notes": "Cleaner login screen: app settings and phone alarm controls are available after sign-in. Startup update checks remain before login."
+  "versionCode": 11,
+  "versionName": "1.6.3",
+  "path": "/downloads/cartlyft-1.6.3.apk",
+  "bytes": 3970107,
+  "sha256": "f194b4ab034e87b0fa25284fc42103192836d942b98e03ad941324ec7b2c5c83",
+  "notes": "Faster login rendering, lightweight public startup, preloaded partner screens, and fewer duplicate data requests."
 }

@@ -286,6 +286,14 @@ export async function loadCloudState() {
   if (!supabase) return null;
   const startedSession = requestHeaders()['x-app-session'];
   try {
+    // Signed-out login needs no private tables. Shopping only needs the public
+    // catalogue; never overwrite private report/order caches with empty reads.
+    if (!startedSession) {
+      const catalog = await supabase.rpc('app_catalog');
+      if (catalog.error) throw catalog.error;
+      if (requestHeaders()['x-app-session'] !== startedSession || startedEpoch !== changeEpoch) return null;
+      return { carts: (catalog.data?.carts || []).map(rowToCart), menus: catalog.data?.menus || {} };
+    }
     // Account reads use explicit safe columns; credentials are never fetched.
     const resilient = async (table, cols, order) => {
       return supabase.from(table).select(cols).order(order);

@@ -1,18 +1,19 @@
 import { nativeCommand } from './lib/nativeApp';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { loadInventory, committedOrder, trackChanges, pendingOperations, savedOrders, restoreSavedOrders, outbox, validateSession, revokeSession, storage, loadCloudState, mergeStates, loadCartOrders, mergeOrders } from './lib/store';
 import { TODAY, localDate, getInitialState, normalize } from './core';
 import { AdminLogin, TeamLogin } from './screens/Login';
 import { StoreContext, useStore } from './store';
+import { loadSignedInScreen } from './lib/screenModules';
 import { AppLaunch } from './components/AppLaunch';
 
-const AdminApp = lazy(() => import('./screens/Admin').then(m => ({ default: m.AdminApp })));
+const AdminApp = lazy(() => loadSignedInScreen('admin'));
 const CartListing = lazy(() => import('./screens/Customer').then(m => ({ default: m.CartListing })));
 const CartMenu = lazy(() => import('./screens/Customer').then(m => ({ default: m.CartMenu })));
-const OwnerApp = lazy(() => import('./screens/owner/OwnerApp').then(m => ({ default: m.OwnerApp })));
-const StaffApp = lazy(() => import('./screens/Staff').then(m => ({ default: m.StaffApp })));
+const OwnerApp = lazy(() => loadSignedInScreen('owner'));
+const StaffApp = lazy(() => loadSignedInScreen('staff'));
 
 const liveSession = (s) => (s?.token && s.expiresAt > Date.now()) ? s : null;
 
@@ -26,6 +27,7 @@ export default function App() {
     reactSetState(next);
   };
   const [hydrated, setHydrated] = useState(false);
+  const justAuthenticated = useRef(null);
   const [syncOps, setSyncOps] = useState(() => pendingOperations());
   const [showPending, setShowPending] = useState(false);
   useEffect(() => {
@@ -40,7 +42,8 @@ export default function App() {
     let active = true;
     setHydrated(false);
     (async () => {
-      if (session?.token) {
+      if (session?.role) void loadSignedInScreen(session.role).catch(() => {});
+      if (session?.token && justAuthenticated.current !== session.token) {
         const checked = await validateSession();
         if (!active) return;
         if (checked && !checked.error) {
@@ -51,7 +54,7 @@ export default function App() {
       }
       const cloud = await loadCloudState();
       if (!active) return;
-      if (cloud) setState(prev => normalize(mergeStates(prev, cloud)));
+      if (cloud) { setState(prev => normalize(mergeStates(prev, cloud))); setLastSync(Date.now()); }
       setHydrated(true);
       void outbox.flush();
     })();
@@ -69,6 +72,8 @@ export default function App() {
     };
     const refresh = async () => {
       await outbox.flush();
+      // Cart sessions already refresh through the visibility/online poll below.
+      if (storage.get('session', null)?.cartId) return;
       const cloud = await loadCloudState();
       if (cloud) setState(prev => normalize(mergeStates(prev, cloud)));
     };
@@ -175,7 +180,8 @@ export default function App() {
     document.addEventListener('visibilitychange', resume);
     window.addEventListener('focus', resume);
     window.addEventListener('online', resume);
-    tick();
+    // Hydration just loaded orders and stock; the first scheduled tick keeps
+    // them current without immediately downloading the same data again.
     return () => {
       alive = false; clearInterval(t); pollRef.current = null;
       document.removeEventListener('visibilitychange', resume);
@@ -242,7 +248,7 @@ export default function App() {
     setState(next);
     return true;
   };
-  const login = (sess) => { setLastSync(null); setHydrated(false); storage.set('session', sess); setSession(sess); };
+  const login = (sess) => { justAuthenticated.current = sess.token; setLastSync(null); setHydrated(false); storage.set('session', sess); setSession(sess); };
   const logout = () => {
     if (pendingOperations().length && !confirm('Some changes are waiting to sync. They remain saved on this device. Log out?')) return;
     void revokeSession();
@@ -251,9 +257,8 @@ export default function App() {
     setHydrated(false); setSession(null);
   };
 
-  if (!hydrated) return <AppLaunch />;
   return (
-    <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow, refreshSavedData }}>
+    <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow, refreshSavedData, hydrated }}>
       {syncOps.length > 0 && (showPending || syncOps.some(o => o.error)) && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
         {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} change(s) saved on this device, waiting to sync.`}
         {syncOps.some(o => o.error) && <button style={{ marginLeft: 8, padding: '8px 12px', borderRadius: 8 }} onClick={async () => {
@@ -265,7 +270,7 @@ export default function App() {
         catch (error) { alert(error.message); }
       }}>Recover saved orders</button></details>}
       <BrowserRouter>
-        <Suspense fallback={<AppLaunch />}><Routes>
+        <DataReady><Suspense fallback={<AppLaunch />}><Routes>
           {/* Public — customer */}
           <Route path="/" element={<MarketplaceRoute />} />
           <Route path="/c/:cartId" element={<CartMenuRoute />} />
@@ -277,10 +282,18 @@ export default function App() {
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<RequireRole role="admin"><AdminRoute /></RequireRole>} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes></Suspense>
+        </Routes></Suspense></DataReady>
       </BrowserRouter>
     </StoreContext.Provider>
   );
+}
+
+// Login is independent of business-data/network hydration. Public shopping and
+// authenticated operations still wait for their scoped data before rendering.
+function DataReady({ children }) {
+  const { hydrated } = useStore();
+  const { pathname } = useLocation();
+  return hydrated || pathname === '/login' || pathname === '/admin/login' ? children : <AppLaunch />;
 }
 
 // Route guards — bounce to the right login if the session doesn't match.

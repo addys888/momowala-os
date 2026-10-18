@@ -1,0 +1,31 @@
+import '../../src/lib/compat';
+import React from 'react';
+import {createRoot} from 'react-dom/client';
+import App from '../../src/MomoWalaOS';
+import '../../src/index.css';
+window.flow={results:[],errors:[],done:false,checkpoint:null};
+window.addEventListener('error',e=>flow.errors.push(e.message));
+window.addEventListener('unhandledrejection',e=>flow.errors.push(String(e.reason)));
+localStorage.clear();history.replaceState(null,'','/login');
+let releaseCatalog;const calls=[];
+window.fetch=async(input)=>{
+ const url=String(input);calls.push(url);
+ if(url.includes('/rpc/app_catalog'))return await new Promise(resolve=>{releaseCatalog=()=>resolve(new Response(JSON.stringify({carts:[],menus:{}}),{headers:{'Content-Type':'application/json'}}));});
+ throw Error('Unexpected request '+url);
+};
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const check=(name,pass)=>{flow.results.push({name,status:pass?'PASS':'FAIL'});if(!pass)throw Error(name);};
+const start=performance.now();const root=createRoot(document.getElementById('root'));root.render(<App/>);
+(async()=>{
+ for(let i=0;i<100&&!document.querySelector('input[type="password"]');i++)await sleep(20);
+ flow.loginReadyMs=Math.round(performance.now()-start);
+ check('Login renders while catalogue request is stalled',!!document.querySelector('input[type="password"]')&&flow.loginReadyMs<2000);
+ await sleep(200);
+ check('Signed-out startup fetches only one public catalogue',calls.length===1&&calls[0].includes('/rpc/app_catalog'));
+ check('No settings button on login',!document.body.textContent.includes('App settings'));
+ document.querySelector('a[href="/"]').click();await sleep(150);
+ check('Shopping waits for catalogue before rendering',!!document.querySelector('[aria-label="Loading"]'));
+ releaseCatalog();await sleep(500);
+ check('Shopping renders after catalogue response',!document.querySelector('[aria-label="Loading"]'));
+ root.unmount();flow.done=true;
+})().catch(error=>{flow.errors.push(String(error));flow.done=true;});

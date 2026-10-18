@@ -16,4 +16,4 @@ const data=readFileSync(apk);
 writeFileSync(apk+'.sha256',createHash('sha256').update(data).digest('hex')+`  ${filename}\n`);
 console.log(`Signed APK: ${apk} (${(data.length/1024/1024).toFixed(2)} MB)`);
 
-writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Cleaner login screen: app settings and phone alarm controls are available after sign-in. Startup update checks remain before login.'},null,2)+'\n');
+writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Faster login rendering, lightweight public startup, preloaded partner screens, and fewer duplicate data requests.'},null,2)+'\n');
