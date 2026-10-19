@@ -19,6 +19,7 @@ export function OrderAlertsPrompt({ cartId, role = 'owner' }) {
   });
 
   useEffect(() => {
+    if (__ANDROID_APP__) return;
     let alive = true;
     reminderStatus().then(s => {
       if (!alive) return;
@@ -81,6 +82,7 @@ export function RemindersButton({ cartId, role = 'owner' }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (__ANDROID_APP__) return;
     let alive = true;
     reminderStatus().then(s => {
       if (!alive) return;
@@ -93,7 +95,7 @@ export function RemindersButton({ cartId, role = 'owner' }) {
   }, [cartId, role]);
 
   if (__ANDROID_APP__) return <NativeNotifications cartId={cartId} role={role} />;
-  if (status === 'loading' || status === 'unsupported' || !pushSupported()) return null;
+  if (status === 'loading' || status === 'on' || status === 'unsupported' || !pushSupported()) return null;
 
   const on = status === 'on';
   const enable = async () => {

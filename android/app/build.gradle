@@ -11,8 +11,8 @@ android {
         minSdk 24
         targetSdk 35
         testInstrumentationRunner project.hasProperty('flowTests') ? 'com.cartlyft.momowala.TabFlowTest' : 'com.cartlyft.momowala.PrintRoutingTest'
-        versionCode 12
-        versionName '1.7.0'
+        versionCode 13
+        versionName '1.7.1'
     }
     signingConfigs {
         release {

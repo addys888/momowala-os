@@ -1,101 +1,62 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { PackageCheck, ChevronDown, Check } from 'lucide-react';
 import { readPacking, writePacking } from '../lib/packing';
 import { storage, pushMenus } from '../lib/store';
 import { TODAY, colors, brand, editInput, prepChecklistFor, menuFor } from '../core';
 import { EditModalShell } from './shared';
 
-// Daily completion is confirmed by Supabase and shared across phones.
-export function PrepChecklist({ state, updateState, cartId }) {
-  const items = prepChecklistFor(state, cartId);
-  const dateKey = `mw:prep:${cartId}:${TODAY}`;
-  const [checked, setChecked] = useState(new Set());
-  const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const [legacy, setLegacy] = useState(() => storage.get(dateKey, []));
-  const busyRef = useRef(false), epoch = useRef(0);
-  useEffect(() => {
-    let alive=true;
+// Staff can inspect confirmed progress; only owners can save or edit the list.
+export function PrepChecklist({ state, updateState, cartId, readOnly=false }) {
+  const items=prepChecklistFor(state,cartId),dateKey=`mw:prep:${cartId}:${TODAY}`;
+  const [checked,setChecked]=useState(new Set()),[ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [legacy,setLegacy]=useState(()=>readOnly?[]:storage.get(dateKey,[]));
+  const [open,setOpen]=useState(false),[editing,setEditing]=useState(false);
+  const busyRef=useRef(false),epoch=useRef(0);
+  useEffect(()=>{
+    let alive=true;setReady(false);setChecked(new Set());
     const refresh=async()=>{
       if(busyRef.current||document.hidden)return;
       const started=epoch.current;
-      try { const next=await readPacking(cartId,TODAY); if(alive&&started===epoch.current){setChecked(next);setReady(true);setError('');} }
-      catch { if(alive)setError('Packing status unavailable. Reconnect to load saved progress.'); }
+      try{const next=await readPacking(cartId,TODAY);if(alive&&started===epoch.current){setChecked(next);setReady(true);setError('');}}
+      catch{if(alive)setError('Packing status unavailable. Reconnect to load saved progress.');}
     };
-    void refresh(); const timer=setInterval(refresh,12000);
-    window.addEventListener('online',refresh);
-    return()=>{alive=false;clearInterval(timer);window.removeEventListener('online',refresh);};
+    void refresh();const timer=setInterval(refresh,12000);window.addEventListener('online',refresh);document.addEventListener('visibilitychange',refresh);
+    return()=>{alive=false;clearInterval(timer);window.removeEventListener('online',refresh);document.removeEventListener('visibilitychange',refresh);};
   },[cartId]);
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(false);
-
-  if (items.length === 0 && !editing) {
-    return (
-      <button onClick={() => setEditing(true)} style={{ flex: '1 1 150px', minWidth: 0, background: '#fff', border: `1px dashed ${colors.border}`, borderRadius: 12, padding: '10px 12px', cursor: 'pointer', color: colors.muted, fontSize: 12.5, fontWeight: 700, textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8 }}>
-        🧺 Set up packing list
-      </button>
-    );
-  }
-
-  const persist = async (changes,importOnly=false) => {
-    if(!ready||busyRef.current)return;
+  const persist=async(changes,importOnly=false)=>{
+    if(readOnly||!ready||busyRef.current)return;
     busyRef.current=true;epoch.current++;setBusy(true);setError('');
-    try { const next=await writePacking(cartId,TODAY,changes,importOnly);setChecked(next);
-      if(importOnly){storage.set(dateKey,[]);setLegacy([]);} }
-    catch { setError('Could not confirm saving. Reconnect and retry; saved server progress is kept.'); }
-    finally {busyRef.current=false;setBusy(false);}
+    try{const next=await writePacking(cartId,TODAY,changes,importOnly);setChecked(next);if(importOnly){storage.set(dateKey,[]);setLegacy([]);}}
+    catch{setError('Could not confirm saving. Reconnect and retry; saved server progress is kept.');}
+    finally{busyRef.current=false;setBusy(false);}
   };
-  const toggle = id => persist({[id]:!checked.has(id)});
-  const markAll = () => persist(Object.fromEntries(items.map(i=>[i.id,true])));
-  const clearAll = () => persist(Object.fromEntries(items.map(i=>[i.id,false])));
-
-  const done = items.filter(i => checked.has(i.id)).length;
-  const all = done === items.length && items.length > 0;
-  const pct = items.length ? Math.round((done / items.length) * 100) : 0;
-  const accent = all ? '#0F7B0F' : brand.navy;
-
-  return (
-    <>
-      {/* Compact tile — sits in the utility row */}
-      <button onClick={() => setOpen(o => !o)} style={{ flex: '1 1 150px', minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, background: '#fff', border: `1px solid ${all ? '#CBE7CB' : colors.border}`, borderRadius: 12, padding: '10px 12px', cursor: 'pointer', textAlign: 'left' }}>
-        <span style={{ fontSize: 18, flexShrink: 0 }}>🧺</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 800, color: all ? '#0F7B0F' : colors.ink, lineHeight: 1.1 }}>{all ? 'Packed ✓' : 'Pack today'}</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5 }}>
-            <div style={{ flex: 1, height: 5, borderRadius: 5, background: '#EEEBE2', overflow: 'hidden' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: accent, borderRadius: 5 }} />
-            </div>
-            <span style={{ fontSize: 10.5, fontWeight: 700, color: colors.muted }}>{ready ? `${done}/${items.length}` : 'Loading…'}</span>
-          </div>
-        </div>
-        <span style={{ fontSize: 12, color: colors.muted, flexShrink: 0 }}>{open ? '▾' : '▸'}</span>
-      </button>
-
-      {/* Full-width panel — wraps onto its own line below the tiles */}
-      {open && (
-        <div style={{ flex: '1 1 100%', width: '100%', background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, overflow: 'hidden' }}>
-          {error && <p role="alert" style={{padding:12}}>{error}</p>}
-          {legacy.length>0 && <button disabled={!ready||busy} onClick={()=>persist(Object.fromEntries(legacy.filter(id=>items.some(i=>i.id===id)).map(id=>[id,true])),true)}>Import checklist saved on this phone</button>}
-          <div style={{ padding: 12, display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 8 }}>
-            {items.map(it => {
-              const on = checked.has(it.id);
-              return (
-                <button key={it.id} disabled={!ready||busy} onClick={() => toggle(it.id)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: `1px solid ${on ? '#CBE7CB' : colors.border}`, background: on ? '#F3FAF3' : '#fff', borderRadius: 10, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                  <span style={{ width: 20, height: 20, borderRadius: 6, border: `1.5px solid ${on ? '#0F7B0F' : colors.border}`, background: on ? '#0F7B0F' : '#fff', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, flexShrink: 0 }}>{on ? '✓' : ''}</span>
-                  <span style={{ fontSize: 12.5, lineHeight: 1.3, color: on ? colors.muted : colors.ink, textDecoration: on ? 'line-through' : 'none' }}>{it.label}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '4px 16px 12px' }}>
-            <button disabled={!ready||busy} onClick={all ? clearAll : markAll} style={{ background: 'transparent', border: 'none', color: brand.navy, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>{all ? 'Clear all' : 'Mark all packed'}</button>
-            <button onClick={() => setEditing(true)} style={{ background: 'transparent', border: 'none', color: colors.muted, fontSize: 12, fontWeight: 700, cursor: 'pointer', padding: 0 }}>Edit list</button>
-          </div>
-        </div>
-      )}
-      {editing && <PrepChecklistModal state={state} updateState={updateState} cartId={cartId} onClose={() => setEditing(false)} />}
-    </>
-  );
+  const done=items.filter(i=>checked.has(i.id)).length,all=ready&&done===items.length&&items.length>0;
+  const pct=items.length?Math.round(done/items.length*100):0;
+  return <section className={`packing-card ${all?'complete':''}`} aria-label={readOnly?'Pack today — view only':'Pack today'}>
+    <button className="packing-summary" aria-expanded={open} onClick={()=>setOpen(v=>!v)}>
+      <span className="packing-symbol"><PackageCheck size={22}/></span>
+      <span className="packing-heading"><strong>{all?'Packed ✓':'Pack today'}</strong><span>{readOnly?'Owner’s packing checklist · View only':'Daily packing checklist'}</span></span>
+      <span className="packing-count">{ready?`${done}/${items.length}`:'—'}</span>
+      <ChevronDown size={18} style={{transform:open?'rotate(180deg)':'none'}}/>
+    </button>
+    <div className="packing-progress" role="progressbar" aria-label="Packing completion" aria-valuemin={0} aria-valuemax={items.length} aria-valuenow={ready?done:undefined}><span style={{width:ready?`${pct}%`:'0%'}}/></div>
+    {error&&<p className="packing-message" role="alert">{error}</p>}
+    {open&&<div className="packing-details">
+      {!items.length&&<p className="packing-message">{readOnly?'The owner has not set up a packing list.':'Add the items your team needs to pack each day.'}</p>}
+      <ul className="packing-list">{items.map(it=>{
+        const packed=ready&&checked.has(it.id);
+        const content=<><span className={`packing-check ${packed?'checked':''}`} aria-hidden="true">{packed&&<Check size={15}/>}</span><span className="packing-item-name">{it.label}</span><span className="packing-item-status">{!ready?'—':packed?'Packed':'Pending'}</span></>;
+        return <li key={it.id}>{readOnly?<div className="packing-item">{content}</div>:<button className="packing-item" aria-pressed={packed} disabled={!ready||busy} onClick={()=>persist({[it.id]:!checked.has(it.id)})}>{content}</button>}</li>;
+      })}</ul>
+      {!readOnly&&<div className="packing-actions">
+        {items.length>0&&<button disabled={!ready||busy} onClick={()=>persist(Object.fromEntries(items.map(i=>[i.id,!all])))}>{all?'Clear all':'Mark all packed'}</button>}
+        <button onClick={()=>setEditing(true)}>{items.length?'Edit list':'Set up packing list'}</button>
+        {Array.isArray(legacy)&&legacy.length>0&&<button disabled={!ready||busy} onClick={()=>persist(Object.fromEntries(legacy.filter(id=>items.some(i=>i.id===id)).map(id=>[id,true])),true)}>Import checklist saved on this phone</button>}
+      </div>}
+    </div>}
+    {!readOnly&&editing&&<PrepChecklistModal state={state} updateState={updateState} cartId={cartId} onClose={()=>setEditing(false)}/>}
+  </section>;
 }
-
 // Add / rename / remove the checklist items. Saved into the menus blob so the
 // list syncs across devices (via the clobber-safe per-cart pushMenus path).
 function PrepChecklistModal({ state, updateState, cartId, onClose }) {

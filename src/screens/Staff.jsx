@@ -1,3 +1,4 @@
+import { PrepChecklist } from '../components/PrepChecklist';
 import { ClosingWorkflow } from '../components/ClosingWorkflow';
 import { nativeCommand } from '../lib/nativeApp';
 import { OpeningInventory } from '../components/OpeningInventory';
@@ -15,6 +16,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [addTarget, setAddTarget] = useState(null); // pending order we're adding items to
   const [cancelTarget, setCancelTarget] = useState(null);
   const [justPlaced, setJustPlaced] = useState(null); // success toast after a staff order
+  const [isManager,setIsManager]=useState(false);
   const [placing, setPlacing] = useState(false); // in-flight guard for the pay buttons
   const submittedCartRef = React.useRef(null); // Keep a committed basket from being submitted again before React renders.
   const placingRef = React.useRef(false); // synchronous guard — blocks rapid double-taps before re-render
@@ -235,18 +237,19 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders will continue on this assigned phone." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will continue on this assigned phone."} title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        {!__ANDROID_APP__ && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
           <button onClick={toggleSound} title={__ANDROID_APP__ ? 'Android alert settings' : soundOn ? 'Order sound on — tap to mute' : 'Order sound off — tap to unmute'}
             style={{ display: 'flex', alignItems: 'center', gap: 6, background: soundOn ? colors.ink : '#fff', color: soundOn ? colors.primary : colors.muted, border: `1px solid ${soundOn ? colors.ink : colors.border}`, padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
             {soundOn ? <Volume2 size={15} /> : <VolumeX size={15} />} {__ANDROID_APP__ ? 'Alert settings' : `Order sound ${soundOn ? 'On' : 'Off'}`}
           </button>
-        </div>
+        </div>}
         {/* Shown on EVERY tab until this phone actually has push enabled — a
             staff phone without it stays silent for customer orders. */}
         <OrderAlertsPrompt cartId={cartId} role="staff" />
         <ClosingWorkflow key={`closing-${cartId}`} cartId={cartId} />
-        <OpeningInventory key={cartId} cartId={cartId} cart={cartInfo} stockTypes={menu.stockTypes || []} inventory={inv || {}} />
-        {tab === 'order' && <RemindersButton cartId={cartId} role="staff" />}
+        <OpeningInventory key={cartId} onManager={setIsManager} cartId={cartId} cart={cartInfo} stockTypes={menu.stockTypes || []} inventory={inv || {}} />
+        {( __ANDROID_APP__ || tab === 'order') && <RemindersButton cartId={cartId} role="staff" />}
+        {tab === 'order' && isManager && <PrepChecklist key={`packing-${cartId}`} state={state} cartId={cartId} readOnly />}
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} foodLabel={menuLabelFor(state, cartId)} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} vendors={{ zomato: vendorEnabledFor(state, cartId, 'zomato'), swiggy: vendorEnabledFor(state, cartId, 'swiggy') }} addTarget={addTarget} onAddToOrder={(items) => addToOrder(addTarget, items)} onCancelAdd={() => { setAddTarget(null); setCart([]); }} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} onAddItems={(o) => { setCart([]); setAddTarget(o); setTab('order'); }} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} settling={settling} onlineVendors={onlineVendorsFor(state, cartId)} printer={printerCfgFor(state, cartId)} cart={cartInfo} />}

@@ -215,7 +215,7 @@ public class MainActivity extends Activity {
         return "https".equals(u.getScheme()) && HOST.equals(u.getHost()) && (u.getPort()==-1 || u.getPort()==443);
     }
     private void showMenu(View anchor) {
-        String[] items={"Reload", "Print screen", "Open website", "Check for updates", "Unassign opening alarms", "About / notifications"};
+        String[] items={"Reload", "Print screen", "Open website", "Check for updates", "Unassign opening alarms", "Notification settings", "About"};
         new AlertDialog.Builder(this).setTitle("App settings").setItems(items,(dialog,index) -> {
             switch (items[index]) {
                 case "Reload": if (web != null) { failure.setVisibility(View.GONE); web.reload(); } break;
@@ -225,6 +225,7 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this).setTitle("Unassign this phone?").setMessage("Opening alarms will stop, including while logged out. Sign in to assign this phone again.")
                       .setPositiveButton("Unassign",(d,w)->InventoryReminders.clear(this)).setNegativeButton("Keep alarms",null).show(); break;
                 case "Check for updates": updater.check(); break;
+                case "Notification settings": startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))); break;
                 default: new AlertDialog.Builder(this).setTitle("Cartlyft Partner").setMessage("For Android 7 and newer.\n\nAllow notifications for background partner alerts. Acknowledge an alert to stop its sound and vibration. Phone volume, notification and battery settings apply.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
             }
         }).setNegativeButton("Close",null).show();

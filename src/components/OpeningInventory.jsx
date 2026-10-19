@@ -6,7 +6,7 @@ import { useStore } from '../store';
 
 const field={width:'100%',minHeight:44,padding:10,border:'1px solid #CCD6E0',borderRadius:8,fontSize:16};
 const button={minHeight:44,padding:'10px 16px',border:0,borderRadius:9,background:'#0A2F5C',color:'#fff',fontWeight:700};
-export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady}) {
+export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady,onManager}) {
   const {session,refreshNow}=useStore();
   const [savedRecord,setRecord]=useState(null), [loadedFor,setLoadedFor]=useState(''), [error,setError]=useState('');
   const [quantities,setQuantities]=useState({}), [busy,setBusy]=useState(false), [native,setNative]=useState(null);
@@ -18,7 +18,7 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
   useEffect(()=>{const timer=setInterval(()=>setDate(openingBusinessDate(cart?.openTime)),30000);return()=>clearInterval(timer);},[cart?.openTime]);
   useEffect(()=>{
     let active=true;
-    onReady?.(false);
+    onReady?.(false);onManager?.(false);
     const read=async()=>{
       try {
         const {data,error}=await supabase.rpc('app_opening_status',{p_cart_id:cartId,p_date:date});
@@ -28,19 +28,19 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
             const current=nativeCommand('inventoryStatus');
             if(current?.enabled && current.cartId===cartId)setNative(nativeCommand('clearInventory'));
           }
-          setAccess(data);setRecord(data.record);setLoadedFor(`${cartId}:${date}`);setError('');onReady?.(!!data.record);}
-      } catch {if(active)setError('Opening stock status is unavailable. Check your connection and try again.');}
+          onManager?.(session?.role==='staff' && data.canLoad===true);setAccess(data);setRecord(data.record);setLoadedFor(`${cartId}:${date}`);setError('');onReady?.(!!data.record);}
+      } catch {if(active){onManager?.(false);setError('Opening stock status is unavailable. Check your connection and try again.');}}
     };
     void read(); const timer=setInterval(read,20000);
     return()=>{active=false;clearInterval(timer);};
-  },[cartId,date,onReady,session?.role]);
+  },[cartId,date,onReady,onManager,session?.role]);
   useEffect(()=>{
     if(!loaded || !access?.canLoad || session?.role!=='staff' || !cart?.openTime || (record && record.business_date!==date)) return;
     nativeCommand('configureInventory',{cartId,openTime:cart.openTime,expiresAt:session.expiresAt,completedDate:record?.business_date || ''});
   },[loaded,access?.canLoad,record,date,cartId,cart?.openTime,session?.role,session?.expiresAt]);
   useEffect(()=>{
     const read=()=>setNative(nativeCommand('inventoryStatus'));
-    read();window.addEventListener('focus',read);return()=>window.removeEventListener('focus',read);
+    const visible=()=>{if(!document.hidden)read();};read();window.addEventListener('focus',read);document.addEventListener('visibilitychange',visible);return()=>{window.removeEventListener('focus',read);document.removeEventListener('visibilitychange',visible);};
   },[]);
   const save=async()=>{
     if(saving.current || !access?.canLoad)return;
@@ -80,8 +80,8 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
         <button style={{...button,marginLeft:8,background:'#fff',color:'#0A2F5C'}} disabled={busy} onClick={()=>setReview(false)}>Edit</button>
       </div>}
     </>}
-    {__ANDROID_APP__ && access?.canLoad && session?.role==='staff' && <div style={{borderTop:'1px solid #E3E9EF',marginTop:18,paddingTop:14,fontSize:13}}>
-      <strong>Opening alarm · 30 minutes before {cart?.openTime || 'opening'}</strong>
+    {__ANDROID_APP__ && native && access?.canLoad && session?.role==='staff' && (!native.enabled || !native.notifications || !native.exact || native.cartId!==cartId) && <details style={{borderTop:'1px solid #E3E9EF',marginTop:18,paddingTop:14,fontSize:13}}>
+      <summary style={{cursor:'pointer',fontWeight:650}}>Set up opening reminders</summary>
       <p style={{lineHeight:1.6,margin:'7px 0 10px',color:'#617184'}}>Rings and vibrates until acknowledged or opening stock is saved. Acknowledgment silences today’s reminder without marking stock ready. Android sound, notification and battery settings still apply. Alarms continue after logout until you unassign this phone. Sign in to save inventory. Force-stopping the app prevents reminders. Changes from another phone are checked while this screen is open.</p>
       {!native?.enabled && <button style={button} disabled={!cart?.openTime || !loaded} onClick={()=>{ nativeCommand('configureInventory',{cartId,openTime:cart.openTime,expiresAt:session.expiresAt,completedDate:record?.business_date || ''}); setNative(nativeCommand('enableInventory')); }}>Enable on this phone</button>}
       {native?.enabled && native.cartId!==cartId && <p role="alert">This phone is assigned to another cart. Unassign it before enabling this cart’s reminders.</p>}
@@ -89,6 +89,6 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
       {native?.enabled && !native.notifications && <button style={button} onClick={()=>nativeCommand('notificationSettings')}>Allow notifications in settings</button>}
       {native?.enabled && native.notifications && !native.exact && <button style={button} onClick={()=>nativeCommand('alarmSettings')}>Allow precise alarms</button>}
       {native?.enabled && native.cartId===cartId && native.notifications && native.exact && <p style={{color:'#087A65'}}>Opening reminders are enabled. Check alarm volume and vibration in Android settings.</p>}
-    </div>}
+    </details>}
   </section>;
 }
