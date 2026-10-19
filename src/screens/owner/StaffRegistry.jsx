@@ -9,6 +9,7 @@ import { useStore } from '../../store';
 
 function StaffRegistry({ state, updateState, cartId, cart }) {
   const { session } = useStore();
+  const [managerId,setManagerId]=useState(null);
   const [subtab, setSubtab] = useState('registry');
   const [showAdd, setShowAdd] = useState(false);
   const [editStaff, setEditStaff] = useState(null); // staff being edited
@@ -102,7 +103,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
         {[['registry','Registry & activity'],['attendance','Leave & holidays']].map(([id,label]) => <button key={id} role="tab" aria-selected={subtab === id} onClick={() => setSubtab(id)} style={{ flex: 1, padding: 12, minHeight: 48, border: `1px solid ${colors.border}`, background: subtab === id ? brand.navy : '#fff', color: subtab === id ? '#fff' : brand.navy, fontWeight: 700, cursor: 'pointer' }}>{label}</button>)}
       </div>
       {subtab === 'attendance' ? <StaffAttendance key={cartId} staff={staff} cartId={cartId} /> : <>
-      <OpeningManager key={cartId} cartId={cartId} cart={cart} staff={staff} />
+      <OpeningManager onAssignment={setManagerId} key={cartId} cartId={cartId} cart={cart} staff={staff} />
       {/* Today summary across the cart */}
       <div className="partner-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
         <MetricCard label="Orders today" value={cartStats.paid} icon={<FileText size={16}/>} color={colors.green} />
@@ -135,7 +136,7 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
           return (
           <div key={s.id} style={{ padding: '14px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', opacity: s.active ? 1 : 0.5 }}>
             <div onClick={() => setViewStaff(s)} style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} title="View today's orders">
-              <div style={{ fontWeight: 700, fontSize: 15 }}>{s.name} {!s.active && <span style={{ fontSize: 11, color: colors.red }}>· disabled</span>} <ArrowRight size={13} style={{ verticalAlign: 'middle', opacity: 0.4 }} /></div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{s.name} {s.active && s.id===managerId && <span className="manager-badge manager-badge-light">Manager</span>} {!s.active && <span style={{ fontSize: 11, color: colors.red }}>· disabled</span>} <ArrowRight size={13} style={{ verticalAlign: 'middle', opacity: 0.4 }} /></div>
               <div style={{ fontSize: 13, color: colors.muted }}>{s.mobile}</div>
               <div style={{ fontSize: 12, color: colors.muted, marginTop: 3, fontWeight: 600 }}>Today: {st.paid} order{st.paid !== 1 ? 's' : ''} · ₹{st.revenue}{st.cancelled ? ` · ${st.cancelled} cancelled` : ''}</div>
             </div>

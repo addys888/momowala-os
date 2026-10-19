@@ -51,6 +51,7 @@ const orderToRow = (o) => ({
 const rowToOrder = (r) => ({
   revision: r.revision ?? 0,
   insertedAt: r.inserted_at,
+  stockBusinessDate: r.stock_business_date ?? undefined,
   id: r.id, cartId: r.cart_id ?? undefined, token: r.token, date: r.date, time: r.time, items: r.items,
   total: r.total, payment: r.payment, staff: r.staff, source: r.source,
   split: r.split ?? undefined,
@@ -69,7 +70,7 @@ const staffToRow = (s) => ({
 });
 const rowToStaff = (r) => ({
   id: r.id, cartId: r.cart_id ?? undefined, name: r.name, mobile: r.mobile,
-  passwordHash: r.password_hash ?? null, active: r.active,
+  passwordHash: r.password_hash ?? null, active: r.active, isManager: r.is_manager === true,
 });
 
 // stock_logs / cart_loadings — rename cartId ↔ cart_id, otherwise 1:1
@@ -228,7 +229,7 @@ export async function pushMenus() { await outbox.flush(); return { error: null }
 // Tokens are assigned in the same transaction that inserts the order.
 export async function nextOrderToken() { return null; }
 const CART_COLS = 'id,name,tagline,cuisine,location,timing,emoji,accent,logo,phone,instagram,upi_id,upi_qr,open_time,close_time,closed_manually,default_prep_mins,owner_name,owner_mobile,active,created_at';
-const STAFF_COLS = 'id,cart_id,name,mobile,active,updated_at';
+const STAFF_COLS = 'id,cart_id,name,mobile,active,is_manager,updated_at';
 
 // ─── AUTH (SECURITY DEFINER RPCs — hashes never reach the browser) ───
 // Shared caller: returns the function's JSON, or { status: 'rpc_missing' } when

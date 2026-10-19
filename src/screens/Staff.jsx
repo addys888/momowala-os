@@ -1,9 +1,10 @@
 import { PrepChecklist } from '../components/PrepChecklist';
 import { ClosingWorkflow } from '../components/ClosingWorkflow';
+import { openingBusinessDate } from '../lib/openingInventory';
 import { nativeCommand } from '../lib/nativeApp';
 import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
-import { Plus, Minus, X, Clock, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
+import { Plus, Minus, X, Clock, Boxes, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
 import { storage } from '../lib/store';
 import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, partnerColors as colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
@@ -203,7 +204,8 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     // Reload-safe: paid orders and staff-entry (counter) orders both deducted at
     // punch/settle; never-deducted QR pending orders (source !== staff-entry) don't.
     const wasDeducted = isPaid(order) || order.source === 'staff-entry' || !!order.stockDeducted;
-    const newInv = wasDeducted ? restoreInventory(inv, order.items, menu.items) : inv;
+    const sameStockDay=(order.stockBusinessDate || order.date)===openingBusinessDate(cartInfo?.openTime);
+    const newInv = wasDeducted && sameStockDay ? restoreInventory(inv, order.items, menu.items) : inv;
     updateState({
       inventory: { ...state.inventory, [cartId]: newInv },
       orders: state.orders.map(o => o.id === orderId
@@ -234,7 +236,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 
   return (
     <div className="partner-app" style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
-      <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders will continue on this assigned phone." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will continue on this assigned phone."} title={`${cartInfo?.name ?? 'Cart'} · ${staffName}`} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
+      <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders will continue on this assigned phone." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will continue on this assigned phone."} title={<>{cartInfo?.name ?? 'Cart'} · {staffName} {isManager && <span className="manager-badge">Manager</span>}</>} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {!__ANDROID_APP__ && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
@@ -247,13 +249,14 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
             staff phone without it stays silent for customer orders. */}
         <OrderAlertsPrompt cartId={cartId} role="staff" />
         <ClosingWorkflow key={`closing-${cartId}`} cartId={cartId} />
-        <OpeningInventory key={cartId} onManager={setIsManager} cartId={cartId} cart={cartInfo} stockTypes={menu.stockTypes || []} inventory={inv || {}} />
+        <OpeningInventory staffFlow showDetails={tab==='stock'} key={cartId} onManager={setIsManager} cartId={cartId} cart={cartInfo} stockTypes={menu.stockTypes || []} inventory={inv || {}} />
         {( __ANDROID_APP__ || tab === 'order') && <RemindersButton cartId={cartId} role="staff" />}
         {tab === 'order' && isManager && <PrepChecklist key={`packing-${cartId}`} state={state} cartId={cartId} readOnly />}
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} foodLabel={menuLabelFor(state, cartId)} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} vendors={{ zomato: vendorEnabledFor(state, cartId, 'zomato'), swiggy: vendorEnabledFor(state, cartId, 'swiggy') }} addTarget={addTarget} onAddToOrder={(items) => addToOrder(addTarget, items)} onCancelAdd={() => { setAddTarget(null); setCart([]); }} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} onAddItems={(o) => { setCart([]); setAddTarget(o); setTab('order'); }} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} settling={settling} onlineVendors={onlineVendorsFor(state, cartId)} printer={printerCfgFor(state, cartId)} cart={cartInfo} />}
-        {tab === 'wastage' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
+        {tab === 'stock' && <section aria-label="Cart stock"><SectionHeader title="Stock in cart" subtitle="Fresh stock for today · remaining pieces" />{(menu.stockTypes || []).map(s=><StockRow key={s.key} label={s.label} value={inv?.[s.key]?.cart || 0} unit="pieces" />)}</section>}
+        {tab === 'stock' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} ware={wareLedger(state, cartId, TODAY)} myOrders={myOrders} staffName={staffName} />}
       </div>
 
@@ -261,7 +264,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         { id: 'order', icon: <Plus size={20}/>, label: 'New Order' },
         { id: 'pending', icon: <Clock size={20}/>, label: 'Pending', badge: pendingOrders.length },
         { id: 'myorders', icon: <FileText size={20}/>, label: 'My Orders' },
-        { id: 'wastage', icon: <Trash2 size={20}/>, label: 'Wastage' },
+        { id: 'stock', icon: <Boxes size={20}/>, label: 'Stock' },
         { id: 'shift', icon: <Award size={20}/>, label: 'Shift' },
       ]} />
 

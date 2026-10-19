@@ -1,8 +1,8 @@
 {
-  "versionCode": 13,
-  "versionName": "1.7.1",
-  "path": "/downloads/cartlyft-1.7.1.apk",
-  "bytes": 3974127,
-  "sha256": "27970f53c1bf472252d0d9c9beb7c9955b8943a0c22853bb81729e8feb301ade",
-  "notes": "Silent notification setup, cleaner reminder prompts, and a redesigned read-only packing checklist for cart managers."
+  "versionCode": 14,
+  "versionName": "1.7.2",
+  "path": "/downloads/cartlyft-1.7.2.apk",
+  "bytes": 3976191,
+  "sha256": "cd42aa3beb7a298c60b4924fa1caddc6116ab5f59f3ab7549771ec8286cc94f2",
+  "notes": "Manager badges, a daily opening-stock popup, and server-managed fresh stock rollover with preserved history."
 }

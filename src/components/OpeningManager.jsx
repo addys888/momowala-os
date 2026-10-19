@@ -2,18 +2,18 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { openingBusinessDate } from '../lib/openingInventory';
 
-export function OpeningManager({ cartId, cart, staff }) {
+export function OpeningManager({ cartId, cart, staff, onAssignment }) {
   const [status,setStatus]=useState(null), [selected,setSelected]=useState(''), [busy,setBusy]=useState(false), [message,setMessage]=useState('');
   const read=async()=>{
     const {data,error}=await supabase.rpc('app_opening_status',{p_cart_id:cartId,p_date:openingBusinessDate(cart?.openTime)});
     if(error)throw error;
-    setStatus(data);setSelected(data.managerId ? String(data.managerId) : '');
+    onAssignment?.(data.managerActive ? data.managerId : null);setStatus(data);setSelected(data.managerId ? String(data.managerId) : '');
   };
   useEffect(()=>{let active=true;supabase.rpc('app_opening_status',{p_cart_id:cartId,p_date:openingBusinessDate(cart?.openTime)}).then(({data,error})=>{
     if(!active)return;
     if(error)setMessage('Unable to read manager assignment. Retry when connected.');
-    else {setStatus(data);setSelected(data.managerId ? String(data.managerId) : '');}
-  });return()=>{active=false;};},[cartId,cart?.openTime]);
+    else {onAssignment?.(data.managerActive ? data.managerId : null);setStatus(data);setSelected(data.managerId ? String(data.managerId) : '');}
+  });return()=>{active=false;};},[cartId,cart?.openTime,onAssignment]);
   const save=async()=>{
     setBusy(true);setMessage('');
     try {

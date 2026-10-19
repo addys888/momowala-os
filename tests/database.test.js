@@ -424,3 +424,58 @@ test('closing reassignment and disabling cancel old phones; midnight collection 
  assert((await claim()).some(x=>x.endpoint==='fcm:new'&&x.mode==='closing_stop'));
  await sql('delete from push_subscriptions');
 });
+
+test('manager property is derived, scoped and follows reassignment/deactivation',async()=>{
+ await sql("update carts set open_time='15:00' where id='test-a'; update staff set active=true where id in (101,102); update cart_opening_managers set staff_id=101 where cart_id='test-a'");
+ assert.equal(await request('select is_manager from staff where id=101',owner),'t');
+ assert.equal(await request('select count(*) from staff where is_manager',other),'0');
+ await assert.rejects(request('update staff set is_manager=true where id=102',staff),/permission denied/);
+ await sql('update staff set is_manager=true where id=102');
+ assert.equal(await sql('select is_manager from staff where id=102'),'f');
+ await sql("update cart_opening_managers set staff_id=102 where cart_id='test-a'");
+ assert.equal(await sql('select is_manager from staff where id=101'),'f');
+ assert.equal(await sql('select is_manager from staff where id=102'),'t');
+ await sql('update staff set active=false where id=102');
+ assert.equal(await sql('select is_manager from staff where id=102'),'f');
+ await sql("update cart_opening_managers set staff_id=101 where cart_id='test-a'");
+});
+
+test('daily reset archives all food counts, preserves freezer/supplies and runs once across concurrent reads',async()=>{
+ await sql(`delete from cart_stock_rollovers where cart_id='test-a';
+ update inventory set data=jsonb_set(data,'{test-a}','{"veg":{"freezer":500,"cart":27},"paneer":{"freezer":200,"cart":19},"corn":{"freezer":100,"cart":8},"consumables":{"plates":50}}');
+ insert into app_private.inventory_days values('test-a',app_private.stock_business_date('test-a')-1) on conflict(cart_id) do update set business_date=excluded.business_date;`);
+ const reads=await Promise.all([request('select app_inventory()',owner),request('select app_inventory()',staff)]);
+ for(const read of reads){const inv=JSON.parse(read)['test-a'];assert.equal(inv.veg.cart,0);assert.equal(inv.paneer.cart,0);assert.equal(inv.corn.cart,0);assert.equal(inv.veg.freezer,500);assert.deepEqual(inv.consumables,{plates:50});}
+ assert.equal(await sql("select count(*) from cart_stock_rollovers where cart_id='test-a'"),'1');
+ assert.deepEqual(JSON.parse(await request("select quantities from cart_stock_rollovers where cart_id='test-a'",owner)),{veg:27,paneer:19,corn:8});
+ assert.equal(await request("select count(*) from cart_stock_rollovers where cart_id='test-a'",other),'0');
+ await assert.rejects(request("select app_private.roll_all_stock_days()",staff),/permission denied/);
+});
+
+test('opening load rolls first, never carries leftovers, deduplicates phones and remains saved for the day',async()=>{
+ await sql(`delete from opening_loads where cart_id='test-a';delete from opening_alerts where cart_id='test-a';delete from cart_stock_rollovers where cart_id='test-a';
+ update inventory set data=jsonb_set(data,'{test-a,veg,cart}','21');update app_private.inventory_days set business_date=app_private.stock_business_date('test-a')-1 where cart_id='test-a';`);
+ const d=await sql("select app_private.stock_business_date('test-a')"),id=crypto.randomUUID();
+ const load=()=>request(`select app_load_opening_inventory('test-a','${d}','${id}','{"veg":40}')`,staff);
+ const loads=await Promise.all([load(),load()]);assert(loads.every(r=>JSON.parse(r).status==='ok'));
+ const inv=JSON.parse(await request('select app_inventory()',owner))['test-a'];assert.equal(inv.veg.cart,40);assert.equal(inv.veg.freezer,460);assert.equal(inv.paneer.cart,0);
+ const status=JSON.parse(await request("select app_opening_status('test-a',null)",staff));assert.equal(status.isManager,true);assert.equal(status.businessDate,d);assert.equal(status.record.quantities.veg,40);
+ assert.equal(JSON.parse(await request(`select app_load_opening_inventory('test-a','${d}','${crypto.randomUUID()}','{"veg":50}')`,staff)).status,'conflict');
+ assert.equal(JSON.parse(await request('select app_inventory()',staff))['test-a'].veg.cart,40);
+});
+
+test('rollover fallback precedes writes and old cancellations cannot restore discarded food',async()=>{
+ await sql(`delete from cart_stock_rollovers where cart_id='test-a';update app_private.inventory_days set business_date=app_private.stock_business_date('test-a')-1 where cart_id='test-a';
+ update inventory set data=jsonb_set(data,'{test-a,veg,cart}','20');select app_private.inventory_delta('test-a','{"veg":{"dc":10}}');`);
+ assert.equal(JSON.parse(await request('select app_inventory()',owner))['test-a'].veg.cart,10);
+ const created=await mutate('order',{before:null,after:{...order(99991),source:'staff-entry',payment:'pending'}});
+ await sql("update orders set stock_business_date=app_private.stock_business_date('test-a')-1 where id=99991");
+ const before=JSON.parse(await request('select app_inventory()',owner))['test-a'].veg.cart;
+ const cancelled=await mutate('order',{before:created.order,after:{...created.order,payment:'cancelled',cancel_reason:'Yesterday no-show'}},owner);
+ assert.equal(cancelled.status,'ok');assert.equal(JSON.parse(await request('select app_inventory()',owner))['test-a'].veg.cart,before);
+ assert.equal(await sql("select app_private.stock_business_date('test-a','2030-01-02 00:00+05:30')"),'2030-01-02');
+ await sql("update carts set open_time='00:10' where id='test-a'");
+ assert.equal(await sql("select app_private.stock_business_date('test-a','2030-01-01 23:39+05:30')"),'2030-01-01');
+ assert.equal(await sql("select app_private.stock_business_date('test-a','2030-01-01 23:40+05:30')"),'2030-01-02');
+ await sql("update carts set open_time='15:00' where id='test-a'");
+});
