@@ -45,6 +45,7 @@ public class PrintRoutingTest extends Instrumentation {
             Thread.sleep(300);
             testReminders();
             testPartnerAlerts();
+            testClosingAlerts();
             testUpdates();
             testRequiredUpdateGate();
             testStartupBeforeLogin();
@@ -178,6 +179,29 @@ public class PrintRoutingTest extends Instrumentation {
         for(android.service.notification.StatusBarNotification n:PartnerAlerts.manager(c).getActiveNotifications())check(!"partner:delayed-reminder".equals(n.getTag()),"Delayed reminder rang after stock completion");
         InventoryReminders.clear(c);
         PartnerAlerts.prefs(c).edit().clear().commit();
+    }
+    private void testClosingAlerts() throws Exception {
+        android.content.Context c=getTargetContext();String binding="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",key="closing-manager-123-1";
+        PartnerAlerts.bind(c,new org.json.JSONObject().put("binding",binding));
+        java.util.Map<String,String> payload=new java.util.HashMap<>();
+        payload.put("binding",binding);payload.put("tag",key);payload.put("cartId","test-cart");payload.put("date","2026-10-18");payload.put("mode","closing_due");
+        // Opening completion must never suppress a closing reminder.
+        InventoryReminders.prefs(c).edit().putString("cartId","test-cart").putString("completedDate","2099-01-01").commit();
+        PartnerMessagingService.handle(c,payload);
+        check(AlertPlaybackService.pending(c).contains("partner:"+key),"Closing was suppressed by opening completion");
+        new PartnerAlertReceiver().onReceive(c,new Intent("cartlyft.ACK_ALL"));
+        new PartnerAlertReceiver().onReceive(c,new Intent("cartlyft.ACK").putExtra("key",key));
+        check(AlertPlaybackService.pending(c).contains("partner:"+key),"Generic acknowledgment silenced unsubmitted closing");
+        payload.put("mode","closing_stop");PartnerMessagingService.handle(c,payload);
+        check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Cross-phone submission did not stop closing");
+        payload.put("mode","closing_due");PartnerMessagingService.handle(c,payload);
+        check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Late reminder re-rang a completed closing");
+        String ownerKey="closing-owner-123";
+        PartnerAlerts.syncClosing(c,new org.json.JSONObject().put("cartId","test-cart").put("alerts",new org.json.JSONArray().put(new org.json.JSONObject().put("key",ownerKey).put("title","Closing report").put("body","Review counts"))));
+        check(AlertPlaybackService.pending(c).contains("partner:"+ownerKey),"Owner report did not ring");
+        PartnerAlerts.syncClosing(c,new org.json.JSONObject().put("cartId","test-cart").put("alerts",new org.json.JSONArray()));
+        check(!AlertPlaybackService.pending(c).contains("partner:"+ownerKey),"Confirmed owner acknowledgment did not stop ringing");
+        InventoryReminders.clear(c);PartnerAlerts.prefs(c).edit().clear().commit();
     }
     private Activity launchScreen() {
         ActivityMonitor monitor=addMonitor(MainActivity.class.getName(),null,false);

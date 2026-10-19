@@ -23,6 +23,7 @@ public final class AlertPlaybackService extends Service {
         if(change<0) { focusBlocked=true;if(player!=null)player.pause();if(vibrator!=null)vibrator.cancel();vibrating=false; }
         else if(change==AudioManager.AUDIOFOCUS_GAIN) {focusBlocked=false;if(player!=null)player.start();reconcile();}
     };
+    static boolean running() { return instance!=null; }
     static SharedPreferences pending(Context c) { return c.getSharedPreferences("ringing_alerts",MODE_PRIVATE); }
     static boolean start(Context c,String key,String channel) {
         pending(c).edit().putString(key,channel).commit();
@@ -50,7 +51,7 @@ public final class AlertPlaybackService extends Service {
         PendingIntent ack=PendingIntent.getBroadcast(this,4202,new Intent(this,PartnerAlertReceiver.class).setAction("cartlyft.ACK_ALL"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
         startForeground(ID,b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Cartlyft needs your attention")
-            .setContentText("Accept the order or acknowledge the alert to stop ringing.").setGroup("cartlyft-alerts").setGroupSummary(true).setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
+            .setContentText("Complete closing in the app, accept the order or acknowledge other alerts.").setGroup("cartlyft-alerts").setGroupSummary(true).setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
             .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge alerts",ack).build()).build());
         handler.removeCallbacks(tick);reconcile();handler.postDelayed(tick,1000);
         return START_STICKY;

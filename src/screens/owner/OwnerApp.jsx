@@ -1,3 +1,4 @@
+import { ClosingWorkflow } from '../../components/ClosingWorkflow';
 import { OpeningAlerts } from '../../components/OpeningAlerts';
 import { useState, useEffect } from 'react';
 import { ShoppingCart, Users, Clock, BarChart3, Settings, Home, IndianRupee, ArrowRight, Edit3, Boxes, FileText, CheckCircle2 } from 'lucide-react';
@@ -97,6 +98,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         <OrderAlertsPrompt cartId={cartId} role="owner" />
         {__ANDROID_APP__ && <RemindersButton cartId={cartId} role="owner" />}
 
+        <ClosingWorkflow key={`closing-${cartId}`} cartId={cartId} owner expanded={tab==='reconcile'} onOpen={()=>setTab('reconcile')} />
         {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onReconcile={goReconcile} onSeeOrders={() => goOrders(TODAY)} onSeeUncollected={goOrders} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} initialDate={ordersDate} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}

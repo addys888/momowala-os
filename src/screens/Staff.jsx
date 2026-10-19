@@ -1,3 +1,4 @@
+import { ClosingWorkflow } from '../components/ClosingWorkflow';
 import { nativeCommand } from '../lib/nativeApp';
 import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
@@ -243,6 +244,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         {/* Shown on EVERY tab until this phone actually has push enabled — a
             staff phone without it stays silent for customer orders. */}
         <OrderAlertsPrompt cartId={cartId} role="staff" />
+        <ClosingWorkflow key={`closing-${cartId}`} cartId={cartId} />
         <OpeningInventory key={cartId} cartId={cartId} cart={cartInfo} stockTypes={menu.stockTypes || []} inventory={inv || {}} />
         {tab === 'order' && <RemindersButton cartId={cartId} role="staff" />}
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} foodLabel={menuLabelFor(state, cartId)} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} vendors={{ zomato: vendorEnabledFor(state, cartId, 'zomato'), swiggy: vendorEnabledFor(state, cartId, 'swiggy') }} addTarget={addTarget} onAddToOrder={(items) => addToOrder(addTarget, items)} onCancelAdd={() => { setAddTarget(null); setCart([]); }} />}

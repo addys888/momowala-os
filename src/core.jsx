@@ -699,13 +699,8 @@ const DATA_EPOCH = '2026-07-07-testdata-cleanup';
 
 
 const getInitialState = () => {
-  // One-time launch reset.
-  if (storage.get('dataEpoch', null) !== DATA_EPOCH) {
-    ['orders', 'stockLogs', 'cartLoadings', 'dayCloseLogs', 'wastageLogs', 'expenses'].forEach(k => storage.set(k, []));
-    storage.set('inventoryByCart', null);
-    storage.set('staffOnDuty', null);
-    storage.set('dataEpoch', DATA_EPOCH);
-  }
+  // Legacy snapshots are retained for recovery; never erase business records
+  // because an application data-version marker changed.
 
   // Legacy single-tenant keys (pre multi-cart) — read only, for migration.
   const legacyStaff = storage.get('staff', null);
@@ -750,7 +745,7 @@ const getInitialState = () => {
   });
   // make sure every tracked stock type has an inventory bucket
   Object.entries(menus).forEach(([id, m]) => {
-    if (!inventory[id]) inventory[id] = freshInventory(id);
+    if (!inventory[id]) inventory[id] = {};
     (m.stockTypes || []).forEach(st => {
       if (!inventory[id][st.key]) inventory[id][st.key] = { freezer: 0, cart: 0 };
     });
@@ -796,7 +791,7 @@ function normalize(state) {
       items = m.items.map(it => it.type === 'corn' ? { ...it, type: 'cheese' } : it);
     }
     menus[id] = { ...m, stockTypes, ...(items ? { items } : {}) };
-    if (!inventory[id]) inventory[id] = freshInventory(id);
+    if (!inventory[id]) inventory[id] = {};
     stockTypes.forEach(st => { if (!inventory[id][st.key]) inventory[id][st.key] = { freezer: 0, cart: 0 }; });
   });
   return { ...state, menus, inventory };

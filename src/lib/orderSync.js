@@ -1,6 +1,6 @@
 // A failed/offline edit must not freeze every other order on the receiving phone.
 export function mergeOrderUpdates(local = [], remote = [], operations = []) {
-  const protectedIds = new Set(operations.filter(op => op.kind === 'order')
+  const protectedIds = new Set(operations.filter(op => op.kind === 'order' && !(op.error && op.payload.before))
     .map(op => op.payload.after?.id ?? op.payload.before?.id));
   const seen = new Map(local.map(order => [order.id, order]));
   for (const order of remote) {

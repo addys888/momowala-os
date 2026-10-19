@@ -42,12 +42,26 @@ public final class PartnerAlerts {
         manager(c).cancel("partner:"+key,1);
         AlertPlaybackService.remove(c,"partner:"+key);
     }
+    static synchronized void syncClosing(Context c,JSONObject data) throws Exception {
+        String cart=data.getString("cartId"),binding=prefs(c).getString("binding","");
+        org.json.JSONArray alerts=data.getJSONArray("alerts");
+        java.util.Set<String> active=new java.util.HashSet<>();
+        for(int i=0;i<alerts.length();i++) {
+            JSONObject a=alerts.getJSONObject(i);String key=a.getString("key");
+            if(!key.matches("closing-(manager|owner)-[0-9-]+"))continue;
+            active.add(key);prefs(c).edit().putString("closingCart:"+key,cart).apply();
+            show(c,binding,key,a.getString("title"),a.getString("body"));
+        }
+        for(java.util.Map.Entry<String,?> e:prefs(c).getAll().entrySet())
+            if(e.getKey().startsWith("closingCart:") && cart.equals(e.getValue()) && !active.contains(e.getKey().substring(12)))acknowledge(c,e.getKey().substring(12));
+    }
     static synchronized void show(Context c,String binding,String key,String title,String body) {
         if(!binding.matches("[0-9a-f-]{36}") || !binding.equals(prefs(c).getString("binding","")) || key.isEmpty() || key.length()>200)return;
         long now=System.currentTimeMillis();
         for(java.util.Map.Entry<String,?> e:prefs(c).getAll().entrySet())
             if(e.getKey().startsWith("ack:") && e.getValue() instanceof Long && now-(Long)e.getValue()>7*86400000L)prefs(c).edit().remove(e.getKey()).apply();
         if(prefs(c).contains("ack:"+key))return;
+        if(AlertPlaybackService.running() && AlertPlaybackService.pending(c).contains("partner:"+key))return;
         channel(c);
         Intent ack=new Intent(c,PartnerAlertReceiver.class).setAction("cartlyft.ACK").setData(android.net.Uri.parse("cartlyft-alert:"+android.net.Uri.encode(key))).putExtra("key",key);
         PendingIntent silence=PendingIntent.getBroadcast(c,0,ack,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
@@ -56,8 +70,9 @@ public final class PartnerAlerts {
         b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(body)
          .setStyle(new Notification.BigTextStyle().bigText(body)).setContentIntent(open)
          .setCategory(Notification.CATEGORY_REMINDER).setVisibility(Notification.VISIBILITY_PRIVATE)
-         .setPriority(Notification.PRIORITY_HIGH).setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(true)
-         .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",silence).build());
+         .setPriority(Notification.PRIORITY_HIGH).setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(true);
+        if(!key.startsWith("closing-"))b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",silence).build());
+        else b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,"Open closing",open).build());
         if(Build.VERSION.SDK_INT<26)b.setSound(AlertSound.uri(c),AlertSound.attributes()).setVibrate(AlertSound.VIBRATION);
         boolean managed=AlertPlaybackService.start(c,"partner:"+key,CHANNEL);
         if(managed) {

@@ -102,3 +102,7 @@ On the SAME PHONE, sign in as the original owner and open **Reconcile → Recove
 **Retry sync** retries rejected active operations without changing their IDs or payloads. **Set aside & reload** explains that changes are not yet server-saved; backup persistence must succeed before removing active operations, and only the current account is affected. Reconciliation now clearly distinguishes a pending device save from confirmed server data. Home shows business hours and direct Cart settings & hours, Opening stock and Live orders shortcuts.
 
 Validation: 22 unit/API tests; 16 isolated PostgreSQL tests; real browser recovery of example cash ₹500/UPI ₹250 to the isolated database, with server revenue ₹750 confirmed; owner dashboard navigation/rendering with no browser errors; Android debug/release builds and lint; Android 7 native regressions and rendered red-icon check; signed 1.2.0 → 1.3.0 in-place upgrade. Physical phones, printers and multi-device Firebase behavior retain their previously documented gaps.
+
+## 1.7.0 (19 October 2026)
+
+Published with explicit user approval. Includes server-owned business state, shared daily packing and manager closing workflow. See [release evidence and rollout details](release-1.7.0.md). Install over the existing APK to preserve pending/recovery data. Both owner and manager phones must update before enabling closing schedules.

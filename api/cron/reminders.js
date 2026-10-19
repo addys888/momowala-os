@@ -48,17 +48,18 @@ export default async function handler(req, res) {
   const istDate = ist.toISOString().slice(0, 10);
   const istMin = ist.getUTCHours() * 60 + ist.getUTCMinutes();
 
-  const [carts, subs, sends] = await Promise.all([
+  const [carts, subs, sends, closingSettings] = await Promise.all([
     sb('carts?select=id,name,open_time,close_time,active').then(r => r.json()),
     sb('push_subscriptions?select=endpoint,cart_id,role,p256dh,auth').then(r => r.json()),
     sb(`reminder_sends?date=eq.${istDate}&select=cart_id,kind`).then(r => r.json()),
+    sb('cart_closing_settings?enabled=eq.true&select=cart_id').then(r=>{if(!r.ok)throw Error('Closing settings unavailable');return r.json();}),
   ]);
   const already = new Set((sends || []).map(s => `${s.cart_id}:${s.kind}`));
   const inSlot = (target) => target != null && istMin >= target && istMin < target + WINDOW_MIN;
 
   const due = [];
   for (const c of carts || []) {
-    if (c.active === false) continue;
+    if (c.active === false || closingSettings.some(s=>s.cart_id===c.id)) continue;
     // Opening alerts are handled by the manager-scoped durable opening-alerts job.
     if (inSlot(parseMin(c.close_time))) due.push({ cart: c, kind: 'reconcile' });
   }

@@ -335,3 +335,92 @@ test('update policy is readable but cannot be modified by an app client', async 
   assert.equal(await request('select minimum_version_code from android_update_policy'),'0');
   await assert.rejects(request('update android_update_policy set minimum_version_code=9999',owner),/permission denied/);
 });
+
+test('packing progress is server-backed, tenant-scoped and imports never overwrite newer ticks', async()=>{
+ const date="(now() at time zone 'Asia/Kolkata')::date";
+ await sql("delete from daily_packing where cart_id in ('test-a','test-b')");
+ await request(`select app_save_packing('test-a',${date},'{"bag":true}')`,owner);
+ assert.equal(await request("select checked from daily_packing where cart_id='test-a' and item_id='bag'",owner),'t');
+ assert.equal(await request("select count(*) from daily_packing",other),'0');
+ assert.equal(await request("select count(*) from daily_packing"),'0');
+ await assert.rejects(request(`select app_save_packing('test-a',${date},'{"bag":false}')`,other),/Not authorised/);
+ await assert.rejects(request(`select app_save_packing('test-a',${date},'{"bag":false}')`,staff),/Not authorised/);
+ await assert.rejects(request(`select app_save_packing('test-a',${date},'{"bag":false}')`),/Not authorised/);
+ await request(`select app_save_packing('test-a',${date},'{"spoon":true}')`,owner);
+ assert.equal(await request("select count(*) from daily_packing where checked",owner),'2');
+ await request(`select app_save_packing('test-a',${date},'{"bag":false}')`,owner);
+ await request(`select app_save_packing('test-a',${date},'{"bag":true,"new":true}',true)`,owner);
+ assert.equal(await request("select checked from daily_packing where item_id='bag'",owner),'f');
+ await assert.rejects(request(`select app_save_packing('test-a',${date}-1,'{"bag":true}')`,owner),/Only today/);
+ await assert.rejects(request(`select app_save_packing('test-a',${date},'{"bad":"yes"}')`,owner),/Invalid item/);
+ await assert.rejects(request("update daily_packing set checked=true",owner),/permission denied/);
+});
+
+test('closing is owner-configured, manager-only, immutable and idempotent across phones',async()=>{
+ await sql("delete from app_private.closing_deliveries; delete from closing_reports; delete from cart_closing_settings; update staff set active=true where id=101; insert into cart_opening_managers(cart_id,staff_id) values('test-a',101) on conflict(cart_id) do update set staff_id=101; update menus set data=jsonb_set(data,'{test-a,stockTypes}','[{\"key\":\"veg\",\"label\":\"Veg Momo\"},{\"key\":\"paneer\",\"label\":\"Paneer Momo\"}]') where id=1;");
+ for(const token of [null,staff,other])await assert.rejects(request("select app_save_closing_settings('test-a',true,'22:00',0)",token),/Not authorised/);
+ const cfg=JSON.parse(await request("select app_save_closing_settings('test-a',true,'22:00',0)",owner));assert.equal(cfg.closing_time,'22:00:00');
+ await assert.rejects(request("select app_save_closing_settings('test-a',true,'21:00',0)",owner),/changed/);
+ await assert.rejects(request("select app_save_closing_settings('test-a',true,'25:00',1)",owner),/valid closing time/);
+ await sql("update cart_closing_settings set updated_at=now()-interval '2 days' where cart_id='test-a'; select app_private.collect_closing_reports(((now() at time zone 'Asia/Kolkata')::date+time '23:00') at time zone 'Asia/Kolkata','test-a');");
+ const state=JSON.parse(await request("select app_closing_status('test-a')",staff));assert.equal(state.canSubmit,true);assert(state.reports.length>=1);
+ const report=state.reports.find(r=>Date.parse(r.due_at)<Date.now());assert(report);
+ for(const token of [null,other])await assert.rejects(request("select app_closing_status('test-a')",token),/Only the cart manager/);
+ await assert.rejects(request('select * from closing_reports',staff),/permission denied/);
+ const id=crypto.randomUUID();const submit=(cash=1234,quantities='{"veg":10,"paneer":0}',op=id)=>`select app_submit_closing('test-a',${report.id},'${op}',${cash},'${quantities}','Checked')`;
+ for(const token of [owner,other,null])await assert.rejects(request(submit(),token),/Only the assigned/);
+ await assert.rejects(request(submit(-1),staff),/valid cash/);
+ await assert.rejects(request(submit(100,'{"veg":10}'),staff),/every stock/);
+ await assert.rejects(request(submit(100,'{"veg":0.5,"paneer":0}'),staff),/whole pieces/);
+ await sql('update staff set active=false where id=101');await assert.rejects(request(submit(),staff),/Only the assigned/);await sql('update staff set active=true where id=101');
+ const result=JSON.parse(await request(submit(),staff));assert.equal(result.cash_count,1234);assert.equal(result.quantities.paneer,0);
+ const retry=JSON.parse(await request(submit(),staff));assert.equal(retry.submitted_at,result.submitted_at);
+ await assert.rejects(request(submit(999),staff),/already submitted/);
+ const ownerView=JSON.parse(await request("select app_closing_status('test-a')",owner));assert.equal(ownerView.reports.find(r=>r.id===report.id).cash_count,1234);
+ await assert.rejects(request(`select app_ack_closing('test-a',${report.id})`,staff),/Not authorised/);
+ await request(`select app_ack_closing('test-a',${report.id})`,owner);
+ assert(JSON.parse(await request("select app_closing_status('test-a')",owner)).reports.find(r=>r.id===report.id).owner_read_at);
+});
+
+test('closing notifications lease independently, route by manager and send durable stops',async()=>{
+ await sql(`delete from app_private.closing_deliveries; delete from closing_reports; delete from push_subscriptions;
+ insert into app_private.backend_config values(1,encode(digest('local-notification-secret','sha256'),'hex')) on conflict(id) do update set secret_hash=excluded.secret_hash;
+ update cart_closing_settings set enabled=true,updated_at=now() where cart_id='test-a';
+ insert into closing_reports(cart_id,business_date,due_at,stock_types) values('test-a',current_date,now()-interval '1 hour','[]');
+ insert into push_subscriptions(endpoint,cart_id,role,staff_id,p256dh,auth) values('fcm:closing-manager','test-a','staff',101,'binding',''),('fcm:closing-otherstaff','test-a','staff',999,'binding',''),('fcm:closing-owner','test-a','owner',null,'binding',''),('fcm:closing-outsider','test-b','owner',null,'binding','');`);
+ const backend=async q=>{const raw=await sql(`begin;set local role anon;set local request.headers='{"x-backend-secret":"local-notification-secret"}';${q};commit;`);return raw.split('\n').filter(x=>x.startsWith('[')).at(-1);};
+ await assert.rejects(request('select app_claim_closing_notifications()',owner),/Not authorised/);
+ const claimed=JSON.parse(await backend('select app_claim_closing_notifications()'));assert.equal(claimed.length,1);assert.equal(claimed[0].endpoint,'fcm:closing-manager');assert.equal(claimed[0].mode,'closing_due');
+ assert.equal(JSON.parse(await backend('select app_claim_closing_notifications()')).length,0);
+ const d=claimed[0];await backend(`select app_finish_closing_notification(${d.id},'${d.endpoint}','${d.tag}','${d.lease}',true)`);
+ await request(`select app_submit_closing('test-a',${d.id},'${crypto.randomUUID()}',0,'{}')`,staff);
+ const next=JSON.parse(await backend('select app_claim_closing_notifications()'));
+ assert.equal(next.find(x=>x.endpoint==='fcm:closing-manager').mode,'closing_stop');assert.equal(next.find(x=>x.endpoint==='fcm:closing-owner').mode,'closing_report');assert.equal(next.length,2);
+ await request(`select app_ack_closing('test-a',${d.id})`,owner);
+ const ack=JSON.parse(await backend('select app_claim_closing_notifications()'));assert.equal(ack.find(x=>x.endpoint==='fcm:closing-owner').mode,'closing_stop');
+ // A provider response for an obsolete lease cannot mark a newer cancellation as delivered.
+ const ownerPush=next.find(x=>x.mode==='closing_report');await backend(`select app_finish_closing_notification(${d.id},'${ownerPush.endpoint}','${ownerPush.tag}','${ownerPush.lease}',true)`);
+ assert.equal(await sql(`select sent_at is null from app_private.closing_deliveries where report_id=${d.id} and endpoint='fcm:closing-owner'`),'t');
+ await sql('delete from push_subscriptions');
+});
+
+test('closing reassignment and disabling cancel old phones; midnight collection deduplicates',async()=>{
+ await sql(`delete from app_private.closing_deliveries; delete from closing_reports; delete from push_subscriptions;
+ insert into staff(id,cart_id,name,mobile,active) values(102,'test-a','Replacement','9000000004',true) on conflict(id) do update set active=true;
+ update cart_opening_managers set staff_id=101 where cart_id='test-a';
+ update cart_closing_settings set enabled=true,closing_time='00:05',updated_at='2030-01-01 00:00+05:30' where cart_id='test-a';
+ select app_private.collect_closing_reports('2030-01-02 00:04+05:30','test-a');`);
+ assert.equal(await sql("select count(*) from closing_reports where business_date='2030-01-02'"),'0');
+ await sql("select app_private.collect_closing_reports('2030-01-02 00:06+05:30','test-a');select app_private.collect_closing_reports('2030-01-02 00:07+05:30','test-a');");
+ assert.equal(await sql("select count(*) from closing_reports where business_date='2030-01-02'"),'1');
+ await sql(`delete from closing_reports;update cart_closing_settings set updated_at=now() where cart_id='test-a';insert into closing_reports(cart_id,business_date,due_at,stock_types) values('test-a',current_date,now()-interval '1 hour','[]');
+ insert into push_subscriptions(endpoint,cart_id,role,staff_id,p256dh,auth) values('fcm:old','test-a','staff',101,'binding',''),('fcm:new','test-a','staff',102,'binding','');`);
+ const claim=async()=>{const out=await sql(`begin;set local role anon;set local request.headers='{"x-backend-secret":"local-notification-secret"}';select app_claim_closing_notifications();commit;`);return JSON.parse(out.split('\n').find(x=>x.startsWith('[')));};
+ const old=(await claim())[0];assert.equal(old.endpoint,'fcm:old');
+ const revision=await sql("select revision from cart_opening_managers where cart_id='test-a'");await request(`select app_assign_opening_manager('test-a',102,${revision})`,owner);
+ await assert.rejects(request(`select app_submit_closing('test-a',${old.id},'${crypto.randomUUID()}',0,'{}')`,staff),/Only the assigned/);
+ const reassigned=await claim();assert(reassigned.some(x=>x.endpoint==='fcm:old'&&x.mode==='closing_stop'));assert(reassigned.some(x=>x.endpoint==='fcm:new'&&x.mode==='closing_due'));
+ const cfg=await sql("select revision from cart_closing_settings where cart_id='test-a'");await request(`select app_save_closing_settings('test-a',false,'22:00',${cfg})`,owner);
+ assert((await claim()).some(x=>x.endpoint==='fcm:new'&&x.mode==='closing_stop'));
+ await sql('delete from push_subscriptions');
+});

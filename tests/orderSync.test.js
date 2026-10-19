@@ -30,3 +30,10 @@ test('failed later page never becomes a successful partial sync', async () => {
   await assert.rejects(readOrderPages(async from => from === 0
     ? { data: [{ id: 1 }] } : { error: new Error('Disconnected') }, 1), /Disconnected/);
 });
+
+test('server order wins over a rejected edit without deleting the queued command', () => {
+ const local={id:1,revision:1,payment:'cash'},remote={id:1,revision:2,payment:'upi'};
+ const op={kind:'order',payload:{before:{...local,payment:'pending'},after:local},error:'Conflict'};
+ assert.deepEqual(mergeOrderUpdates([local],[remote],[op]),[remote]);
+ assert.equal(op.payload.after.payment,'cash');
+});

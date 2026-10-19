@@ -11,6 +11,15 @@ public final class PartnerMessagingService extends FirebaseMessagingService {
         String binding=d.getOrDefault("binding","");
         if(!binding.matches("[0-9a-f-]{36}") || !binding.equals(PartnerAlerts.prefs(c).getString("binding","")))return;
         String date=d.getOrDefault("date",""),cart=d.getOrDefault("cartId","");
+        String closingKey=d.getOrDefault("tag","");
+        if(closingKey.matches("closing-(manager|owner)-[0-9-]+")) {
+            if("closing_stop".equals(d.get("mode")))PartnerAlerts.acknowledge(c,closingKey);
+            else if("closing_due".equals(d.get("mode")) || "closing_report".equals(d.get("mode"))) {
+                PartnerAlerts.prefs(c).edit().putString("closingCart:"+closingKey,cart).apply();
+                PartnerAlerts.show(c,binding,closingKey,d.getOrDefault("title","Cartlyft closing"),d.getOrDefault("body","Open Cartlyft to complete closing."));
+            }
+            return;
+        }
         if("stock_complete".equals(d.get("mode"))) {
             if(!date.matches("[0-9]{4}-[0-9]{2}-[0-9]{2}"))return;
             if(cart.equals(InventoryReminders.prefs(c).getString("cartId",""))) {

@@ -198,6 +198,9 @@ export function mergeStates(localState, cloud) {
   // private caches into a newly authenticated account.
   const next = { ...localState, ...cloud };
   for (const op of pendingOperations()) {
+    // A rejected edit must not replace an existing server order. New unsynced
+    // orders remain visible as drafts and retain their original operation IDs.
+    if (op.kind === 'order' && op.error && op.payload.before) continue;
     const { after } = op.payload;
     if (op.kind === 'order' && after) next.orders = unionById(next.orders, [rowToOrder(after)]);
     if (op.kind === 'row') {
@@ -347,7 +350,7 @@ export async function loadCloudState() {
       menus: menus.data?.data ?? null,
     };
   } catch (e) {
-    console.warn('Supabase load failed — running on local data only.', e.message);
+    console.warn('Server data unavailable; business screens remain gated.', e.message);
     return null;
   }
 }
@@ -366,7 +369,9 @@ export async function insertOrderNow(order, operationId = crypto.randomUUID()) {
 }
 export async function ackOrder(id) {
   // Only this field changes; unrelated order fields cannot be overwritten.
-  const order = storage.get('orders', []).find(o => o.id === id);
+  const {data: row, error} = await supabase.from('orders').select('*').eq('id',id).maybeSingle();
+  if(error)throw error;
+  const order = row ? rowToOrder(row) : null;
   if (order) {
     outbox.enqueue('order', { before: orderToRow(order), after: { ...orderToRow(order), acknowledged_at: new Date().toISOString() } });
     await outbox.flush();
@@ -393,7 +398,9 @@ export async function notifyNewOrder(order) {
 // Must hit the cloud too: the sync is append-only union, so a local-only
 // delete would be resurrected from the cloud on the next load.
 export async function deleteStockLog(id) {
-  const before = storage.get('stockLogs', []).find(x => x.id === id);
+  const {data: row, error} = await supabase.from('stock_logs').select('*').eq('id',id).maybeSingle();
+  if(error)throw error;
+  const before = row ? rowToLog(row) : null;
   if (before) outbox.enqueue('row', { table: 'stock_logs', before: logToRow(before), after: null });
   await outbox.flush(); return { error: null };
 }

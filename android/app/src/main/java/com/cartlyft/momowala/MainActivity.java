@@ -148,6 +148,7 @@ public class MainActivity extends Activity {
                                 String key=data.getString("key");if(!key.matches("order-[0-9]+"))throw new IllegalArgumentException();
                                 PartnerAlerts.show(MainActivity.this,PartnerAlerts.prefs(MainActivity.this).getString("binding",""),key,"New Cartlyft order","Open Cartlyft to accept the order.");break;
                             }
+                            case "syncClosingAlerts": PartnerAlerts.syncClosing(MainActivity.this,data); break;
                             case "acknowledgePartner": PartnerAlerts.acknowledge(MainActivity.this,data.getString("key")); break;
                             case "acknowledgeInventory": InventoryReminders.acknowledge(MainActivity.this); break;
                             default: throw new IllegalArgumentException();

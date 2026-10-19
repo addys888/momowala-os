@@ -7,10 +7,11 @@ window.flow={results:[],errors:[],done:false,checkpoint:null};
 window.addEventListener('error',e=>flow.errors.push(e.message));
 window.addEventListener('unhandledrejection',e=>flow.errors.push(String(e.reason)));
 localStorage.clear();history.replaceState(null,'','/login');
+localStorage.setItem('mw:dayCloseLogs',JSON.stringify([{id:123,revenue:500}]));
 let releaseCatalog;const calls=[];
 window.fetch=async(input)=>{
  const url=String(input);calls.push(url);
- if(url.includes('/rpc/app_catalog'))return await new Promise(resolve=>{releaseCatalog=()=>resolve(new Response(JSON.stringify({carts:[],menus:{}}),{headers:{'Content-Type':'application/json'}}));});
+ if(url.includes('/rpc/app_catalog'))return await new Promise(resolve=>{releaseCatalog=(fail=false)=>resolve(new Response(JSON.stringify(fail?{message:'Offline'}:{carts:[],menus:{}}),{status:fail?503:200,headers:{'Content-Type':'application/json'}}));});
  throw Error('Unexpected request '+url);
 };
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -25,7 +26,12 @@ const start=performance.now();const root=createRoot(document.getElementById('roo
  check('No settings button on login',!document.body.textContent.includes('App settings'));
  document.querySelector('a[href="/"]').click();await sleep(150);
  check('Shopping waits for catalogue before rendering',!!document.querySelector('[aria-label="Loading"]'));
+ releaseCatalog(true);await sleep(500);
+ check('Server failure shows retry instead of sample business data',document.body.textContent.includes('Retry connection')&&!document.body.textContent.includes('Momo Wala'));
+ check('Legacy report cache survives failed server load',JSON.parse(localStorage.getItem('mw:dayCloseLogs'))[0].revenue===500);
+ [...document.querySelectorAll('button')].find(b=>b.textContent==='Retry connection').click();await sleep(100);
  releaseCatalog();await sleep(500);
  check('Shopping renders after catalogue response',!document.querySelector('[aria-label="Loading"]'));
+ check('Public hydration does not erase legacy reports',JSON.parse(localStorage.getItem('mw:dayCloseLogs'))[0].revenue===500);
  root.unmount();flow.done=true;
 })().catch(error=>{flow.errors.push(String(error));flow.done=true;});

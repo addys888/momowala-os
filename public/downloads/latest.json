@@ -1,8 +1,8 @@
 {
-  "versionCode": 11,
-  "versionName": "1.6.3",
-  "path": "/downloads/cartlyft-1.6.3.apk",
-  "bytes": 3970107,
-  "sha256": "f194b4ab034e87b0fa25284fc42103192836d942b98e03ad941324ec7b2c5c83",
-  "notes": "Faster login rendering, lightweight public startup, preloaded partner screens, and fewer duplicate data requests."
+  "versionCode": 12,
+  "versionName": "1.7.0",
+  "path": "/downloads/cartlyft-1.7.0.apk",
+  "bytes": 3974463,
+  "sha256": "183c6a798b6a93f5f8b3376b294dd1c988f64eca92255fbdc8e257cb30066b89",
+  "notes": "Server-verified business data, shared packing checklists, and owner-configurable manager closing reports with persistent alerts."
 }

@@ -91,3 +91,14 @@ body {
   .partner-app .chart-legend > *,
   .partner-app .opening-flag > * { margin-right:6px; }
 }
+
+.closing-workflow h3 { margin:0 0 8px;font-size:18px; }
+.closing-workflow p { margin:8px 0 14px;font-size:13px;line-height:1.55;color:var(--partner-muted); }
+.closing-workflow label { display:block;margin:14px 0;font-size:13px;font-weight:600;color:var(--partner-ink); }
+.closing-workflow input:not([type=checkbox]),.closing-workflow textarea { display:block;box-sizing:border-box;width:100%;min-height:46px;border:1px solid var(--partner-line);border-radius:8px;padding:10px;margin-top:6px;background:#fff;color:#24394d; }
+.closing-workflow input[type=checkbox] { margin-right:8px; }
+.closing-workflow button { min-height:44px;padding:10px 16px;border:0;border-radius:8px;background:#0A2F5C;color:#fff;font-size:14px;font-weight:600;margin:4px 8px 4px 0; }
+.closing-workflow button.quiet-button { background:#F1F5F9;color:#24394d; }
+.closing-workflow button:disabled { opacity:.5;cursor:wait; }
+.closing-workflow [role=alert] { color:#B42318; }
+.closing-workflow summary { padding:12px 0;font-size:13px;font-weight:600;cursor:pointer; }

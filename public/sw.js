@@ -11,6 +11,7 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch { data = { body: event.data && event.data.text() }; }
+  if(data.mode==='closing_stop'){event.waitUntil(self.registration.getNotifications({tag:data.tag}).then(list=>list.forEach(n=>n.close())));return;}
   const title = data.title || 'Cartlyft';
   const isOrder = /^order-/.test(data.tag || '');
   const options = {
@@ -22,7 +23,7 @@ self.addEventListener('push', (event) => {
     // makes each replacement alert (buzz/sound) again instead of arriving silently.
     renotify: data.renotify !== false,
     requireInteraction: data.requireInteraction !== false,
-    vibrate: data.vibrate || (isOrder ? [500, 200, 500, 200, 700] : undefined),
+    vibrate: data.vibrate || (isOrder || /^closing-/.test(data.tag || '') ? [500, 200, 500, 200, 700] : undefined),
     actions: isOrder ? [{ action: 'open', title: 'View order' }] : [],
     data: { url: data.url || '/' },
   };

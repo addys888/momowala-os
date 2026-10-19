@@ -3,9 +3,10 @@ import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams, useLocation } from 'react-router-dom';
 import { loadInventory, committedOrder, trackChanges, pendingOperations, savedOrders, restoreSavedOrders, outbox, validateSession, revokeSession, storage, loadCloudState, mergeStates, loadCartOrders, mergeOrders } from './lib/store';
-import { TODAY, localDate, getInitialState, normalize } from './core';
+import { TODAY, localDate, normalize } from './core';
 import { AdminLogin, TeamLogin } from './screens/Login';
 import { StoreContext, useStore } from './store';
+import { emptyServerState } from './lib/serverState';
 import { loadSignedInScreen } from './lib/screenModules';
 import { AppLaunch } from './components/AppLaunch';
 
@@ -19,7 +20,7 @@ const liveSession = (s) => (s?.token && s.expiresAt > Date.now()) ? s : null;
 
 
 export default function App() {
-  const [state, reactSetState] = useState(() => normalize(getInitialState()));
+  const [state, reactSetState] = useState(() => emptyServerState());
   const stateRef = useRef(state);
   const setState = (value) => {
     const next = typeof value === 'function' ? value(stateRef.current) : value;
@@ -28,6 +29,8 @@ export default function App() {
   };
   const [hydrated, setHydrated] = useState(false);
   const justAuthenticated = useRef(null);
+  const [loadError, setLoadError] = useState(null);
+  const [loadAttempt, setLoadAttempt] = useState(0);
   const [syncOps, setSyncOps] = useState(() => pendingOperations());
   const [showPending, setShowPending] = useState(false);
   useEffect(() => {
@@ -41,11 +44,13 @@ export default function App() {
   useEffect(() => {
     let active = true;
     setHydrated(false);
+    setLoadError(null);
     (async () => {
       if (session?.role) void loadSignedInScreen(session.role).catch(() => {});
       if (session?.token && justAuthenticated.current !== session.token) {
         const checked = await validateSession();
         if (!active) return;
+        if (!checked || checked.error) { setLoadError('Connect to verify your account and load saved server data.'); return; }
         if (checked && !checked.error) {
           if (!checked.data?.role) { storage.set('session', null); setSession(null); return; }
           const verified = { ...session, ...checked.data };
@@ -54,12 +59,13 @@ export default function App() {
       }
       const cloud = await loadCloudState();
       if (!active) return;
-      if (cloud) { setState(prev => normalize(mergeStates(prev, cloud))); setLastSync(Date.now()); }
+      if (!cloud) { setLoadError('Could not load saved server data. Your pending changes remain on this phone.'); return; }
+      setState(prev => normalize(mergeStates(prev, cloud))); setLastSync(Date.now());
       setHydrated(true);
       void outbox.flush();
     })();
     return () => { active = false; };
-  }, [session?.token]);
+  }, [session?.token, loadAttempt]);
 
   useEffect(() => {
     const status = () => setSyncOps(pendingOperations());
@@ -153,7 +159,7 @@ export default function App() {
           const ops = pendingOperations();
           return { ...prev,
             orders: mergeOrders(prev.orders, fresh, ops),
-            inventory: inventory && !ops.some(o => ['order', 'inventory', 'consumables'].includes(o.kind)) ? { ...prev.inventory, ...inventory } : prev.inventory,
+            inventory: inventory && !ops.some(o => ['order', 'inventory', 'consumables'].includes(o.kind) && !(o.kind === 'order' && o.error && o.payload.before)) ? { ...prev.inventory, ...inventory } : prev.inventory,
           };
         });
         // Menu, hours, reports and yesterday's unpaid orders must also follow
@@ -196,24 +202,9 @@ export default function App() {
     if (cloud && token === storage.get('session', null)?.token) setState(prev => normalize(mergeStates(prev, cloud)));
   };
 
-  // Persist to localStorage, but ONLY the slices whose reference actually changed.
-  // State is updated immutably, so an unchanged slice keeps its reference and is
-  // skipped — this avoids re-serialising the entire orders/logs dataset (which
-  // grows daily) on every single state update, the main cause of the UI getting
-  // sluggish as data accumulates.
-  const persistedRef = useRef({});
-  useEffect(() => {
-    const slices = {
-      platform: state.platform, carts: state.carts, inventoryByCart: state.inventory,
-      menus: state.menus, staffV2: state.staff, orders: state.orders, stockLogs: state.stockLogs,
-      cartLoadings: state.cartLoadings, dayCloseLogs: state.dayCloseLogs, wastageLogs: state.wastageLogs,
-      expenses: state.expenses, payoutMarks: state.payoutMarks,
-    };
-    for (const k in slices) {
-      if (persistedRef.current[k] !== slices[k]) { storage.set(k, slices[k]); persistedRef.current[k] = slices[k]; }
-    }
-    // Cloud writes are captured only by explicit local edits, never hydration.
-  }, [state]);
+  // Business snapshots stay in memory. Supabase owns committed records; only
+  // durable commands, recovery backups, session and device preferences persist.
+  // Existing legacy snapshots are left untouched for manual recovery.
 
   useEffect(() => { storage.set('session', session); }, [session]);
 
@@ -241,6 +232,7 @@ export default function App() {
   // when the merge must be computed from the freshest state (avoids stale-closure
   // clobbers under rapid/concurrent updates).
   const updateState = (updates, commands = []) => {
+    if (!hydrated || loadError) { alert('Wait for saved server data before making changes.'); return false; }
     const prev = stateRef.current;
     const next = { ...prev, ...(typeof updates === 'function' ? updates(prev) : updates) };
     try { trackChanges(prev, next, commands); }
@@ -248,17 +240,17 @@ export default function App() {
     setState(next);
     return true;
   };
-  const login = (sess) => { justAuthenticated.current = sess.token; setLastSync(null); setHydrated(false); storage.set('session', sess); setSession(sess); };
+  const login = (sess) => { setState(emptyServerState()); justAuthenticated.current = sess.token; setLastSync(null); setHydrated(false); storage.set('session', sess); setSession(sess); };
   const logout = () => {
     if (pendingOperations().length && !confirm('Some changes are waiting to sync. They remain saved on this device. Log out?')) return;
     void revokeSession();
     storage.set('session', null);
     setLastSync(null);
-    setHydrated(false); setSession(null);
+    setHydrated(false); setState(emptyServerState()); setSession(null);
   };
 
   return (
-    <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow, refreshSavedData, hydrated }}>
+    <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow, refreshSavedData, hydrated, loadError, retryLoad: () => setLoadAttempt(n => n + 1) }}>
       {syncOps.length > 0 && (showPending || syncOps.some(o => o.error)) && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
         {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} change(s) saved on this device, waiting to sync.`}
         {syncOps.some(o => o.error) && <button style={{ marginLeft: 8, padding: '8px 12px', borderRadius: 8 }} onClick={async () => {
@@ -291,9 +283,11 @@ export default function App() {
 // Login is independent of business-data/network hydration. Public shopping and
 // authenticated operations still wait for their scoped data before rendering.
 function DataReady({ children }) {
-  const { hydrated } = useStore();
+  const { hydrated, loadError, retryLoad } = useStore();
   const { pathname } = useLocation();
-  return hydrated || pathname === '/login' || pathname === '/admin/login' ? children : <AppLaunch />;
+  if (hydrated || pathname === '/login' || pathname === '/admin/login') return children;
+  if (loadError) return <div role="alert" style={{padding:24}}><p>{loadError}</p><button onClick={retryLoad}>Retry connection</button></div>;
+  return <AppLaunch />;
 }
 
 // Route guards — bounce to the right login if the session doesn't match.

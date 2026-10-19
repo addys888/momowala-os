@@ -132,7 +132,7 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
       <SectionHeader title="Reconciliation" subtitle="Daily cash and stock close" />
       <ReconciliationRecovery cartId={cartId} />
 
-      <div className="date-toolbar"><button className="quiet-button" aria-label="Previous business date" onClick={()=>setDate(new Date(Date.parse(date+'T12:00:00Z')-86400000).toISOString().slice(0,10))}>‹</button><label>Business date<input aria-label="Reconciliation date" type="date" value={date} max={businessDate} onInput={e=>e.target.value&&setDate(e.target.value)} onChange={e=>e.target.value&&setDate(e.target.value)}/></label><button className="quiet-button" onClick={()=>setDate(businessDate)}>Today</button><span>{thisClose?'Saved report':'Not reconciled'}</span></div>
+      <div className="date-toolbar"><button className="quiet-button" aria-label="Previous business date" onClick={()=>setDate(new Date(Date.parse(date+'T12:00:00Z')-86400000).toISOString().slice(0,10))}>‹</button><label>Business date<input aria-label="Reconciliation date" type="date" value={date} max={businessDate} onInput={e=>e.target.value&&setDate(e.target.value)} onChange={e=>e.target.value&&setDate(e.target.value)}/></label><button className="quiet-button" onClick={()=>setDate(businessDate)}>Today</button><span>{thisClose?(pendingClose?'Report awaiting server confirmation':'Saved report'):'Not reconciled'}</span></div>
 
       {isCurrentDay && countdown && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#FFF3E0', border: '1px solid #F5CFA4', borderRadius: 10, padding: '8px 12px', marginBottom: 14, fontSize: 12.5, color: '#B5460B', fontWeight: 700 }}>
