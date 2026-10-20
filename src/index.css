@@ -115,3 +115,34 @@ body {
 .daily-opening-overlay{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;padding:16px;background:rgba(13,30,49,.55)}
 .daily-opening-modal{width:100%;max-width:480px;max-height:90vh;overflow-y:auto;border-radius:16px;background:#fff;box-shadow:0 16px 48px rgba(0,0,0,.25);outline:none}
 .daily-opening-modal>section{margin-bottom:0!important;border:0!important}
+
+.whats-new { min-height:100vh;min-height:100dvh;box-sizing:border-box;background:#F4F6F8;color:#173047;display:flex;align-items:center;justify-content:center;padding:32px 22px;font-family:system-ui,sans-serif; }
+.whats-new-content { width:100%;max-width:560px; }
+.whats-new-brand { font-size:12px;letter-spacing:1.3px;font-weight:700;color:#53697b; }
+.whats-new h1 { font-size:30px;line-height:1.2;margin:18px 0 8px; }
+.whats-new p { font-size:14px;color:#53697b; }
+.whats-new ul { padding-left:20px;margin:28px 0; }
+.whats-new li { padding:7px 0;line-height:1.55;font-size:15px; }
+.whats-new button { width:100%;min-height:50px;border:0;border-radius:10px;background:#0A2F5C;color:#fff;font-size:16px;font-weight:650; }
+
+.profit-summary { display:flex;justify-content:space-between;gap:12px;width:100%;border:0;border-top:1px solid #ffffff30;padding:14px 0 0;margin-top:14px;background:transparent;color:inherit;text-align:left;font-size:12px;cursor:pointer; }
+.profit-summary b { text-align:right; }
+.daily-profit { color:#24394d;font-size:14px;line-height:1.55; }
+.daily-profit p { margin:12px 0; }
+.profit-metrics { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+.profit-metrics>div { background:#fff;padding:14px;border:1px solid #dce3e9;border-radius:12px; }
+.profit-metrics span { display:block;color:#53697b;font-size:12px; }
+.profit-metrics strong { display:block;font-size:24px;margin-top:6px; }
+.profit-note { font-size:12px;color:#53697b; }
+.profit-table-wrap { overflow-x:auto;background:#fff;border:1px solid #dce3e9;border-radius:10px;margin:16px 0; }
+.profit-table-wrap table { border-collapse:collapse;width:100%;min-width:650px;font-size:13px; }
+.profit-table-wrap caption { text-align:left;padding:12px;font-weight:700; }
+.profit-table-wrap th,.profit-table-wrap td { padding:10px;text-align:right;border-top:1px solid #e8edf1; }
+.profit-table-wrap th:first-child { text-align:left; }
+.daily-profit details { background:#fff;border:1px solid #dce3e9;padding:12px;border-radius:10px;margin:10px 0; }
+.profit-editor fieldset { border:0;padding:0;min-width:0; }
+.profit-editor label { display:block;margin:10px 0;font-size:13px; }
+.profit-editor input { display:block;box-sizing:border-box;width:100%;min-height:44px;padding:10px;border:1px solid #cbd6e0;border-radius:8px;font-size:16px; }
+.profit-editor button { min-height:44px;padding:10px 14px;background:#0a2f5c;color:#fff;border:0;border-radius:8px;margin:6px 8px 0 0; }
+.profit-editor button:disabled { opacity:.5; }
+.daily-profit [role=alert] { color:#b42318; }

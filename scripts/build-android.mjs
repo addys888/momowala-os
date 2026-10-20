@@ -16,4 +16,4 @@ const data=readFileSync(apk);
 writeFileSync(apk+'.sha256',createHash('sha256').update(data).digest('hex')+`  ${filename}\n`);
 console.log(`Signed APK: ${apk} (${(data.length/1024/1024).toFixed(2)} MB)`);
 
-writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Manager badges, a daily opening-stock popup, and server-managed fresh stock rollover with preserved history.'},null,2)+'\n');
+writeFileSync('public/downloads/latest.json',JSON.stringify({versionCode,versionName,path:`/downloads/${filename}`,bytes:data.length,sha256:createHash('sha256').update(data).digest('hex'),notes:'Sales-scaled supply costs and daily profit after closing, fixed closing configuration, new alert ringtone, and a one-time release welcome.'},null,2)+'\n');

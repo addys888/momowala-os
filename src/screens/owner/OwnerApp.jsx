@@ -1,3 +1,4 @@
+import { DailyProfitSummary } from '../../components/DailyProfit';
 import { ClosingWorkflow } from '../../components/ClosingWorkflow';
 import { OpeningAlerts } from '../../components/OpeningAlerts';
 import { useState, useEffect } from 'react';
@@ -16,6 +17,8 @@ import { useStore } from '../../store';
 
 function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
+  const [reportView,setReportView]=useState('revenue');
+  const goProfit=()=>{setReportView('profit');setTab('reports');};
   const [showProfile, setShowProfile] = useState(false);
   // Deep-link target for the Reconcile tab (set by the dashboard nudge). Cleared
   // on any normal tab switch so opening Reconcile by hand still starts on today.
@@ -26,7 +29,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   // wouldn't be visible at all, since the feed shows one date at a time).
   const [ordersDate, setOrdersDate] = useState(null);
   const goOrders = (date) => { setOrdersDate(date || TODAY); setTab('orders'); };
-  const navTab = (t) => { setReconcileDate(null); setOrdersDate(null); setTab(t); };
+  const navTab = (t) => { setReportView('revenue'); setReconcileDate(null); setOrdersDate(null); setTab(t); };
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
@@ -99,7 +102,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         {__ANDROID_APP__ && <RemindersButton cartId={cartId} role="owner" />}
 
         <ClosingWorkflow key={`closing-${cartId}`} cartId={cartId} owner expanded={tab==='reconcile'} onOpen={()=>setTab('reconcile')} />
-        {tab === 'dashboard' && <Dashboard state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onReconcile={goReconcile} onSeeOrders={() => goOrders(TODAY)} onSeeUncollected={goOrders} updateState={updateState} />}
+        {tab === 'dashboard' && <Dashboard onProfit={goProfit} state={state} cartId={cartId} inv={inv} cart={cart} onEditProfile={() => setShowProfile(true)} onOpeningStock={()=>setTab('inventory')} onToggleOpen={toggleOpen} stockTypes={menu.stockTypes || []} todayRevenue={todayRevenue} cashRevenue={cashRevenue} upiRevenue={upiRevenue} onlineRevenue={onlineRevenue} piecesSold={piecesSold} todayOrders={todayOrders} onReconcile={goReconcile} onSeeOrders={() => goOrders(TODAY)} onSeeUncollected={goOrders} updateState={updateState} />}
         {tab === 'orders' && <OrdersFeed state={state} cartId={cartId} onlineVendors={onlineVendorsFor(state, cartId)} initialDate={ordersDate} />}
         {tab === 'inventory' && <InventoryView state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} />}
         {tab === 'inventory' && <details className="partner-card"><summary>Opening history & alerts</summary><OpeningAlerts key={cartId} cartId={cartId}/></details>}
@@ -107,7 +110,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
         {tab === 'reconcile' && <Reconciliation state={state} updateState={updateState} cartId={cartId} inv={inv} stockTypes={menu.stockTypes || []} initialDate={reconcileDate} />}
         {tab === 'menu' && <MenuEditor state={state} updateState={updateState} cartId={cartId} cart={cart} />}
         {tab === 'staff' && <StaffRegistry state={state} updateState={updateState} cartId={cartId} cart={cart} />}
-        {tab === 'reports' && <Reports state={state} updateState={updateState} cartId={cartId} />}
+        {tab === 'reports' && <Reports initialView={reportView} state={state} updateState={updateState} cartId={cartId} />}
       </div>
 
       <BottomNav tab={tab} setTab={navTab} tabs={[
@@ -219,7 +222,7 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
   );
 }
 
-function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onReconcile, onSeeOrders, onSeeUncollected, updateState }) {
+function Dashboard({ onProfit, state, cartId, inv, cart, onEditProfile, onOpeningStock, onToggleOpen, stockTypes = [], todayRevenue, cashRevenue, upiRevenue, onlineRevenue = 0, piecesSold, todayOrders, onReconcile, onSeeOrders, onSeeUncollected, updateState }) {
   // Day-close nudge: the plate/cash/stock theft audit only runs at day-close, so
   // a stretch of un-closed days means the audit is producing nothing. Warn when
   // today has sales but isn't closed, and count how long the streak has run.
@@ -295,6 +298,7 @@ function Dashboard({ state, cartId, inv, cart, onEditProfile, onOpeningStock, on
       <span>Collected today · Cash + UPI</span><strong>₹{todayRevenue.toLocaleString('en-IN')}</strong>
       <div>{todayOrders.filter(isPaid).length} paid orders · {piecesSold} pieces</div>
       <div className="revenue-detail"><span>Cash <b>₹{cashRevenue.toLocaleString('en-IN')}</b></span><span>UPI <b>₹{upiRevenue.toLocaleString('en-IN')}</b></span><span>Expenses <b>₹{todayExpenses.toLocaleString('en-IN')}</b></span></div>
+      <DailyProfitSummary cartId={cartId} onOpen={onProfit}/>
     </section>
     <section className="partner-card"><div className="card-heading"><h2>Daily operations</h2><span>{closedToday?'Reconciled':'In progress'}</span></div>
       <div className="operation-grid"><button onClick={onOpeningStock}><Boxes size={20}/><span>Opening stock<small>Manager & quantities</small></span><ArrowRight size={16}/></button><button onClick={()=>onReconcile(nudgeDate)}><CheckCircle2 size={20}/><span>Close the day<small>{closedToday?'View saved report':'Cash & stock check'}</small></span><ArrowRight size={16}/></button></div>

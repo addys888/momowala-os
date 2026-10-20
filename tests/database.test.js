@@ -479,3 +479,83 @@ test('rollover fallback precedes writes and old cancellations cannot restore dis
  assert.equal(await sql("select app_private.stock_business_date('test-a','2030-01-01 23:40+05:30')"),'2030-01-02');
  await sql("update carts set open_time='15:00' where id='test-a'");
 });
+
+test('first closing setup returns usable defaults and can be saved by the owner',async()=>{
+ await sql("delete from cart_closing_settings where cart_id='test-a';update staff set active=true where id=101;update cart_opening_managers set staff_id=101 where cart_id='test-a'");
+ const status=JSON.parse(await request("select app_closing_status('test-a')",owner));
+ assert.deepEqual(status.settings,{enabled:false,closing_time:'22:00:00',revision:0});
+ const saved=JSON.parse(await request("select app_save_closing_settings('test-a',true,'22:00',0)",owner));
+ assert.equal(saved.enabled,true);assert.equal(saved.revision,1);
+ await assert.rejects(request("select app_save_closing_settings('test-a',false,'22:00',0)",owner),/changed/);
+ await assert.rejects(request("select app_save_closing_settings('test-a',false,'22:00',1)",staff),/Not authorised/);
+});
+
+const dailyCosts={'Room rent + electricity':150,'Labour (300 + 300 + 200)':800,'Fresh cream':100,Mayo:70,Oil:200,Gas:200,Disposal:200,Veggies:100,'Mocktail supplies':50,Coal:30,Butter:50,'Packing supplies':50,Other:100};
+const profitDay=async(d,token=owner)=>JSON.parse(await request(`select app_profit_day('test-a','${d}')`,token));
+test('profit waits for a confirmed close; first cost setup is owner-scoped',async()=>{
+ await sql("delete from day_close_logs where cart_id='test-a' and date>='2090-01-01';delete from closing_reports where cart_id='test-a' and business_date>='2090-01-01';delete from daily_profit_reports where cart_id='test-a';delete from cart_cost_profiles where cart_id='test-a';delete from cart_loadings where cart_id='test-a' and date>='2090-01-01'");
+ assert.equal(Object.values(dailyCosts).reduce((s,n)=>s+n,0),2100);
+ const call=`select app_save_cost_profile('test-a','2090-01-01','{"veg":3,"paneer":5,"corn":5}',${quote(dailyCosts)},0)`;
+ await assert.rejects(request(call,staff),/Not authorised/);await assert.rejects(request(call,other),/Not authorised/);
+ await request(call,owner);
+ await sql(`insert into cart_loadings(id,cart_id,date,type,item,qty) values(909001,'test-a','2090-01-01','CART_LOAD','veg',100),(909002,'test-a','2090-01-01','CART_LOAD','paneer',50),(909003,'test-a','2090-01-01','CART_LOAD','corn',20);
+ insert into orders(id,cart_id,date,time,token,items,total,payment,stock_usage,stock_deducted) values(909001,'test-a','2090-01-01','12:00','P1','[]',2000,'cash','{"veg":20,"paneer":10,"corn":5}',true)`);
+ assert.equal((await profitDay('2090-01-01')).report,null);
+ await assert.rejects(profitDay('2090-01-01',staff),/Not authorised/);await assert.rejects(profitDay('2090-01-01',other),/Not authorised/);
+});
+test('manager closing automatically calculates sold cost, 2100 overhead, and separate unsold value',async()=>{
+ await sql(`insert into closing_reports(cart_id,business_date,due_at,stock_types,submitted_at,quantities) values('test-a','2090-01-01',now(),'[]',now(),'{"veg":80,"paneer":40,"corn":15}')`);
+ assert.equal(await sql("select result->>'status' from daily_profit_reports where cart_id='test-a' and business_date='2090-01-01'"),'ready');
+ const r=(await profitDay('2090-01-01')).report.result;
+ assert.equal(r.status,'ready');assert.equal(r.sales,2000);assert.equal(r.soldCost,135);assert.equal(r.overhead,2100);assert.equal(r.profit,-235);assert.equal(r.unsoldValue,515);assert.equal(r.loadedCost,650);assert.equal(r.preparationCost,2750);assert.equal(r.source,'manager_closing');
+ assert.equal(r.rows.find(x=>x.key==='veg').loaded,100);assert.equal(r.rows.find(x=>x.key==='veg').variance,0);
+ assert.equal(await request("select count(*) from daily_profit_reports where cart_id='test-a'",other),'0');
+});
+test('purchase expenses are not charged twice; paid-order corrections refresh profit with frozen rates',async()=>{
+ const before=(await profitDay('2090-01-01')).report;
+ await sql("insert into expenses(id,cart_id,date,category,amount) values(909001,'test-a','2090-01-01','Frozen momo stock',10000) on conflict(id) do update set amount=excluded.amount");
+ assert.equal((await profitDay('2090-01-01')).report.result.profit,-235);
+ await request(`select app_save_cost_profile('test-a','2090-01-01','{"veg":9,"paneer":9,"corn":9}','{"Daily":1}',1)`,owner);
+ assert.equal((await profitDay('2090-01-01')).report.result.profit,-235);
+ await sql("insert into orders(id,cart_id,date,time,token,items,total,payment,stock_usage,stock_deducted) values(909002,'test-a','2090-01-01','12:01','P2','[]',100,'pending','{\"veg\":5}',true)");
+ let r=(await profitDay('2090-01-01')).report.result;assert.equal(r.profit,-235);assert.equal(r.pendingSales,100);
+ await sql("update orders set payment='upi' where id=909002");r=(await profitDay('2090-01-01')).report.result;assert.equal(r.profit,-150);assert.equal(r.soldCost,150);
+ await sql("update orders set payment='cancelled' where id=909002");r=(await profitDay('2090-01-01')).report.result;assert.equal(r.profit,-235);
+ assert((await profitDay('2090-01-01')).report.revision>before.revision);
+});
+test('owner reconciliation also finalizes profit; manual-only revenue never invents sold pieces',async()=>{
+ await sql(`insert into day_close_logs(id,cart_id,date,closed_at,physical_cash,phonepe_amount,stock) values(909002,'test-a','2090-01-02',now(),0,0,'[{"key":"veg","actual":0}]')`);
+ let r=(await profitDay('2090-01-02')).report.result;assert.equal(r.status,'ready');assert.equal(r.profit,-1);assert.equal(r.source,'reconciliation');
+ await sql("update day_close_logs set unrecorded=true,physical_cash=5000 where id=909002");r=(await profitDay('2090-01-02')).report.result;assert.equal(r.status,'incomplete');assert.equal(r.profit,null);assert.equal(r.countedCollections,5000);
+ await sql("insert into day_close_logs(id,cart_id,date,closed_at,holiday) values(909003,'test-a','2090-01-03',now(),true)");r=(await profitDay('2090-01-03')).report.result;assert.equal(r.status,'holiday');assert.equal(r.overhead,0);
+});
+test('missing cost rates block final profit and can be supplied without losing reports',async()=>{
+ await sql("insert into orders(id,cart_id,date,time,token,items,total,payment,stock_usage) values(909004,'test-a','2090-01-04','12:00','P4','[]',100,'cash','{\"newfood\":2}');insert into day_close_logs(id,cart_id,date,closed_at) values(909004,'test-a','2090-01-04',now())");
+ let r=(await profitDay('2090-01-04')).report.result;assert.equal(r.status,'incomplete');assert.equal(r.profit,null);assert.equal(r.missingRates,true);
+ await request("select app_save_cost_profile('test-a','2090-01-04','{\"newfood\":4}','{\"Daily\":10}',0)",owner);
+ r=(await profitDay('2090-01-04')).report.result;assert.equal(r.profit,82);
+ await assert.rejects(request("select app_save_cost_profile('test-a','2090-01-04','{\"newfood\":-1}','{\"Daily\":10}',1)",owner),/nonnegative/);
+ await assert.rejects(request("select app_save_cost_profile('test-a','2090-01-04','{\"newfood\":4}','{\"Daily\":10}',0)",owner),/changed/);
+});
+
+test('concurrent late sales refresh one report without weakening permissions',async()=>{
+ await Promise.all([sql("update orders set total=2100 where id=909001"),sql("update orders set payment='cash' where id=909002")]);
+ const r=(await profitDay('2090-01-01',admin)).report.result;
+ assert.equal(r.sales,2200);assert.equal(r.soldCost,150);assert.equal(r.profit,-50);
+ await assert.rejects(request("select app_private.refresh_daily_profit('test-a','2090-01-01')",staff),/permission denied/);
+ await assert.rejects(request("update daily_profit_reports set result='{}' where cart_id='test-a'",owner),/permission denied/);
+});
+
+test('variable supplies scale from 500 veg + 300 paneer + 40 corn; fixed daily costs stay 950',async()=>{
+ const fixed={'Room rent + electricity':150,'Labour (300 + 300 + 200)':800};
+ const variable=Object.fromEntries(Object.entries(dailyCosts).filter(([k])=>!(k in fixed)));
+ await sql("delete from day_close_logs where cart_id='test-a' and date>='2091-01-01';delete from daily_profit_reports where cart_id='test-a' and business_date>='2091-01-01';delete from cart_cost_profiles where cart_id='test-a' and effective_from>='2091-01-01'");
+ await request(`select app_save_cost_profile('test-a','2091-01-01','{"veg":3,"paneer":5,"corn":5}',${quote(fixed)},0,${quote(variable)},'{"veg":500,"paneer":300,"corn":40}')`,owner);
+ for(const [i,factor] of [0,0.5,1,2].entries()){
+  const day=`2091-01-0${i+1}`,id=919100+i,usage={veg:500*factor,paneer:300*factor,corn:40*factor};
+  await sql(`insert into orders(id,cart_id,date,time,token,items,total,payment,stock_usage) values(${id},'test-a','${day}','12:00','S${i}','[]',${10000*factor},'cash',${quote(usage)});insert into day_close_logs(id,cart_id,date,closed_at,stock) values(${id},'test-a','${day}',now(),'[]')`);
+  const r=(await profitDay(day)).report.result;
+  assert.equal(r.referencePieces,840);assert.equal(r.soldReferencePieces,840*factor);assert.equal(r.fixedTotal,950);assert.equal(r.variableCosts.Oil,200*factor);assert.equal(r.variableCosts['Fresh cream'],100*factor);assert.equal(r.variableTotal,1150*factor);assert.equal(r.profit,10000*factor-3200*factor-950-1150*factor);
+ }
+ await assert.rejects(request(`select app_save_cost_profile('test-a','2091-01-05','{"veg":3}','{}',0,'{"Oil":200}','{"veg":0}')`,owner),/greater than zero/);
+});

@@ -1,8 +1,8 @@
 {
-  "versionCode": 14,
-  "versionName": "1.7.2",
-  "path": "/downloads/cartlyft-1.7.2.apk",
-  "bytes": 3976191,
-  "sha256": "cd42aa3beb7a298c60b4924fa1caddc6116ab5f59f3ab7549771ec8286cc94f2",
-  "notes": "Manager badges, a daily opening-stock popup, and server-managed fresh stock rollover with preserved history."
+  "versionCode": 15,
+  "versionName": "1.7.3",
+  "path": "/downloads/cartlyft-1.7.3.apk",
+  "bytes": 4141423,
+  "sha256": "576a454e93a4747389231854e627f6f409d0bc5bdefccc9815c8995b45954c28",
+  "notes": "Sales-scaled supply costs and daily profit after closing, fixed closing configuration, new alert ringtone, and a one-time release welcome."
 }

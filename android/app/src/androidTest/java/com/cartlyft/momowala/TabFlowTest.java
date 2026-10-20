@@ -14,6 +14,12 @@ public class TabFlowTest extends Instrumentation {
     @Override public void onStart() {
         Bundle result=new Bundle();
         try {
+            android.media.MediaPlayer tone=new android.media.MediaPlayer();
+            try {
+                tone.setDataSource(getTargetContext(),AlertSound.uri(getTargetContext()));
+                tone.prepare();
+                if(tone.getDuration()<16000 || tone.getDuration()>18000)throw new Exception("Downloaded alert tone missing or undecodable");
+            } finally { tone.release(); }
             ActivityMonitor monitor=addMonitor(FlowTestActivity.class.getName(),null,false);
             runOnMainSync(()->getTargetContext().startActivity(new Intent(getTargetContext(),FlowTestActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)));
             FlowTestActivity activity=(FlowTestActivity)monitor.waitForActivityWithTimeout(10000);

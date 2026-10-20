@@ -1,3 +1,4 @@
+import { DailyProfit } from '../../components/DailyProfit';
 import { recordedAverageOrder } from '../../lib/reportMetrics';
 import { useState } from 'react';
 import { TrendingUp, Plus, Check, Clock, IndianRupee, Trash2, Edit3, ChevronDown, ChevronRight } from 'lucide-react';
@@ -93,8 +94,8 @@ function EarningsChart({ data }) {
   );
 }
 
-function Reports({ state, updateState, cartId }) {
-  const [view, setView] = useState('revenue'); // 'revenue' | 'expense' sub-tab
+function Reports({ state, updateState, cartId, initialView='revenue' }) {
+  const [view, setView] = useState(initialView);
   const [chartMode, setChartMode] = useState('daily'); // earnings chart: daily | weekly | monthly
   const [period, setPeriod] = useState('today');
   const [pickedDate, setPickedDate] = useState(TODAY); // for the single-day view
@@ -313,11 +314,12 @@ function Reports({ state, updateState, cartId }) {
 
       {/* Earnings | Expenses sub-tabs */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-        {[['revenue', 'Overview'], ['expense', 'Expenses']].map(([k, lab]) => (
+        {[['revenue', 'Overview'], ['expense', 'Expenses'], ['profit','Daily profit']].map(([k, lab]) => (
           <button key={k} onClick={() => setView(k)} style={{ flex: 1, padding: '11px 0', background: view === k ? colors.ink : '#fff', color: view === k ? colors.primary : colors.ink, border: `1px solid ${view === k ? colors.ink : colors.border}`, borderRadius: 12, fontSize: 14, fontWeight: 650, cursor: 'pointer' }}>{lab}</button>
         ))}
       </div>
 
+      {view === 'profit' && <DailyProfit key={cartId} cartId={cartId} stockTypes={menu.stockTypes||[]} />}
       {view === 'revenue' && (<>
       {/* Period toggle */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>

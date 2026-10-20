@@ -137,6 +137,7 @@ public class MainActivity extends Activity {
                             case "notificationSettings":
                                 startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))); break;
                             case "inventoryStatus": break;
+                            case "appInfo": result.confirm(new org.json.JSONObject().put("versionCode",getPackageManager().getPackageInfo(getPackageName(),0).versionCode).put("versionName",getPackageManager().getPackageInfo(getPackageName(),0).versionName).toString()); return true;
                             case "nativePushStatus": result.confirm(PartnerMessagingService.status(MainActivity.this).toString()); return true;
                             case "bindNativePush": PartnerAlerts.bind(MainActivity.this,data); break;
                             case "orderAlertKeys": {

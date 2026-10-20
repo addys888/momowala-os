@@ -9,12 +9,14 @@ export function ClosingWorkflow({cartId,owner=false,expanded=false,onOpen}) {
  const [data,setData]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  const [cash,setCash]=useState(''),[counts,setCounts]=useState({}),[notes,setNotes]=useState('');
  const [editing,setEditing]=useState(false),[enabled,setEnabled]=useState(false),[time,setTime]=useState('22:00');
+ const settingsRevision=useRef(0);
  const [review,setReview]=useState(false); const request=useRef(null),epoch=useRef(0);
  const load=useCallback(async()=>{
   const version=++epoch.current;
   try {
    const next=await rpc('app_closing_status',{p_cart_id:cartId});
    if(version!==epoch.current)return;
+   next.settings={...next.settings,enabled:next.settings?.enabled===true,closing_time:next.settings?.closing_time||'22:00:00',revision:next.settings?.revision??0};
    setData(next);setError('');
    // Only confirmed server state controls which native closing alerts may ring.
    const alerts=next.reports.filter(r=>owner?r.submitted_at&&!r.owner_read_at:next.settings.enabled&&next.canSubmit&&!r.submitted_at)
@@ -30,7 +32,7 @@ export function ClosingWorkflow({cartId,owner=false,expanded=false,onOpen}) {
  const pending=data?.reports.find(r=>!r.submitted_at);
  useEffect(()=>{setCash('');setCounts({});setNotes('');setReview(false);request.current=null;},[pending?.id]);
  const saveSettings=async()=>{
-  setBusy(true);setError('');try{await rpc('app_save_closing_settings',{p_cart_id:cartId,p_enabled:enabled,p_time:time,p_revision:data.settings.revision});setEditing(false);await load();}catch(e){setError(e.message);}finally{setBusy(false);}
+  setBusy(true);setError('');try{await rpc('app_save_closing_settings',{p_cart_id:cartId,p_enabled:enabled,p_time:time,p_revision:settingsRevision.current});setEditing(false);await load();}catch(e){setError(e.message);}finally{setBusy(false);}
  };
  const submit=async()=>{
   setBusy(true);setError('');
@@ -50,8 +52,8 @@ export function ClosingWorkflow({cartId,owner=false,expanded=false,onOpen}) {
   <h3>Daily closing</h3>
   <p>{data.settings.enabled?`Scheduled at ${data.settings.closing_time.slice(0,5)} IST`:'Closing workflow is off'}</p>
   {error&&<p role="alert">{error} <button disabled={busy} onClick={load}>Reload</button></p>}
-  {owner&&<><button className="quiet-button" onClick={()=>{setEnabled(data.settings.enabled);setTime(data.settings.closing_time.slice(0,5));setEditing(!editing);}}>Configure closing</button>
-   {editing&&<div><label><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/> Enable manager closing</label><label>Closing time (IST)<input aria-label="Closing time" type="time" value={time} onChange={e=>setTime(e.target.value)}/></label><p>Uses the cart manager assigned in Staff. Changes apply to future closing tasks; existing reports are retained.</p><button disabled={busy} onClick={saveSettings}>{busy?'Saving…':'Save closing settings'}</button></div>}
+  {owner&&<><button className="quiet-button" onClick={()=>{settingsRevision.current=data.settings.revision;setEnabled(data.settings.enabled);setTime(data.settings.closing_time.slice(0,5));setEditing(!editing);}}>Configure closing</button>
+   {editing&&<div><label><input type="checkbox" checked={enabled} onChange={e=>setEnabled(e.target.checked)}/> Enable manager closing</label><label>Closing time (IST)<input aria-label="Closing time" type="time" value={time} onChange={e=>setTime(e.target.value)}/></label><p>Uses the cart manager assigned in Staff. Changes apply to future closing tasks; existing reports are retained.</p><button disabled={busy||!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)} onClick={saveSettings}>{busy?'Saving…':'Save closing settings'}</button></div>}
   </>}
   {!owner&&pending&&<form key={pending.id} onSubmit={e=>{e.preventDefault();setReview(true);}}>
    <p><strong>Closing date: {pending.business_date}</strong></p>

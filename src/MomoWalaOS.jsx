@@ -1,3 +1,4 @@
+import { WhatsNew } from './components/WhatsNew';
 import { nativeCommand } from './lib/nativeApp';
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 
@@ -341,7 +342,7 @@ function StaffRoute() {
   if (!state.staff.some(s => s.mobile && s.cartId === session.cartId && s.name === session.name && s.active)) {
     logout(); return <Navigate to="/login" replace />;
   }
-  return <StaffApp state={state} updateState={updateState} cartId={session.cartId} staffName={session.name} onExit={() => { logout(); nav('/login'); }} />;
+  return <WhatsNew key={`${session.cartId}:${session.staffId}`} staffId={session.staffId} cartId={session.cartId}><StaffApp state={state} updateState={updateState} cartId={session.cartId} staffName={session.name} onExit={() => { logout(); nav('/login'); }} /></WhatsNew>;
 }
 
 // ═══════════════════════════════════════════════
