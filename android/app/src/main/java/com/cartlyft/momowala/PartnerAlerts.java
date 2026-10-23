@@ -10,6 +10,7 @@ import org.json.JSONObject;
 /** Persistent local acknowledgments prevent redelivered messages from re-ringing. */
 public final class PartnerAlerts {
     static final String CHANNEL="partner_attention_v2";
+    static final String INFO_CHANNEL="partner_updates_silent_v1";
     static android.content.SharedPreferences prefs(Context c) { return c.getSharedPreferences("partner_alerts",Context.MODE_PRIVATE); }
     static NotificationManager manager(Context c) { return (NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE); }
     static void channel(Context c) {
@@ -24,6 +25,8 @@ public final class PartnerAlerts {
                 channel.enableVibration(old.shouldVibrate());
             }
             manager(c).createNotificationChannel(channel);
+            NotificationChannel info=new NotificationChannel(INFO_CHANNEL,"Cart updates (silent)",NotificationManager.IMPORTANCE_DEFAULT);
+            info.setSound(null,null);info.enableVibration(false);manager(c).createNotificationChannel(info);
         }
     }
     static synchronized void bind(Context c,JSONObject data) throws Exception {
@@ -35,6 +38,13 @@ public final class PartnerAlerts {
             AlertPlaybackService.clearPartner(c);
             prefs(c).edit().clear().putString("binding",binding).apply();
         }
+        prefs(c).edit().putString("role",data.optString("role","")).putString("cartId",data.optString("cartId","")).apply();
+        for(String key:AlertPlaybackService.pending(c).getAll().keySet())
+            if(key.startsWith("partner:")&&!rings(c,key.substring(8))) {manager(c).cancel(key,1);AlertPlaybackService.remove(c,key);}
+        if(!"staff".equals(data.optString("role")))InventoryReminders.clear(c);
+    }
+    static boolean rings(Context c,String key) {
+        return "staff".equals(prefs(c).getString("role","")) && key.startsWith("closing-manager-");
     }
     static synchronized void acknowledge(Context c,String key) {
         if(key==null || key.length()>200)return;
@@ -60,26 +70,43 @@ public final class PartnerAlerts {
         long now=System.currentTimeMillis();
         for(java.util.Map.Entry<String,?> e:prefs(c).getAll().entrySet())
             if(e.getKey().startsWith("ack:") && e.getValue() instanceof Long && now-(Long)e.getValue()>7*86400000L)prefs(c).edit().remove(e.getKey()).apply();
-        if(prefs(c).contains("ack:"+key))return;
-        if(AlertPlaybackService.running() && AlertPlaybackService.pending(c).contains("partner:"+key))return;
+        if(prefs(c).contains("ack:"+key)){acknowledge(c,key);return;}
+        boolean ring=rings(c,key);
+        if(!ring)AlertPlaybackService.remove(c,"partner:"+key);
+        if(ring && AlertPlaybackService.running() && AlertPlaybackService.pending(c).contains("partner:"+key))return;
         channel(c);
-        Intent ack=new Intent(c,PartnerAlertReceiver.class).setAction("cartlyft.ACK").setData(android.net.Uri.parse("cartlyft-alert:"+android.net.Uri.encode(key))).putExtra("key",key);
+        Intent ack=new Intent(c,PartnerAlertReceiver.class).setAction(key.startsWith("closing-")?"cartlyft.SILENCE_CLOSING":"cartlyft.ACK").setData(android.net.Uri.parse("cartlyft-alert:"+android.net.Uri.encode(key))).putExtra("key",key);
         PendingIntent silence=PendingIntent.getBroadcast(c,0,ack,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        PendingIntent open=PendingIntent.getActivity(c,0,new Intent(c,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
-        Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,CHANNEL):new Notification.Builder(c);
-        b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle(title).setContentText(body)
+        String cart=prefs(c).getString("closingCart:"+key,prefs(c).getString("cartId",""));
+        String target=key.startsWith("closing-")?"closing":key.startsWith("order-")?"orders":"stock";
+        Intent launch=new Intent(c,MainActivity.class).setData(android.net.Uri.parse("cartlyft-notification:"+android.net.Uri.encode(key))).putExtra("notificationKey",key).putExtra("notificationBinding",binding).putExtra("notificationTarget",target).putExtra("notificationCart",cart).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent open=PendingIntent.getActivity(c,0,launch,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        String selectedChannel=ring?CHANNEL:INFO_CHANNEL;
+        Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,selectedChannel):new Notification.Builder(c);
+        b.setSmallIcon(R.drawable.ic_stat_cartlyft).setContentTitle(title).setContentText(body)
          .setStyle(new Notification.BigTextStyle().bigText(body)).setContentIntent(open)
          .setCategory(Notification.CATEGORY_REMINDER).setVisibility(Notification.VISIBILITY_PRIVATE)
-         .setPriority(Notification.PRIORITY_HIGH).setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(true);
-        if(!key.startsWith("closing-"))b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",silence).build());
-        else b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,"Open closing",open).build());
-        if(Build.VERSION.SDK_INT<26)b.setSound(AlertSound.uri(c),AlertSound.attributes()).setVibrate(AlertSound.VIBRATION);
-        boolean managed=AlertPlaybackService.start(c,"partner:"+key,CHANNEL);
+         .setPriority(ring?Notification.PRIORITY_HIGH:Notification.PRIORITY_DEFAULT).setOngoing(ring).setAutoCancel(!ring).setOnlyAlertOnce(true);
+        if(ring && !key.startsWith("closing-"))b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",silence).build());
+        else if(ring) {
+            b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,"Open closing",open).build());
+            b.addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"Silence ringtone",silence).build());
+        }
+        if(ring && Build.VERSION.SDK_INT<26)b.setSound(AlertSound.uri(c),AlertSound.attributes()).setVibrate(AlertSound.VIBRATION);
+        boolean managed=ring && AlertPlaybackService.start(c,"partner:"+key,CHANNEL);
         if(managed) {
             if(Build.VERSION.SDK_INT>=26)b.setGroup("cartlyft-alerts").setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY);
             else b.setSound(null).setVibrate(null);
         }
-        Notification n=b.build();if(!managed)n.flags|=Notification.FLAG_INSISTENT;
+        // Lock-screen copy exposes the task and controls, never cash, customer or staff details.
+        Notification.Builder locked=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,selectedChannel):new Notification.Builder(c);
+        locked.setSmallIcon(R.drawable.ic_stat_cartlyft).setContentTitle("Cartlyft Partner")
+            .setContentText(key.startsWith("closing-manager-")?"Day-end closing needs submission":key.startsWith("closing-owner-")?"Closing report ready to review":"A partner update needs attention")
+            .setVisibility(Notification.VISIBILITY_PUBLIC).setContentIntent(open).setOngoing(ring)
+            .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,key.startsWith("closing-")?"Open closing":"Open app",open).build());
+        if(ring)locked.addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"Silence ringtone",silence).build());
+        b.setPublicVersion(locked.build());
+        Notification n=b.build();if(ring&&!managed)n.flags|=Notification.FLAG_INSISTENT;
         try {manager(c).notify("partner:"+key,1,n);}catch(SecurityException denied){/* User notification settings take precedence. */}
     }
 }

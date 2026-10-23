@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabase';
 import { openingBusinessDate } from '../lib/openingInventory';
 import { nativeCommand } from '../lib/nativeApp';
 import { useStore } from '../store';
+import { StockRefill } from './StockRefill';
 import { DailyOpeningModal } from './DailyOpeningModal';
 
 const field={width:'100%',minHeight:44,padding:10,border:'1px solid #CCD6E0',borderRadius:8,fontSize:16};
@@ -72,7 +73,7 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
     <p style={{fontSize:13,lineHeight:1.6,color:'#617184',margin:'10px 0'}}>Manager: <strong>{access?.managerActive ? access.managerName : 'Not assigned or inactive'}</strong> · Opening {cart?.openTime || 'not set'} IST</p>
     {!record && loaded && !access?.canLoad && <p style={{fontSize:13,marginBottom:12}}>Only the assigned manager can submit opening stock. {session?.role==='owner'?'Assign or replace the manager in Staff → Registry & activity.':'Ask your owner to check the manager assignment.'}</p>}
     {error && <p role="alert" style={{color:'#B42318',marginBottom:12}}>{error}</p>}
-    {record ? <details><summary style={{color:'#087A65',cursor:'pointer'}}>Opening stock saved by {record.actor_name || 'manager'} · View quantities</summary><p style={{fontSize:13,marginTop:8}}>{Object.entries(record.quantities).map(([key,n])=>`${stockTypes.find(s=>s.key===key)?.label || key}: ${n}`).join(' · ')}</p><p style={{fontSize:12,marginTop:8,color:'#617184'}}>For later top-ups or corrections, use the owner’s Stock controls.</p></details> : <>
+    {record ? <details><summary style={{color:'#087A65',cursor:'pointer'}}>Opening stock saved by {record.actor_name || 'manager'} · View quantities</summary><p style={{fontSize:13,marginTop:8}}>{Object.entries(record.quantities).map(([key,n])=>`${stockTypes.find(s=>s.key===key)?.label || key}: ${n}`).join(' · ')}</p><p style={{fontSize:12,marginTop:8,color:'#617184'}}>The assigned manager can add refills below. Corrections remain in the owner’s Stock controls.</p></details> : <>
       {!loaded && <p role="status">Checking today’s saved inventory…</p>}
       <fieldset hidden={loaded && !access?.canLoad} disabled={busy || !loaded || !access?.canLoad} style={{border:0,padding:0,margin:0,minWidth:0}}>
         {stockTypes.map(s=><label key={s.key} style={{display:'block',marginBottom:12,fontSize:13,fontWeight:650}}>{s.label} <span style={{fontWeight:400,color:'#617184'}}>· freezer: {inventory[s.key]?.freezer || 0}</span><input aria-label={`Load ${s.label}`} type="number" inputMode="numeric" min="0" step="1" style={{...field,marginTop:5}} value={quantities[s.key] ?? ''} placeholder="Pieces to load" onChange={e=>setQuantities({...quantities,[s.key]:e.target.value})}/></label>)}
@@ -86,6 +87,7 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
         <button style={{...button,marginLeft:8,background:'#fff',color:'#0A2F5C'}} disabled={busy} onClick={()=>setReview(false)}>Edit</button>
       </div>}
     </>}
+    {record && loaded && access?.canLoad && session?.role==='staff' && <StockRefill key={`${cartId}:${date}`} cartId={cartId} date={date} stockTypes={stockTypes} inventory={inventory}/> }
     {__ANDROID_APP__ && native && access?.canLoad && session?.role==='staff' && (!native.enabled || !native.notifications || !native.exact || native.cartId!==cartId) && <details style={{borderTop:'1px solid #E3E9EF',marginTop:18,paddingTop:14,fontSize:13}}>
       <summary style={{cursor:'pointer',fontWeight:650}}>Set up opening reminders</summary>
       <p style={{lineHeight:1.6,margin:'7px 0 10px',color:'#617184'}}>Rings and vibrates until acknowledged or opening stock is saved. Acknowledgment silences today’s reminder without marking stock ready. Android sound, notification and battery settings still apply. Alarms continue after logout until you unassign this phone. Sign in to save inventory. Force-stopping the app prevents reminders. Changes from another phone are checked while this screen is open.</p>

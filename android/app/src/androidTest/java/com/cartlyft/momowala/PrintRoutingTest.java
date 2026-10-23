@@ -14,12 +14,13 @@ public class PrintRoutingTest extends Instrumentation {
         Intent sent;
         @Override public void startActivity(Intent intent) { sent = intent; }
     }
-    private boolean liveFcm,waitFcm;
-    @Override public void onCreate(Bundle args) { liveFcm=args!=null && "true".equals(args.getString("liveFcm")); waitFcm=args!=null && "true".equals(args.getString("waitFcm")); super.onCreate(args); start(); }
+    private boolean liveFcm,waitFcm,closingOnly;
+    @Override public void onCreate(Bundle args) { closingOnly=args!=null && "true".equals(args.getString("closingOnly")); liveFcm=args!=null && "true".equals(args.getString("liveFcm")); waitFcm=args!=null && "true".equals(args.getString("waitFcm")); super.onCreate(args); start(); }
     @Override public void onStart() {
         android.os.Looper.prepare();
         Bundle result = new Bundle();
         try {
+            if(closingOnly){testClosingAlerts();result.putString("stream","PASS: closing silence and redelivery checks\n");finish(Activity.RESULT_OK,result);return;}
             Method navigate = MainActivity.class.getDeclaredMethod("navigate", WebView.class, Uri.class, boolean.class);
             navigate.setAccessible(true);
             CaptureActivity activity = new CaptureActivity();
@@ -182,7 +183,7 @@ public class PrintRoutingTest extends Instrumentation {
     }
     private void testClosingAlerts() throws Exception {
         android.content.Context c=getTargetContext();String binding="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",key="closing-manager-123-1";
-        PartnerAlerts.bind(c,new org.json.JSONObject().put("binding",binding));
+        PartnerAlerts.bind(c,new org.json.JSONObject().put("binding",binding).put("role","staff").put("cartId","test-cart"));
         java.util.Map<String,String> payload=new java.util.HashMap<>();
         payload.put("binding",binding);payload.put("tag",key);payload.put("cartId","test-cart");payload.put("date","2026-10-18");payload.put("mode","closing_due");
         // Opening completion must never suppress a closing reminder.
@@ -191,14 +192,41 @@ public class PrintRoutingTest extends Instrumentation {
         check(AlertPlaybackService.pending(c).contains("partner:"+key),"Closing was suppressed by opening completion");
         new PartnerAlertReceiver().onReceive(c,new Intent("cartlyft.ACK_ALL"));
         new PartnerAlertReceiver().onReceive(c,new Intent("cartlyft.ACK").putExtra("key",key));
-        check(AlertPlaybackService.pending(c).contains("partner:"+key),"Generic acknowledgment silenced unsubmitted closing");
+        check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Summary silence left closing ringing");
         payload.put("mode","closing_stop");PartnerMessagingService.handle(c,payload);
         check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Cross-phone submission did not stop closing");
         payload.put("mode","closing_due");PartnerMessagingService.handle(c,payload);
         check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Late reminder re-rang a completed closing");
+        String silenceKey="closing-manager-124-1";
+        PartnerAlerts.show(c,binding,silenceKey,"Closing due","Submit counts");
+        android.app.Notification visible=null;
+        for(android.service.notification.StatusBarNotification posted:PartnerAlerts.manager(c).getActiveNotifications())
+            if(("partner:"+silenceKey).equals(posted.getTag()))visible=posted.getNotification();
+        check(visible!=null && visible.publicVersion!=null,"Missing lock-screen notification copy");
+        check(visible.publicVersion.visibility==android.app.Notification.VISIBILITY_PUBLIC,"Lock-screen copy is hidden");
+        check(visible.publicVersion.actions.length==2,"Lock-screen closing actions missing");
+        check("Day-end closing needs submission".equals(visible.publicVersion.extras.getCharSequence(android.app.Notification.EXTRA_TEXT)),"Lock-screen copy leaked report details");
+        new PartnerAlertReceiver().onReceive(c,new Intent("cartlyft.SILENCE_CLOSING").putExtra("key",silenceKey));
+        check(!AlertPlaybackService.pending(c).contains("partner:"+silenceKey),"Explicit silence did not stop closing");
+        PartnerAlerts.show(c,binding,silenceKey,"Closing due","Still pending");
+        check(!AlertPlaybackService.pending(c).contains("partner:"+silenceKey),"Silenced closing rang again on redelivery");
+        // A stale playback entry must be removed even when its receipt already exists.
+        AlertPlaybackService.pending(c).edit().putString("partner:"+silenceKey,PartnerAlerts.CHANNEL).commit();
+        PartnerAlerts.show(c,binding,silenceKey,"Closing due","Stale delivery");
+        check(!AlertPlaybackService.pending(c).contains("partner:"+silenceKey),"Acknowledged stale playback survived sync");
         String ownerKey="closing-owner-123";
         PartnerAlerts.syncClosing(c,new org.json.JSONObject().put("cartId","test-cart").put("alerts",new org.json.JSONArray().put(new org.json.JSONObject().put("key",ownerKey).put("title","Closing report").put("body","Review counts"))));
-        check(AlertPlaybackService.pending(c).contains("partner:"+ownerKey),"Owner report did not ring");
+        check(!AlertPlaybackService.pending(c).contains("partner:"+ownerKey),"Owner report must be silent");
+        android.app.Notification ownerNotice=null;
+        for(android.service.notification.StatusBarNotification posted:PartnerAlerts.manager(c).getActiveNotifications())if(("partner:"+ownerKey).equals(posted.getTag()))ownerNotice=posted.getNotification();
+        check(ownerNotice!=null && ownerNotice.sound==null && ownerNotice.vibrate==null,"Owner notification sound/vibration enabled");
+        check((ownerNotice.flags & android.app.Notification.FLAG_INSISTENT)==0,"Owner notification repeats");
+        check(ownerNotice.getSmallIcon().getResId()==R.drawable.ic_stat_cartlyft,"Brand icon missing");
+        PartnerAlerts.show(c,binding,"order-999","New order","Review order");
+        check(!AlertPlaybackService.pending(c).contains("partner:order-999"),"New orders must not ring");
+        PartnerAlerts.bind(c,new org.json.JSONObject().put("binding",binding).put("role","owner").put("cartId","test-cart"));
+        PartnerAlerts.show(c,binding,"closing-manager-999-1","Stale manager alert","Do not ring for owner");
+        check(!AlertPlaybackService.pending(c).contains("partner:closing-manager-999-1"),"Owner received manager ringing");
         PartnerAlerts.syncClosing(c,new org.json.JSONObject().put("cartId","test-cart").put("alerts",new org.json.JSONArray()));
         check(!AlertPlaybackService.pending(c).contains("partner:"+ownerKey),"Confirmed owner acknowledgment did not stop ringing");
         InventoryReminders.clear(c);PartnerAlerts.prefs(c).edit().clear().commit();

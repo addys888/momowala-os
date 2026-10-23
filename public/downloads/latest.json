@@ -1,8 +1,8 @@
 {
-  "versionCode": 15,
-  "versionName": "1.7.3",
-  "path": "/downloads/cartlyft-1.7.3.apk",
-  "bytes": 4141423,
-  "sha256": "576a454e93a4747389231854e627f6f409d0bc5bdefccc9815c8995b45954c28",
-  "notes": "Sales-scaled supply costs and daily profit after closing, fixed closing configuration, new alert ringtone, and a one-time release welcome."
+  "versionCode": 21,
+  "versionName": "1.7.9",
+  "path": "/downloads/cartlyft-1.7.9.apk",
+  "bytes": 4145247,
+  "sha256": "75695a92ef9e688e5753eb8b15302a4b48468d8ceb2812272f33ee979a6a6188",
+  "notes": "Silent owner updates with navigation to the relevant screen. Ringing is limited to manager opening and closing reminders. Cartlyft notification icon and cleanup of old owner/order alarms."
 }

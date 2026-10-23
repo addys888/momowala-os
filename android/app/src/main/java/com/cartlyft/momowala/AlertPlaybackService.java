@@ -50,14 +50,21 @@ public final class AlertPlaybackService extends Service {
         PendingIntent open=PendingIntent.getActivity(this,4202,new Intent(this,MainActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         PendingIntent ack=PendingIntent.getBroadcast(this,4202,new Intent(this,PartnerAlertReceiver.class).setAction("cartlyft.ACK_ALL"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
-        startForeground(ID,b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Cartlyft needs your attention")
-            .setContentText("Complete closing in the app, accept the order or acknowledge other alerts.").setGroup("cartlyft-alerts").setGroupSummary(true).setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
-            .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge alerts",ack).build()).build());
+        startForeground(ID,b.setSmallIcon(R.drawable.ic_stat_cartlyft).setContentTitle("Cartlyft needs your attention")
+            .setContentText("Silence sound here. Complete closing and review reports in the app.").setGroup("cartlyft-alerts").setGroupSummary(true).setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
+            .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Silence alerts",ack).build()).build());
         handler.removeCallbacks(tick);reconcile();handler.postDelayed(tick,1000);
         return START_STICKY;
     }
     private final Runnable tick=new Runnable(){public void run(){reconcile();if(!pending(AlertPlaybackService.this).getAll().isEmpty())handler.postDelayed(this,1000);}};
     private void reconcile() {
+        // Migrate old queued order/owner alarms before playback can restart after an update.
+        for(String key:pending(this).getAll().keySet()) {
+            if((key.startsWith("partner:")&&!PartnerAlerts.rings(this,key.substring(8))) || (key.equals("inventory")&&!"staff".equals(PartnerAlerts.prefs(this).getString("role","")))) {
+                pending(this).edit().remove(key).commit();
+                if(key.startsWith("partner:"))((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).cancel(key,1);
+            }
+        }
         Map<String,?> entries=pending(this).getAll();
         if(entries.isEmpty()) { stopOutput();stopForeground(true);stopSelf();return; }
         if(focusBlocked)return;

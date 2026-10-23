@@ -1,3 +1,4 @@
+import { useNotificationNavigation } from '../../lib/useNotificationNavigation';
 import { DailyProfitSummary } from '../../components/DailyProfit';
 import { ClosingWorkflow } from '../../components/ClosingWorkflow';
 import { OpeningAlerts } from '../../components/OpeningAlerts';
@@ -17,6 +18,7 @@ import { useStore } from '../../store';
 
 function OwnerApp({ state, updateState, onExit, cartId }) {
   const [tab, setTab] = useState('dashboard');
+  useNotificationNavigation(cartId,true,setTab);
   const [reportView,setReportView]=useState('revenue');
   const goProfit=()=>{setReportView('profit');setTab('reports');};
   const [showProfile, setShowProfile] = useState(false);

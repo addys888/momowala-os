@@ -1,3 +1,4 @@
+import { useNotificationNavigation } from '../lib/useNotificationNavigation';
 import { PrepChecklist } from '../components/PrepChecklist';
 import { ClosingWorkflow } from '../components/ClosingWorkflow';
 import { openingBusinessDate } from '../lib/openingInventory';
@@ -13,6 +14,7 @@ import { printReceipt, printKitchenTicket } from '../lib/escpos';
 
 function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [tab, setTab] = useState('order');
+  useNotificationNavigation(cartId,false,setTab);
   const [cart, setCart] = useState([]);
   const [addTarget, setAddTarget] = useState(null); // pending order we're adding items to
   const [cancelTarget, setCancelTarget] = useState(null);

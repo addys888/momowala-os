@@ -1948,3 +1948,104 @@ revoke all on function app_private.refresh_daily_profit(text,date),app_private.p
 revoke all on function public.app_profit_day(text,date),public.app_save_cost_profile(text,date,jsonb,jsonb,bigint,jsonb,jsonb) from public,anon,authenticated;
 grant execute on function public.app_profit_day(text,date),public.app_save_cost_profile(text,date,jsonb,jsonb,bigint,jsonb,jsonb) to anon;
 notify pgrst,'reload schema';
+
+begin;
+create table if not exists app_private.stock_refills (
+ operation_id uuid primary key,cart_id text not null references public.carts(id),business_date date not null,
+ staff_id bigint not null references public.staff(id),category text not null,quantity integer not null check(quantity>0),
+ log_id bigint not null,created_at timestamptz not null default now()
+);
+alter table app_private.stock_refills enable row level security;
+revoke all on app_private.stock_refills from public,anon,authenticated;
+create or replace function public.app_refill_stock(p_cart_id text,p_date date,p_operation_id uuid,p_category text,p_quantity integer)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,public,app_private as $$
+declare s app_sessions:=app_private.session();prior app_private.stock_refills;blob jsonb;ci jsonb;f numeric;c numeric;logid bigint;
+begin
+ if not app_private.allowed(p_cart_id,array['staff']) then raise exception 'Only the assigned manager can refill stock' using errcode='42501'; end if;
+ perform pg_advisory_xact_lock(hashtextextended(p_cart_id,17));
+ if not exists(select 1 from cart_opening_managers m join staff t on t.id=m.staff_id and t.cart_id=m.cart_id and t.active where m.cart_id=p_cart_id and m.staff_id=s.staff_id) then raise exception 'Only the assigned active manager can refill stock' using errcode='42501'; end if;
+ perform 1 from staff where id=s.staff_id and active for share;
+ if not found then raise exception 'Manager account is inactive' using errcode='42501'; end if;
+ if p_operation_id is null then raise exception 'Refill reference required'; end if;
+ perform pg_advisory_xact_lock(hashtextextended(p_operation_id::text,92));
+ select * into prior from app_private.stock_refills where operation_id=p_operation_id;
+ if found then
+  if prior.cart_id is distinct from p_cart_id or prior.staff_id is distinct from s.staff_id or prior.business_date is distinct from p_date or prior.category is distinct from p_category or prior.quantity is distinct from p_quantity then raise exception 'Refill reference already used for another request'; end if;
+  return jsonb_build_object('status','ok','record',to_jsonb(prior));
+ end if;
+ if p_date is distinct from app_private.stock_business_date(p_cart_id) then raise exception 'Reload before refilling a new business day'; end if;
+ perform pg_advisory_xact_lock(hashtextextended(p_cart_id||':'||p_date::text,2));
+ if not exists(select 1 from opening_loads where cart_id=p_cart_id and business_date=p_date) then raise exception 'Submit today''s opening stock before refilling'; end if;
+ if p_category is null or p_quantity is null or p_quantity<=0 or p_quantity>100000 then raise exception 'Choose a category and positive whole-piece quantity'; end if;
+ if not exists(select 1 from menus m cross join lateral jsonb_array_elements(coalesce(m.data->p_cart_id->'stockTypes','[]')) t where m.id=1 and t->>'key'=p_category) then raise exception 'Unknown stock category'; end if;
+ perform app_private.roll_stock_day(p_cart_id);
+ select data into blob from inventory where id=1 for update;
+ ci:=blob->p_cart_id;
+ if ci is null or not ci ? p_category or p_category='consumables' then raise exception 'Stock category is unavailable'; end if;
+ f:=coalesce((ci->p_category->>'freezer')::numeric,0);c:=coalesce((ci->p_category->>'cart')::numeric,0);
+ if p_quantity>f then raise exception 'Not enough freezer stock for this refill'; end if;
+ ci:=jsonb_set(ci,array[p_category],(ci->p_category)||jsonb_build_object('freezer',f-p_quantity,'cart',c+p_quantity));
+ update inventory set data=jsonb_set(blob,array[p_cart_id],ci,true),updated_at=now() where id=1;
+ logid:=nextval('app_private.opening_log_id');
+ insert into cart_loadings(id,cart_id,date,time,type,item,qty,note) values(logid,p_cart_id,p_date,to_char(now() at time zone 'Asia/Kolkata','HH24:MI'),'CART_LOAD',p_category,p_quantity,'Manager refill · '||coalesce(s.name,'manager'));
+ insert into app_private.stock_refills(operation_id,cart_id,business_date,staff_id,category,quantity,log_id) values(p_operation_id,p_cart_id,p_date,s.staff_id,p_category,p_quantity,logid) returning * into prior;
+ return jsonb_build_object('status','ok','record',to_jsonb(prior));
+end $$;
+revoke all on function public.app_refill_stock(text,date,uuid,text,integer) from public,anon,authenticated;
+grant execute on function public.app_refill_stock(text,date,uuid,text,integer) to anon;
+notify pgrst,'reload schema';
+commit;
+
+create or replace function app_private.collect_closing_reports(p_now timestamptz,p_cart text default null)
+returns void language plpgsql security definer set search_path=public,app_private as $$
+declare c record; d date; due timestamptz; items jsonb;
+begin
+ for c in select s.* from cart_closing_settings s join carts cart on cart.id=s.cart_id and cart.active where s.enabled and (p_cart is null or s.cart_id=p_cart) loop
+  -- Include the configuration day even when enabled after the scheduled hour.
+  -- Do not create historical reports for dates before enablement/update.
+  for d in select (p_now at time zone 'Asia/Kolkata')::date-i from generate_series(0,1) i loop
+   due:=(d+c.closing_time) at time zone 'Asia/Kolkata';
+   if due>p_now or d<(c.updated_at at time zone 'Asia/Kolkata')::date then continue; end if;
+   select coalesce(data->c.cart_id->'stockTypes','[]'::jsonb) into items from menus where id=1;
+   insert into closing_reports(cart_id,business_date,due_at,stock_types) values(c.cart_id,d,due,coalesce(items,'[]')) on conflict do nothing;
+  end loop;
+ end loop;
+end $$;
+
+begin;
+alter table public.closing_reports add column if not exists expected_quantities jsonb;
+create or replace function public.app_closing_stock_check(p_cart_id text,p_report_id bigint)
+returns jsonb language plpgsql security definer set search_path=pg_catalog,public,app_private as $$
+declare r closing_reports; expected jsonb; current_day date; stock jsonb;
+begin
+ if not app_private.closing_manager(p_cart_id) and not app_private.allowed(p_cart_id,array['owner','admin']) then raise exception 'Not authorised' using errcode='42501';end if;
+ select * into r from closing_reports where id=p_report_id and cart_id=p_cart_id;
+ if not found then raise exception 'Closing report not found';end if;
+ if r.expected_quantities is not null then return r.expected_quantities;end if;
+ select data->p_cart_id into stock from inventory where id=1 for share;
+ select business_date into current_day from app_private.inventory_days where cart_id=p_cart_id;
+ if current_day=r.business_date then
+  select jsonb_object_agg(t->>'key',(stock->(t->>'key')->>'cart')::numeric) into expected from jsonb_array_elements(r.stock_types) t;
+ else select quantities into expected from cart_stock_rollovers where cart_id=p_cart_id and business_date=r.business_date;
+ end if;
+ if expected is null or exists(select 1 from jsonb_array_elements(r.stock_types) t where expected->(t->>'key') is null or expected->(t->>'key')='null'::jsonb) then raise exception 'Expected stock is unavailable for this closing date. Ask the owner to review stock records.';end if;
+ return expected;
+end $$;
+create or replace function public.app_submit_closing_checked(p_cart_id text,p_report_id bigint,p_operation_id uuid,p_cash numeric,p_quantities jsonb,p_expected jsonb,p_notes text default '')
+returns jsonb language plpgsql security definer set search_path=pg_catalog,public,app_private as $$
+declare expected jsonb; result jsonb;
+begin
+ if not app_private.closing_manager(p_cart_id) then raise exception 'Only the assigned manager can submit closing' using errcode='42501';end if;
+ perform pg_advisory_xact_lock(hashtextextended(p_cart_id,17));
+ perform 1 from inventory where id=1 for update;
+ expected:=app_closing_stock_check(p_cart_id,p_report_id);
+ if expected is distinct from p_expected then raise exception 'Stock changed. Review the latest expected counts before submitting.';end if;
+ if exists(select 1 from jsonb_each(p_quantities) q where q.value is distinct from expected->q.key) and length(trim(coalesce(p_notes,'')))=0 then raise exception 'Explain the stock difference after recounting or checking missing entries.';end if;
+ result:=app_submit_closing(p_cart_id,p_report_id,p_operation_id,p_cash,p_quantities,p_notes);
+ update closing_reports set expected_quantities=expected where id=p_report_id and cart_id=p_cart_id;
+ return result||jsonb_build_object('expected_quantities',expected);
+end $$;
+revoke all on function public.app_closing_stock_check(text,bigint), public.app_submit_closing_checked(text,bigint,uuid,numeric,jsonb,jsonb,text) from public,anon,authenticated;
+grant execute on function public.app_closing_stock_check(text,bigint), public.app_submit_closing_checked(text,bigint,uuid,numeric,jsonb,jsonb,text) to anon;
+notify pgrst,'reload schema';
+commit;

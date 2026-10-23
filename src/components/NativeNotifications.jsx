@@ -15,7 +15,7 @@ export function NativeNotifications({cartId,role}) {
         const actor=`${cartId}:${role}:${session?.staffId || session?.name || ''}`;
         let saved=JSON.parse(localStorage.getItem('mw:nativePush') || 'null');
         if(saved?.actor!==actor){saved={actor,binding:crypto.randomUUID()};localStorage.setItem('mw:nativePush',JSON.stringify(saved));}
-        nativeCommand('bindNativePush',{binding:saved.binding});
+        nativeCommand('bindNativePush',{binding:saved.binding,role,cartId});
         const state=nativeCommand('nativePushStatus');
         const permitted=state?.notifications ?? nativeCommand('inventoryStatus')?.notifications;
         if(active)setPermissionNeeded(permitted===false);

@@ -79,10 +79,10 @@ public final class InventoryReminders {
         long open=OpeningSchedule.businessOpening(time,now);
         if(now<open-30*60_000L || OpeningSchedule.date(open).equals(quietDate(c))) { schedule(c,false); return; }
         channel(c);
-        Intent launch=new Intent(c,MainActivity.class).putExtra("openingInventory",true).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        Intent launch=new Intent(c,MainActivity.class).putExtra("notificationTarget","stock").putExtra("notificationCart",prefs(c).getString("cartId","")).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent content=PendingIntent.getActivity(c,ID,launch,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,CHANNEL):new Notification.Builder(c);
-        b.setSmallIcon(android.R.drawable.ic_dialog_info).setContentTitle("Prepare opening inventory")
+        b.setSmallIcon(R.drawable.ic_stat_cartlyft).setContentTitle("Prepare opening inventory")
          .setContentText("Load today's stock into the cart. Tap to review and save quantities.")
          .setCategory(Notification.CATEGORY_REMINDER).setVisibility(Notification.VISIBILITY_PRIVATE)
          .setPriority(Notification.PRIORITY_HIGH).setContentIntent(content).setOngoing(true).setAutoCancel(false);

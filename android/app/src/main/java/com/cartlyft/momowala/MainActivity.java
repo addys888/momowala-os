@@ -21,6 +21,19 @@ public class MainActivity extends Activity {
     private static final String HOST = "momowala-os.vercel.app";
     private static final String ORIGIN = "https://" + HOST;
     private WebView web;
+    private org.json.JSONObject notificationTarget;
+    private void captureNotification(Intent intent) {
+        if(intent==null)return;
+        String target=intent.getStringExtra("notificationTarget"),cart=intent.getStringExtra("notificationCart");
+        if(target==null||cart==null||!java.util.Arrays.asList("stock","orders","closing").contains(target))return;
+        String binding=intent.getStringExtra("notificationBinding"),key=intent.getStringExtra("notificationKey");
+        if(binding!=null&&!binding.equals(PartnerAlerts.prefs(this).getString("binding","")))return;
+        // Opening the notification hides it locally; report acknowledgment remains a server action.
+        if(key!=null&&!key.startsWith("closing-manager-"))PartnerAlerts.acknowledge(this,key);
+        try{notificationTarget=new org.json.JSONObject().put("target",target).put("cartId",cart);}catch(Exception ignored){}
+    }
+    @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);captureNotification(intent);}
+
     private AppUpdater updater;
     private final android.os.Handler updateHandler=new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable updatePoll=new Runnable(){public void run(){if(updater!=null)updater.resume(false);updateHandler.postDelayed(this,15000);}};
@@ -31,6 +44,7 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
+        captureNotification(getIntent());
         updater=new AppUpdater(this);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         LinearLayout root = new LinearLayout(this);
@@ -67,6 +81,12 @@ public class MainActivity extends Activity {
         }
     }
     private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
+    private void openNotificationSettings() {
+        Intent settings;
+        if(android.os.Build.VERSION.SDK_INT>=26)settings=new Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(android.provider.Settings.EXTRA_APP_PACKAGE,getPackageName());
+        else settings=new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()));
+        startActivity(settings);
+    }
     private void showFailure(String text) { failure.setText(text); failure.setVisibility(View.VISIBLE); progress.setVisibility(View.GONE); }
     private WebView createWebView() {
         WebView view = new WebView(this);
@@ -135,7 +155,12 @@ public class MainActivity extends Activity {
                                 if(android.os.Build.VERSION.SDK_INT>=31) startActivity(new Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,Uri.parse("package:"+getPackageName())));
                                 break;
                             case "notificationSettings":
-                                startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))); break;
+                                openNotificationSettings(); break;
+                            case "notificationTarget":
+                                if(notificationTarget!=null && notificationTarget.optString("cartId").equals(data.optString("cartId"))) {
+                                    result.confirm(notificationTarget.toString());notificationTarget=null;
+                                } else result.confirm("null");
+                                return true;
                             case "inventoryStatus": break;
                             case "appInfo": result.confirm(new org.json.JSONObject().put("versionCode",getPackageManager().getPackageInfo(getPackageName(),0).versionCode).put("versionName",getPackageManager().getPackageInfo(getPackageName(),0).versionName).toString()); return true;
                             case "nativePushStatus": result.confirm(PartnerMessagingService.status(MainActivity.this).toString()); return true;
@@ -215,6 +240,15 @@ public class MainActivity extends Activity {
         Uri u=Uri.parse(url);
         return "https".equals(u.getScheme()) && HOST.equals(u.getHost()) && (u.getPort()==-1 || u.getPort()==443);
     }
+    private String installedVersionLabel() {
+        try {
+            android.content.pm.PackageInfo info=getPackageManager().getPackageInfo(getPackageName(),0);
+            long code=android.os.Build.VERSION.SDK_INT>=28?info.getLongVersionCode():info.versionCode;
+            return "Installed version: "+info.versionName+" (build "+code+")";
+        } catch(android.content.pm.PackageManager.NameNotFoundException unavailable) {
+            return "Installed version unavailable";
+        }
+    }
     private void showMenu(View anchor) {
         String[] items={"Reload", "Print screen", "Open website", "Check for updates", "Unassign opening alarms", "Notification settings", "About"};
         new AlertDialog.Builder(this).setTitle("App settings").setItems(items,(dialog,index) -> {
@@ -226,8 +260,8 @@ public class MainActivity extends Activity {
                     new AlertDialog.Builder(this).setTitle("Unassign this phone?").setMessage("Opening alarms will stop, including while logged out. Sign in to assign this phone again.")
                       .setPositiveButton("Unassign",(d,w)->InventoryReminders.clear(this)).setNegativeButton("Keep alarms",null).show(); break;
                 case "Check for updates": updater.check(); break;
-                case "Notification settings": startActivity(new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,Uri.parse("package:"+getPackageName()))); break;
-                default: new AlertDialog.Builder(this).setTitle("Cartlyft Partner").setMessage("For Android 7 and newer.\n\nAllow notifications for background partner alerts. Acknowledge an alert to stop its sound and vibration. Phone volume, notification and battery settings apply.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
+                case "Notification settings": openNotificationSettings(); break;
+                default: new AlertDialog.Builder(this).setTitle("Cartlyft Partner").setMessage(installedVersionLabel()+"\n\nFor Android 7 and newer.\n\nAllow notifications for background partner alerts. Acknowledge an alert to stop its sound and vibration. Phone volume, notification and battery settings apply.\n\nSaved staff changes sync when internet returns. Sign in online before working offline. Do not clear app storage with unsynced changes.\n\nInstall future updates over this app to keep your saved data.").setPositiveButton("OK",null).show();
             }
         }).setNegativeButton("Close",null).show();
     }
