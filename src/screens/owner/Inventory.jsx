@@ -1,3 +1,4 @@
+import { OwnerLoadingHistory } from '../../components/OwnerLoadingHistory';
 import { OpeningInventory } from '../../components/OpeningInventory';
 import { useState } from 'react';
 import { Plus, AlertCircle, Trash2, Edit3 } from 'lucide-react';
@@ -176,6 +177,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   return (
     <div>
       <div className="inventory-summary">{[['Freezer',stockTypes.reduce((n,t)=>n+(inv?.[t.key]?.freezer || 0),0)],['On cart',stockTypes.reduce((n,t)=>n+(inv?.[t.key]?.cart || 0),0)],['Tracked items',stockTypes.length]].map(([label,value])=><div key={label}><span>{label}</span><strong>{value.toLocaleString('en-IN')}</strong></div>)}</div>
+      <OwnerLoadingHistory key={`history-${cartId}`} cartId={cartId} stockTypes={stockTypes}/>
       <OpeningInventory key={cartId} cartId={cartId} cart={state.carts.find(c=>c.id===cartId)} stockTypes={stockTypes} inventory={inv} onReady={setOpeningReady} />
       <SectionHeader title="Stock" subtitle={mode === 'momo' ? 'Stock In · Cart Loading · Consumables' : 'Consumables & supplies'} />
 
@@ -282,13 +284,13 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       {/* Recent Logs */}
       <SectionHeader title="Activity Log" />
       <div style={{ background: '#fff', borderRadius: 12, border: `1px solid ${colors.border}`, overflow: 'hidden' }}>
-        {[...cartStockLogs, ...cartLoadLogs].sort((a, b) => b.id - a.id).slice(0, 8).map(log => (
+        {[...cartStockLogs, ...cartLoadLogs].sort((a, b) => `${b.date || ''} ${b.time || ''}`.localeCompare(`${a.date || ''} ${a.time || ''}`) || b.id - a.id).slice(0, 8).map(log => (
           <div key={log.id} style={{ padding: '12px 16px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <div style={{ fontSize: 10, color: colors.muted, letterSpacing: 1, fontWeight: 700 }}>{log.type.replace('_', ' ')}</div>
               <div style={{ fontSize: 13, marginTop: 2 }}>{log.note}</div>
             </div>
-            <div style={{ fontSize: 11, color: colors.muted }}>{log.time}</div>
+            <div style={{ fontSize: 11, color: colors.muted }}>{log.date} · {log.time} IST</div>
           </div>
         ))}
         {cartStockLogs.length === 0 && cartLoadLogs.length === 0 && (

@@ -2,6 +2,8 @@ import { openingBusinessDate } from '../lib/openingInventory';
 import { nativeCommand } from '../lib/nativeApp';
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { localDate, istTime } from '../lib/time';
+import { loadingReference } from '../lib/loadingHistory';
 
 export function OpeningAlerts({ cartId, onOpenStock, compact = false, openTime }) {
   const [opening,setOpening]=useState(null);
@@ -33,7 +35,15 @@ export function OpeningAlerts({ cartId, onOpenStock, compact = false, openTime }
     const completed=opening?.record;
     const missingManager=checked&&!error&&!opening?.managerActive;
     return <button className={`opening-flag ${completed?'complete':missingManager||opening?.overdue?'overdue':''}`} onClick={onOpenStock}>
-      <span className="status-dot"/><span>{error?'Opening status unavailable':!checked?'Checking opening stock…':completed?'Opening stock loaded':missingManager?'Assign a manager for opening stock':opening?.overdue?'Opening stock overdue':'Opening stock pending'}</span><span aria-hidden="true">→</span>
+      <span className="status-dot"/><span style={{flex:1,minWidth:0,textAlign:'left'}}>
+        <span style={{display:'block'}}>{error?'Opening status unavailable':!checked?'Checking opening stock…':completed?`Opening stock submitted by ${completed.actor_name || 'manager'}`:missingManager?'Assign a manager for opening stock':opening?.overdue?'Opening stock overdue':'Opening stock pending'}</span>
+        {completed&&<span style={{display:'block',fontSize:12,fontWeight:400,lineHeight:1.6,marginTop:4}}>
+          <span style={{display:'block'}}>Business date: {completed.business_date}</span>
+          {completed.created_at&&<span style={{display:'block'}}>Submitted {localDate(new Date(completed.created_at))} · {istTime(new Date(completed.created_at))} IST</span>}
+          <span style={{display:'block',overflowWrap:'anywhere'}}>Ref: {loadingReference(completed)}</span>
+          <span style={{display:'block',marginTop:3}}>View loading details →</span>
+        </span>}
+      </span><span aria-hidden="true">→</span>
     </button>;
   }
   return <section aria-label="Opening alerts" style={{background:'#fff',border:'1px solid #DCE4EC',borderRadius:16,padding:18,marginBottom:20}}>

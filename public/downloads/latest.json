@@ -1,8 +1,8 @@
 {
-  "versionCode": 21,
-  "versionName": "1.7.9",
-  "path": "/downloads/cartlyft-1.7.9.apk",
-  "bytes": 4145247,
-  "sha256": "75695a92ef9e688e5753eb8b15302a4b48468d8ceb2812272f33ee979a6a6188",
-  "notes": "Silent owner updates with navigation to the relevant screen. Ringing is limited to manager opening and closing reminders. Cartlyft notification icon and cleanup of old owner/order alarms."
+  "versionCode": 22,
+  "versionName": "1.7.10",
+  "path": "/downloads/cartlyft-1.7.10.apk",
+  "bytes": 4151135,
+  "sha256": "56cf099e40ffacaff985c870c8eea7e9631a0ed654839e4288575a7df8e2ba95",
+  "notes": "Daily opening stock history with permanent references and IST timestamps. Weekly browsing and daily refill totals. Clearer owner home summary and improved manager loading validation."
 }
