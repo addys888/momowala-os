@@ -17,9 +17,11 @@ test('bootstrap returns every committed order beyond 1000 with tenant isolation 
  assert.equal(JSON.parse(request('select app_partner_bootstrap()',other)).orders.length,0);
  assert.throws(()=>request('select app_partner_bootstrap()','00000000-0000-4000-8000-000000000000'),/Sign in required/);
 });
+sql(`insert into partner_notifications(cart_id,audience,event_key,kind,title,body,target) select 'inbox-test-a','owner','ops-fixture:'||n,'refill','Stock refilled','Fixture','stock' from generate_series(1,60) n on conflict do nothing;`);
+
 test('inbox paginates committed events and blocks cross-cart reads',()=>{
  const page=JSON.parse(request("select app_partner_inbox('inbox-test-a')"));
- assert.equal(page.items.length,30);assert.ok(page.unread>=1105);
+ assert.equal(page.items.length,30);assert.ok(page.unread>=60);assert.ok(page.items.every(n=>!['order','cancel','payment'].includes(n.kind)));
  const older=JSON.parse(request(`select app_partner_inbox('inbox-test-a',${page.items.at(-1).id})`));
  assert.equal(older.items.length,30);assert.ok(older.items.every(n=>n.id<page.items.at(-1).id));
  assert.throws(()=>request("select app_partner_inbox('inbox-test-a')",other),/Not authorised/);
@@ -53,3 +55,12 @@ test('recovered prior-day sale retains its date without deducting current-day st
  assert.equal(JSON.parse(result[0]).status,'ok');
  const last=JSON.parse(result.at(-1));assert.equal(last.count,1);assert.equal(last.stock,100);assert.equal(last.date,'2026-10-10');
 });
+
+ test('routine order events stay out of inbox and order trigger is disabled',()=>{
+ assert.equal(sql("select count(*) from pg_trigger where tgrelid='orders'::regclass and tgname='partner_order_event'"),'0');
+ const page=JSON.parse(request("select app_partner_inbox('inbox-test-a')"));
+ const result=JSON.parse(request(`reset role;insert into partner_notifications(cart_id,audience,event_key,kind,title,body,target) select 'inbox-test-a','owner','suppressed:'||k,k,'Order activity','Fixture','orders' from unnest(array['order','cancel','payment']) k on conflict do nothing;set local role anon;select app_partner_inbox('inbox-test-a')`));
+ assert.equal(result.unread,page.unread);assert.deepEqual(result.items,page.items);
+ const claim=sql("select pg_get_functiondef('app_claim_partner_notifications()'::regprocedure)");
+ assert.match(claim,/n.kind not in \('order','cancel','payment'\) and d.sent_at is null/);
+ });
