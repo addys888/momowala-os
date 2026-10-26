@@ -145,7 +145,7 @@ export default function App() {
   useEffect(() => {
     if (!hydrated || !session?.cartId || (session.role !== 'staff' && session.role !== 'owner')) { pollRef.current = null; return; }
     let alive = true, inFlight = false, fullSyncAt = Date.now();
-    const tick = async (force = false) => {
+    const tick = async (force = false, full = false) => {
       // Never stack requests: on slow 4G a poll can outlast the 12s interval, and
       // firing another on top of it piles up in-flight calls and hangs the app.
       // Also skip background polling when the tab isn't visible (the manual 🔄
@@ -153,19 +153,19 @@ export default function App() {
       if (inFlight || (!force && document.hidden)) return;
       inFlight = true;
       try {
-        const [fresh, inventory] = await Promise.all([loadCartOrders(session.cartId, TODAY), loadInventory()]);
+        const [fresh, inventory] = await Promise.all([loadCartOrders(session.cartId, TODAY), loadInventory().catch(()=>null)]);
         if (!alive || !fresh) return;
         setLastSync(Date.now());
         setState(prev => {
           const ops = pendingOperations();
           return { ...prev,
-            orders: mergeOrders(prev.orders, fresh, ops),
-            inventory: inventory && !ops.some(o => ['order', 'inventory', 'consumables'].includes(o.kind) && !(o.kind === 'order' && o.error && o.payload.before)) ? { ...prev.inventory, ...inventory } : prev.inventory,
+            orders: [...prev.orders.filter(o=>o.cartId!==session.cartId || o.date!==TODAY),...fresh],
+            inventory: inventory ? { ...prev.inventory, ...inventory } : prev.inventory,
           };
         });
         // Menu, hours, reports and yesterday's unpaid orders must also follow
         // edits made on another phone, without fetching history every 12 seconds.
-        if (force || Date.now() - fullSyncAt >= 60000) {
+        if (full || Date.now() - fullSyncAt >= 60000) {
           const identity = await validateSession();
           if (!alive) return;
           if (identity && !identity.error && !identity.data?.role) {
@@ -181,7 +181,7 @@ export default function App() {
         console.warn('Cart sync failed', error.message);
       } finally { inFlight = false; }
     };
-    pollRef.current = () => tick(true);
+    pollRef.current = (full = true) => tick(true,full);
     const t = setInterval(tick, 12000);
     const resume = () => { if (!document.hidden) void tick(true); };
     document.addEventListener('visibilitychange', resume);
@@ -196,7 +196,7 @@ export default function App() {
       window.removeEventListener('online', resume);
     };
   }, [session?.token, hydrated]);
-  const refreshNow = async () => { if (pollRef.current) await pollRef.current(); };
+  const refreshNow = async (full = true) => { if (pollRef.current) await pollRef.current(full); };
   const refreshSavedData = async () => {
     const token = storage.get('session', null)?.token;
     const cloud = await loadCloudState();
@@ -232,14 +232,32 @@ export default function App() {
   // Accepts a plain object of fields to merge, OR a function (prev) => fields
   // when the merge must be computed from the freshest state (avoids stale-closure
   // clobbers under rapid/concurrent updates).
-  const updateState = (updates, commands = []) => {
+  const mutationBusy=useRef(false);
+  const updateState = async (updates, commands = []) => {
+    if(mutationBusy.current)return false;
     if (!hydrated || loadError) { alert('Wait for saved server data before making changes.'); return false; }
     const prev = stateRef.current;
     const next = { ...prev, ...(typeof updates === 'function' ? updates(prev) : updates) };
-    try { trackChanges(prev, next, commands); }
-    catch { alert('This device could not save the change. Free storage space and retry.'); return false; }
-    setState(next);
-    return true;
+    mutationBusy.current=true;
+    const token=session?.token;
+    try {
+      const receipt=await trackChanges(prev,next,commands);
+      if(storage.get('session',null)?.token!==token)return false;
+      // Publish only after the database commits. Apply returned order revisions.
+      setState(current=>{
+        const patch=Object.fromEntries(Object.keys(next).filter(k=>next[k]!==prev[k]).map(k=>[k,next[k]]));
+        const results=receipt?.results || (receipt?[receipt]:[]);
+        if(patch.orders)patch.orders=mergeOrders(current.orders,patch.orders);
+        for(const result of results)if(result.order)patch.orders=mergeOrders(patch.orders||current.orders,[committedOrder(result.order)]);
+        return {...current,...patch};
+      });
+      void refreshNow(false);
+      return receipt || true;
+    } catch(error) {
+      alert(`Not confirmed by server: ${error.message}. Your request is retained for retry.`);
+      return false;
+    } finally {mutationBusy.current=false;}
+
   };
   const login = (sess) => { setState(emptyServerState()); justAuthenticated.current = sess.token; setLastSync(null); setHydrated(false); storage.set('session', sess); setSession(sess); };
   const logout = () => {
@@ -253,9 +271,9 @@ export default function App() {
   return (
     <StoreContext.Provider value={{ state, updateState, session, login, logout, lastSync, refreshNow, refreshSavedData, hydrated, loadError, retryLoad: () => setLoadAttempt(n => n + 1) }}>
       {syncOps.length > 0 && (showPending || syncOps.some(o => o.error)) && <div role="status" style={{ padding: 12, background: '#fff3cd', color: '#663c00' }}>
-        {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} change(s) saved on this device, waiting to sync.`}
-        {syncOps.some(o => o.error) && <button style={{ marginLeft: 8, padding: '8px 12px', borderRadius: 8 }} onClick={async () => {
-          try { await outbox.retryFailed(); } catch { alert('Could not retry. Your changes remain saved on this device.'); }
+        {syncOps.some(o => o.error) ? `A change needs attention: ${syncOps.find(o => o.error).error}` : `${syncOps.length} unconfirmed request(s). These are not included in saved orders or reports.`}
+        {<button style={{ marginLeft: 8, padding: '8px 12px', borderRadius: 8 }} onClick={async () => {
+          try { await outbox.retryFailed(); await refreshSavedData(); if(pendingOperations().length)alert('Some requests are still unconfirmed. Keep this phone online and do not re-enter them.'); } catch { alert('Could not retry. Your changes remain saved on this device.'); }
         }}>Retry sync</button>}
       </div>}
       {session?.cartId && savedOrders(session.cartId).length > 0 && <details style={{padding:12}}><summary>Recover orders saved on this phone</summary><p>Retry previously set-aside orders using their original IDs. Existing successful submissions will not be duplicated.</p><button onClick={async () => {

@@ -71,3 +71,29 @@ test('late committed response never reaches a different signed-in account', asyn
   resolve({data:{status:'ok',order:{id:1}}});await running;
   assert.equal(committed.length,0);assert.equal(saved.length,0);
 });
+
+test('explicit transaction is confirmed even when an unrelated older edit is rejected',async()=>{
+ const ctx=setup(async op=>op.kind==='row'?{data:{status:'conflict',message:'Stale edit'}}:{data:{status:'ok',order:{id:99}}});
+ ctx.queue.enqueue('row',{});await ctx.queue.flush();
+ const order=ctx.queue.enqueue('order',{after:{id:99}});
+ const receipt=await ctx.queue.commit(order.id);
+ assert.equal(receipt.order.id,99);assert.equal(ctx.queue.list().length,1);
+ assert.equal(ctx.queue.list()[0].error,'Stale edit');
+});
+test('explicit transaction fails closed on lost response and retains original retry ID',async()=>{
+ let online=false;const ids=[];
+ const ctx=setup(async op=>{ids.push(op.id);if(!online)throw Error('offline');return {data:{status:'ok'}};});
+ const op=ctx.queue.enqueue('order',{after:{id:101}});
+ await assert.rejects(ctx.queue.commit(op.id),/confirmation unavailable/);
+ assert.equal(ctx.queue.list()[0].id,op.id);
+ online=true;await ctx.queue.commit(op.id);
+ assert.deepEqual(ids,[op.id,op.id]);assert.equal(ctx.queue.list().length,0);
+});
+test('recovery drains independent legacy orders while retaining a conflicted earlier edit',async()=>{
+ const ctx=setup(async op=>op.payload.after.id===1?{data:{status:'conflict',message:'Stale'}}:{data:{status:'ok'}});
+ ctx.queue.enqueue('order',{before:{id:1},after:{id:1}});
+ ctx.queue.enqueue('order',{before:{id:1},after:{id:1,payment:'cash'}});
+ ctx.queue.enqueue('order',{before:null,after:{id:2}});
+ await ctx.queue.flush();assert.equal(ctx.queue.list().length,2);
+ assert.ok(ctx.queue.list().every(op=>op.payload.after.id===1));
+});

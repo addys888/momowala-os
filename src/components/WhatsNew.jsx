@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { nativeCommand } from '../lib/nativeApp';
 
 const updates = [
+ {code:23,items:['Orders and other changes are confirmed by the server before they appear as saved.','Faster account loading and safer recovery of unsent orders, without duplicating stock deductions.','New notification bell for cart activity and owner announcements to staff.']},
  {code:22,items:['Opening stock now shows the submission date, time and permanent reference number.','Owners can browse weekly opening history and daily opening/refill quantities in Stock.','Opening stock requires an explicit quantity for each category, with clearer validation and save confirmation.']},
  {code:12,items:['Manager closing: submit cash and remaining stock at the owner’s scheduled time.']},
  {code:13,items:['View the owner’s Pack Today checklist from your manager home screen.','Notification setup now stays quietly in the background once enabled.']},

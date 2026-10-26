@@ -78,7 +78,7 @@ public final class PartnerAlerts {
         Intent ack=new Intent(c,PartnerAlertReceiver.class).setAction(key.startsWith("closing-")?"cartlyft.SILENCE_CLOSING":"cartlyft.ACK").setData(android.net.Uri.parse("cartlyft-alert:"+android.net.Uri.encode(key))).putExtra("key",key);
         PendingIntent silence=PendingIntent.getBroadcast(c,0,ack,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         String cart=prefs(c).getString("closingCart:"+key,prefs(c).getString("cartId",""));
-        String target=key.startsWith("closing-")?"closing":key.startsWith("order-")?"orders":"stock";
+        String target=key.startsWith("inbox-")?"inbox":key.startsWith("closing-")?"closing":key.startsWith("order-")?"orders":"stock";
         Intent launch=new Intent(c,MainActivity.class).setData(android.net.Uri.parse("cartlyft-notification:"+android.net.Uri.encode(key))).putExtra("notificationKey",key).putExtra("notificationBinding",binding).putExtra("notificationTarget",target).putExtra("notificationCart",cart).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent open=PendingIntent.getActivity(c,0,launch,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         String selectedChannel=ring?CHANNEL:INFO_CHANNEL;

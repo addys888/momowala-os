@@ -25,7 +25,7 @@ public class MainActivity extends Activity {
     private void captureNotification(Intent intent) {
         if(intent==null)return;
         String target=intent.getStringExtra("notificationTarget"),cart=intent.getStringExtra("notificationCart");
-        if(target==null||cart==null||!java.util.Arrays.asList("stock","orders","closing").contains(target))return;
+        if(target==null||cart==null||!java.util.Arrays.asList("stock","orders","closing","inbox").contains(target))return;
         String binding=intent.getStringExtra("notificationBinding"),key=intent.getStringExtra("notificationKey");
         if(binding!=null&&!binding.equals(PartnerAlerts.prefs(this).getString("binding","")))return;
         // Opening the notification hides it locally; report acknowledgment remains a server action.

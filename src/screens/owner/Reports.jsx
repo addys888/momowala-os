@@ -168,10 +168,10 @@ function Reports({ state, updateState, cartId, initialView='revenue' }) {
   const thisWeekStart = periodStart('week');
   const receivedById = new Map((state.payoutMarks || []).filter(m => m.cartId === cartId).map(m => [m.id, !!m.received]));
   const weekStatus = (ws) => ws === thisWeekStart ? 'progress' : (receivedById.get(weekId(ws)) ? 'received' : 'pending');
-  const togglePayout = (ws) => {
+  const togglePayout = async (ws) => {
     const id = weekId(ws);
     const mark = { id, cartId, weekStart: ws, received: !(receivedById.get(id) === true), updatedAt: new Date().toISOString() };
-    updateState(prev => ({ ...prev, payoutMarks: [...(prev.payoutMarks || []).filter(m => m.id !== id), mark] }));
+    (await updateState(prev => ({ ...prev, payoutMarks: [...(prev.payoutMarks || []).filter(m => m.id !== id), mark] })));
   };
   // Years that actually have online sales (newest first), for the filter.
   const payoutYears = [...new Set(Object.keys(weekMap).map(ws => ws.slice(0, 4)))].sort().reverse();
@@ -279,14 +279,14 @@ function Reports({ state, updateState, cartId, initialView='revenue' }) {
   const maxQty = soldItems[0]?.qty || 1;
   const shownItems = showAllItems ? soldItems : soldItems.slice(0, 5);
 
-  const addExpense = (category, amount, note, date = TODAY, fund = 'cart') => {
+  const addExpense = async (category, amount, note, date = TODAY, fund = 'cart') => {
     const e = { id: Date.now(), cartId, date: date || TODAY, category, amount, note, fund };
-    if (!updateState({ expenses: [...(state.expenses || []), e] })) return;
+    if (!(await updateState({ expenses: [...(state.expenses || []), e] }))) return;
     setShowExpense(false);
   };
-  const removeExpense = (id) => { if (!updateState({ expenses: state.expenses.filter(e => e.id !== id) })) return; setDelExpense(null); };
-  const updateExpense = (id, category, amount, note, date = TODAY, fund = 'cart') => {
-    if (!updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY, fund } : e) })) return;
+  const removeExpense = async (id) => { if (!(await updateState({ expenses: state.expenses.filter(e => e.id !== id) }))) return; setDelExpense(null); };
+  const updateExpense = async (id, category, amount, note, date = TODAY, fund = 'cart') => {
+    if (!(await updateState({ expenses: state.expenses.map(e => e.id === id ? { ...e, category, amount, note, date: date || TODAY, fund } : e) }))) return;
     setEditExpenseItem(null);
   };
 

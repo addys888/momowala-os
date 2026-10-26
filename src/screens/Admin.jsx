@@ -31,8 +31,8 @@ function AdminCarts({ state, updateState }) {
   const [menuCartId, setMenuCartId] = useState(null);
   const [editOwnerCart, setEditOwnerCart] = useState(null);
 
-  const saveOwner = (cartId, fields) => {
-    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ...fields } : c) });
+  const saveOwner = async (cartId, fields) => {
+    (await updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, ...fields } : c) }));
     setEditOwnerCart(null);
   };
 
@@ -62,7 +62,7 @@ function AdminCarts({ state, updateState }) {
     };
     const freshInv = freshInventory(id);
     const newMenus = { ...state.menus, [id]: { items: [], lassi: [], addons: [], stockTypes: [], onlineVendors: !!form.onlineVendors, stockMode: form.stockMode || 'simple' } };
-    updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInv }, menus: newMenus });
+    (await updateState({ carts: [...state.carts, cart], inventory: { ...state.inventory, [id]: freshInv }, menus: newMenus }));
     pushMenus(newMenus, id);
     // New carts can't be created via the recurring PATCH sync — insert explicitly.
     const r = await insertCart(cart);
@@ -77,12 +77,12 @@ function AdminCarts({ state, updateState }) {
     setShowAdd(false);
   };
 
-  const toggleActive = (id) => updateState({ carts: state.carts.map(c => c.id === id ? { ...c, active: !c.active } : c) });
+  const toggleActive = async (id) => (await updateState({ carts: state.carts.map(c => c.id === id ? { ...c, active: !c.active } : c) }));
   // Flip a cart's Zomato/Swiggy opt-in. Writes an explicit boolean into the
   // menus blob so it overrides the momowala legacy default either way.
-  const toggleOnlineVendors = (id) => {
+  const toggleOnlineVendors = async (id) => {
     const menus = { ...state.menus, [id]: { ...(state.menus?.[id] || { items: [], lassi: [], addons: [] }), onlineVendors: !onlineVendorsFor(state, id) } };
-    updateState({ menus });
+    (await updateState({ menus }));
     pushMenus(menus, id);
   };
   const resetOwnerPw = async (cart) => {
@@ -101,13 +101,13 @@ function AdminCarts({ state, updateState }) {
     if (r.status === 'ok') { alert('Recovery code saved. You can now use "Forgot password?" on the admin login.'); return; }
     alert(r.message || 'Could not save the recovery code — log in again and retry.');
   };
-  const removeCart = (cart) => {
+  const removeCart = async (cart) => {
     const orders = state.orders.filter(o => o.cartId === cart.id).length;
     if (!confirm(`Remove ${cart.name}? This hides the cart and removes its staff. ${orders} order(s) stay in records.`)) return;
-    updateState({
+    (await updateState({
       carts: state.carts.filter(c => c.id !== cart.id),
       staff: state.staff.filter(s => s.cartId !== cart.id),
-    });
+    }));
   };
 
   return (

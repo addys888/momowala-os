@@ -78,7 +78,7 @@ test('concurrent settlement deducts stock exactly once; lost response retry is i
   assert.equal(await sql("select data->'test-a'->'veg'->>'cart' from inventory where id=1"),'90');
 });
 test('pending counter creation and retry are atomic', async () => {
-  const after={...order(91002),source:'staff-entry'};const id=crypto.randomUUID();
+  const after={...order(91002),date:new Date(Date.now()+330*60000).toISOString().slice(0,10),source:'staff-entry'};const id=crypto.randomUUID();
   await mutate('order',{before:null,after},staff,id); await mutate('order',{before:null,after},staff,id);
   assert.equal(await sql("select data->'test-a'->'veg'->>'cart' from inventory where id=1"),'80');
 });

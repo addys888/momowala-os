@@ -48,24 +48,24 @@ function MenuEditor({ state, updateState, cartId, cart }) {
     return chip ? `${chip} · ${price}` : price;
   };
 
-  const setMenu = (next) => {
+  const setMenu = async (next) => {
     const menus = { ...state.menus, [cartId]: next };
-    return updateState({ menus });
+    return (await updateState({ menus }));
   };
-  const dedupe = (section) => {
+  const dedupe = async (section) => {
     const list = menu[section] || [];
     const seen = new Set(), kept = [];
     list.forEach(it => { const k = menuKeyOf(section, it); if (!seen.has(k)) { seen.add(k); kept.push(it); } });
-    setMenu({ ...menu, [section]: kept });
+    (await setMenu({ ...menu, [section]: kept }));
   };
-  const saveItem = (section, item) => {
+  const saveItem = async (section, item) => {
     const list = menu[section] || [];
     const exists = item.id && list.some(x => x.id === item.id);
     const nextList = exists ? list.map(x => x.id === item.id ? item : x) : [...list, { ...item, id: item.id || newId(section[0]) }];
-    if (!setMenu({ ...menu, [section]: nextList })) return;
+    if (!(await setMenu({ ...menu, [section]: nextList }))) return;
     setEdit(null);
   };
-  const removeItem = (section, id) => { if (confirm('Remove this item?')) setMenu({ ...menu, [section]: (menu[section] || []).filter(x => x.id !== id) }); };
+  const removeItem = async (section, id) => { if (confirm('Remove this item?')) (await setMenu({ ...menu, [section]: (menu[section] || []).filter(x => x.id !== id) })); };
 
   const onPhoto = async (e) => {
     const files = Array.from(e.target.files || []);
@@ -132,10 +132,10 @@ function MenuEditor({ state, updateState, cartId, cart }) {
           addons: addUnique('addons', addons, extracted.addons),
         };
         const added = (next.items.length - items.length) + (next.lassi.length - lassi.length) + (next.addons.length - addons.length);
-        setMenu({ ...menu, ...labelPatch, ...next });
+        (await setMenu({ ...menu, ...labelPatch, ...next }));
         setAiNote(`Added ${added} new item${added !== 1 ? 's' : ''}, skipped ${count - added} already on the menu. Review below.`);
       } else {
-        setMenu({ ...menu, ...labelPatch, ...extracted });
+        (await setMenu({ ...menu, ...labelPatch, ...extracted }));
         setAiNote(`Imported ${count} items — review and edit below, then they're saved automatically.`);
       }
     } catch (err) {
@@ -159,7 +159,7 @@ function MenuEditor({ state, updateState, cartId, cart }) {
       {aiNote && <div style={{ background: brand.surface, border: `1px solid ${brand.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 13, color: brand.text, marginBottom: 16 }}>{aiNote}</div>}
 
       </details>
-      <SectionNameControl emoji={label.emoji} name={label.label} onSave={(emoji, name) => setMenu({ ...menu, itemEmoji: emoji, itemLabel: name })} />
+      <SectionNameControl emoji={label.emoji} name={label.label} onSave={async (emoji, name) => (await setMenu({ ...menu, itemEmoji: emoji, itemLabel: name }))} />
 
       <MenuSection title={`${label.emoji} ${label.label}`} hint="Prices + optional pieces" grouped
         rows={items.map(i => ({ id: i.id, dup: dupItems.has(i.id), group: (i.cat || 'Other'), primary: `${i.name}${i.star ? ' ⭐' : ''}`, secondary: itemSecondary(i) }))}
@@ -208,7 +208,7 @@ function SectionNameControl({ emoji, name, onSave }) {
       <div style={{ display: 'flex', gap: 8 }}>
         <input value={e} onChange={ev => setE(ev.target.value.slice(0, 2))} placeholder="🍽️" style={{ ...editInput, width: 56, textAlign: 'center', marginBottom: 0 }} />
         <input value={n} onChange={ev => setN(ev.target.value)} placeholder="Dosa" style={{ ...editInput, flex: 1, marginBottom: 0 }} />
-        <button onClick={() => { onSave((e || '🍽️').trim(), (n || 'Menu').trim()); setOpen(false); }} style={{ ...adminBtn, color: brand.navy }}>Save</button>
+        <button onClick={async () => { (await onSave((e || '🍽️').trim(), (n || 'Menu').trim())); setOpen(false); }} style={{ ...adminBtn, color: brand.navy }}>Save</button>
       </div>
       <div style={{ fontSize: 11, color: colors.muted, marginTop: 8 }}>Shown as the food section header on the ordering and customer screens.</div>
     </div>
@@ -278,16 +278,16 @@ function ItemModal({ initial, stockTypes = [], categories = [], onSave, onClose 
   const [newCat, setNewCat] = useState(categories.length === 0 || (!!(initial?.cat) && !categories.includes(initial.cat)));
   const num = (v) => parseInt(v) || 0;
   const single = !!f.single;
-  const submit = () => {
+  const submit = async () => {
     if (!f.name?.trim()) { setError('Enter an item name.'); return; }
     if (!f.cat?.trim()) { setError('Pick or enter a category (e.g. Dosa, Steamed, Snacks).'); return; }
     if (single) {
       if (!num(f.full)) { setError('Enter a price.'); return; }
-      onSave({ ...f, single: true, name: f.name.trim(), cat: f.cat.trim(), half: 0, full: num(f.full), pcsHalf: 0, pcsFull: num(f.pcsFull), stockKey: f.type || null });
+      (await onSave({ ...f, single: true, name: f.name.trim(), cat: f.cat.trim(), half: 0, full: num(f.full), pcsHalf: 0, pcsFull: num(f.pcsFull), stockKey: f.type || null }));
       return;
     }
     if (!num(f.half) && !num(f.full)) { setError('Enter at least one price.'); return; }
-    onSave({ ...f, single: false, name: f.name.trim(), cat: f.cat.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type || null });
+    (await onSave({ ...f, single: false, name: f.name.trim(), cat: f.cat.trim(), half: num(f.half), full: num(f.full), pcsHalf: num(f.pcsHalf), pcsFull: num(f.pcsFull), stockKey: f.type || null }));
   };
   const set = (k, v) => setF(p => ({ ...p, [k]: v }));
   return (
@@ -366,9 +366,9 @@ function ItemModal({ initial, stockTypes = [], categories = [], onSave, onClose 
 function SimpleItemModal({ initial, section, onSave, onClose }) {
   const [f, setF] = useState({ name: '', price: 0, ...initial });
   const [error, setError] = useState('');
-  const submit = () => {
+  const submit = async () => {
     if (!f.name?.trim()) { setError('Enter a name.'); return; }
-    onSave({ ...f, name: f.name.trim(), price: parseInt(f.price) || 0 });
+    (await onSave({ ...f, name: f.name.trim(), price: parseInt(f.price) || 0 }));
   };
   return (
     <EditModalShell title={`${initial?.id ? 'Edit' : 'Add'} ${section === 'addons' ? 'add-on' : 'drink'}`} onClose={onClose} onSave={submit} error={error}>
@@ -411,10 +411,10 @@ function CartProfileModal({ cart, printer = {}, vendorLinks = {}, vendors, onSav
     try { const b64 = await fileToBase64(file, max, 0.8); setF(p => ({ ...p, [k]: `data:image/jpeg;base64,${b64}` })); }
     catch { setError('Could not read that image.'); }
   };
-  const submit = () => {
+  const submit = async () => {
     if (!f.name.trim()) { setError('Cart name is required.'); return; }
     if (!f.cuisine.trim()) { setError('Add a short food description.'); return; }
-    onSave({
+    (await onSave({
       name: f.name.trim(), emoji: f.emoji.trim() || '🛒', logo: f.logo || null, tagline: f.tagline.trim(),
       cuisine: f.cuisine.trim(), location: f.location.trim(), timing: f.timing.trim(),
       phone: f.phone.trim(), instagram: f.instagram.trim(), accent: f.accent,
@@ -423,7 +423,7 @@ function CartProfileModal({ cart, printer = {}, vendorLinks = {}, vendors, onSav
       printerEnabled: !!f.printerEnabled, printerFooter: f.printerFooter.trim(), printerAutoPrint: !!f.printerAutoPrint,
       zomatoUrl: f.zomatoUrl.trim(), swiggyUrl: f.swiggyUrl.trim(),
       ...(f.vendors ? {vendors:f.vendors}:{}),
-    });
+    }));
   };
   return (
     <EditModalShell title="Edit cart details" onClose={onClose} onSave={submit} error={error}>

@@ -15,6 +15,7 @@ export async function hashPassword(plain) {
 
 // ─── LOCAL PERSISTENCE (always on, works offline) ───
 const PREFIX = 'mw:';
+let serverMenus = {};
 
 export const storage = {
   get(key, fallback) {
@@ -198,29 +199,6 @@ export function mergeStates(localState, cloud) {
   // Cloud reads are already scoped by the server. Never union previous users'
   // private caches into a newly authenticated account.
   const next = { ...localState, ...cloud };
-  for (const op of pendingOperations()) {
-    // A rejected edit must not replace an existing server order. New unsynced
-    // orders remain visible as drafts and retain their original operation IDs.
-    if (op.kind === 'order' && op.error && op.payload.before) continue;
-    const { after } = op.payload;
-    if (op.kind === 'order' && after) next.orders = unionById(next.orders, [rowToOrder(after)]);
-    if (op.kind === 'row') {
-      const entry = Object.entries(slices).find(([, cfg]) => cfg.table === op.payload.table);
-      if (entry) {
-        const [key, cfg] = entry;
-        const id = after?.id ?? op.payload.before?.id;
-        const existing = next[key].find(x => x.id === id);
-        next[key] = next[key].filter(x => x.id !== id);
-        if (after) next[key].push(cfg.from({ ...(existing ? cfg.to(existing) : {}), ...after }));
-      }
-    }
-    if (op.kind === 'menu') next.menus = { ...next.menus, [op.payload.cartId]: op.payload.value };
-    if (op.kind === 'inventory' || op.kind === 'consumables' || op.kind === 'order') {
-      // Keep the optimistic local stock until every corresponding command lands.
-      const cid = op.payload.cartId || after?.cart_id;
-      if (cid && localState.inventory[cid]) next.inventory = { ...next.inventory, [cid]: localState.inventory[cid] };
-    }
-  }
   return next;
 }
 
@@ -256,14 +234,12 @@ export const authAdminRecover = (mobile, code, newPassword) => callRpc('app_admi
 // Apply per-stock-key deltas (or absolute fset/cset) to the cart's inventory.
 // Returns { status, cartInv } or { status:'rpc_missing' } when not migrated yet.
 export async function applyInventory(cartId, ops) {
-  outbox.enqueue('inventory', { cartId, ops });
-  await outbox.flush();
-  return { status: 'queued' };
+  const op=outbox.enqueue('inventory',{cartId,ops});
+  return await outbox.commit(op.id);
 }
 export async function setCartConsumables(cartId, cons) {
-  outbox.enqueue('consumables', { cartId, value: cons });
-  await outbox.flush();
-  return { status: 'queued' };
+  const op=outbox.enqueue('consumables',{cartId,value:cons});
+  return await outbox.commit(op.id);
 }
 export async function pushInventoryBlob() { throw new Error('Whole inventory writes are disabled'); }
 
@@ -286,7 +262,7 @@ export async function loadCartOrders(cartId, date) {
 // ─── CLOUD LOAD ───
 let changeEpoch = 0;
 export async function loadCloudState() {
-  const startedEpoch = changeEpoch;
+  const startedEpoch=changeEpoch;
   if (!supabase) return null;
   const startedSession = requestHeaders()['x-app-session'];
   try {
@@ -295,47 +271,20 @@ export async function loadCloudState() {
     if (!startedSession) {
       const catalog = await supabase.rpc('app_catalog');
       if (catalog.error) throw catalog.error;
-      if (requestHeaders()['x-app-session'] !== startedSession || startedEpoch !== changeEpoch) return null;
+      if (requestHeaders()['x-app-session'] !== startedSession || startedEpoch!==changeEpoch) return null;
       return { carts: (catalog.data?.carts || []).map(rowToCart), menus: catalog.data?.menus || {} };
     }
-    // Account reads use explicit safe columns; credentials are never fetched.
-    const resilient = async (table, cols, order) => {
-      return supabase.from(table).select(cols).order(order);
-    };
-    // PostgREST caps a single response at 1000 rows. Page through so growing
-    // tables (orders especially) return in FULL — otherwise once a table passes
-    // 1000 rows the newest orders silently drop and the owner goes revenue-blind.
-    const fetchAll = async (table, order = 'id') => {
-      const pageSize = 1000;
-      let all = [], from = 0;
-      for (;;) {
-        const r = await supabase.from(table).select('*').order(order).range(from, from + pageSize - 1);
-        if (r.error) return { data: all, error: r.error };
-        all = all.concat(r.data || []);
-        if (!r.data || r.data.length < pageSize) break;
-        from += pageSize;
-      }
-      return { data: all, error: null };
-    };
-    const [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses, payoutMarks] = await Promise.all([
-      fetchAll('orders'),
-      fetchAll('stock_logs'),
-      fetchAll('cart_loadings'),
-      fetchAll('day_close_logs'),
-      supabase.rpc('app_inventory'),
-      resilient('staff', STAFF_COLS, 'id'),
-      resilient('carts', CART_COLS, 'created_at'),
-      supabase.rpc('app_catalog'),
-      supabase.from('menus').select('*').eq('id', 1).maybeSingle(),
-      fetchAll('wastage_logs'),
-      fetchAll('expenses'),
-      fetchAll('payout_marks'),
-    ]);
+    const response = await supabase.rpc('app_partner_bootstrap');
+    if(response.error) throw response.error;
+    const b=response.data;
+    if(!b || !Array.isArray(b.orders)) throw new Error('Incomplete server response');
+    const wrap=data=>({data,error:null});
+    const orders=wrap(b.orders),stockLogs=wrap(b.stock_logs),cartLoadings=wrap(b.cart_loadings),dayCloseLogs=wrap(b.day_close_logs),inventory=wrap(b.inventory),staff=wrap(b.staff),carts=wrap(b.carts),platform=wrap(b.catalog),menus=wrap({data:b.menus}),wastage=wrap(b.wastage_logs),expenses=wrap(b.expenses),payoutMarks=wrap(b.payout_marks);
     // Every scoped read must succeed before replacing cached state.
     const failed = [orders, stockLogs, cartLoadings, dayCloseLogs, inventory, staff, carts, platform, menus, wastage, expenses, payoutMarks].find((r) => r.error);
     if (failed) throw failed.error;
-    if (requestHeaders()['x-app-session'] !== startedSession || startedEpoch !== changeEpoch) return null;
-    storage.set('serverMenus', menus.data?.data || {});
+    if (requestHeaders()['x-app-session'] !== startedSession || startedEpoch!==changeEpoch) return null;
+    serverMenus = menus.data?.data || {};
     return {
       orders: orders.data.map((r) => rowToOrder(r)),
       stockLogs: stockLogs.data.map(rowToLog),
@@ -438,19 +387,20 @@ export const outbox = createOutbox({
     return request.setHeader('x-app-session', token);
   },
   onResult: (result, op) => {
+    changeEpoch++;
     if (op.kind === 'batch') {
       operationChanges([op]).forEach((change, i) => {
-        if (change.kind === 'menu') storage.set('serverMenus', { ...storage.get('serverMenus', {}), [change.payload.cartId]: change.payload.value });
+        if (change.kind === 'menu') serverMenus = { ...serverMenus, [change.payload.cartId]: change.payload.value };
         emit('mw:committed', { ...result.results[i], op: change });
       });
       return;
     }
-    if (op.kind === 'menu') storage.set('serverMenus', { ...storage.get('serverMenus', {}), [op.payload.cartId]: op.payload.value });
+    if (op.kind === 'menu') serverMenus = { ...serverMenus, [op.payload.cartId]: op.payload.value };
     emit('mw:committed', { ...result, op });
   },
-  onStatus: ops => { changeEpoch++; emit('mw:sync', ops); },
+  onStatus: ops => { emit('mw:sync', ops); },
 });
-export function trackChanges(before, after, extraCommands = []) {
+export async function trackChanges(before, after, extraCommands = []) {
   const commands = [];
   if (!storage.get('session', null)?.token) return;
   for (const [key, cfg] of Object.entries(slices)) {
@@ -477,7 +427,7 @@ export function trackChanges(before, after, extraCommands = []) {
     for (const [cartId, menu] of Object.entries(after.menus)) {
       if (JSON.stringify(before.menus[cartId]) !== JSON.stringify(menu)) {
         const queued = pendingOperations().filter(o => o.kind === 'menu' && o.payload.cartId === cartId).at(-1);
-        commands.push({ kind: 'menu', payload: { cartId, before: queued?.payload.value ?? storage.get('serverMenus', {})[cartId] ?? null, value: menu } });
+        commands.push({ kind: 'menu', payload: { cartId, before: queued?.payload.value ?? serverMenus[cartId] ?? null, value: menu } });
       }
     }
   }
@@ -485,10 +435,11 @@ export function trackChanges(before, after, extraCommands = []) {
   if (commands.length) {
     // A single storage write precedes every optimistic state change.
     const requiresBatch = commands.length > 1 || commands.some(c => ['inventory','consumables'].includes(c.kind) || c.payload.table === 'day_close_logs');
-    if (requiresBatch) outbox.enqueue('batch', { commands });
-    else outbox.enqueue(commands[0].kind, commands[0].payload);
+    const kind=requiresBatch?'batch':commands[0].kind, payload=requiresBatch?{commands}:commands[0].payload;
+    const operation=outbox.list().find(op=>op.actor===currentActor()&&op.kind===kind&&JSON.stringify(op.payload)===JSON.stringify(payload)) || outbox.enqueue(kind,payload);
+    return await outbox.commit(operation.id);
   }
-  void outbox.flush();
+  return null;
 }
 export function syncToCloud() { void outbox.flush(); }
 export const validateSession = () => supabase?.rpc('app_identity');

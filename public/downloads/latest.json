@@ -1,8 +1,8 @@
 {
-  "versionCode": 22,
-  "versionName": "1.7.10",
-  "path": "/downloads/cartlyft-1.7.10.apk",
-  "bytes": 4151135,
-  "sha256": "56cf099e40ffacaff985c870c8eea7e9631a0ed654839e4288575a7df8e2ba95",
-  "notes": "Daily opening stock history with permanent references and IST timestamps. Weekly browsing and daily refill totals. Clearer owner home summary and improved manager loading validation."
+  "versionCode": 23,
+  "versionName": "1.8.0",
+  "path": "/downloads/cartlyft-1.8.0.apk",
+  "bytes": 4156811,
+  "sha256": "18d1e4b504f676a926915685d5638e703f208b74be45c77c529417100d5e71ca",
+  "notes": "Server-confirmed orders, safer recovery of unsent orders, faster account loading, and a notification inbox with owner announcements."
 }

@@ -36,20 +36,20 @@ function StaffRegistry({ state, updateState, cartId, cart }) {
     const id = Date.now();
     const r = await authRegisterStaff(session?.token, id, name, mobile, password);
     if (r.status === 'ok') {
-      updateState({ staff: [...state.staff, { id, cartId, name, mobile, active: true }] });
+      (await updateState({ staff: [...state.staff, { id, cartId, name, mobile, active: true }] }));
       setShowAdd(false); return;
     }
     alert(r.status === 'rpc_missing' ? needsSql : (r.message || 'Could not register staff.'));
   };
 
-  const toggleActive = (id) => updateState({ staff: state.staff.map(s => s.id === id ? { ...s, active: !s.active } : s) });
+  const toggleActive = async (id) => (await updateState({ staff: state.staff.map(s => s.id === id ? { ...s, active: !s.active } : s) }));
   // Edit name/mobile — synced via the recurring staff PATCH (name/mobile columns).
   // The password hash is untouched, so they keep logging in (with the new mobile).
-  const saveStaffEdit = (id, name, mobile) => {
-    if (!updateState({ staff: state.staff.map(s => s.id === id ? { ...s, name: name.trim(), mobile } : s) })) return;
+  const saveStaffEdit = async (id, name, mobile) => {
+    if (!(await updateState({ staff: state.staff.map(s => s.id === id ? { ...s, name: name.trim(), mobile } : s) }))) return;
     setEditStaff(null);
   };
-  const removeStaff = (id) => { if (confirm('Remove this staff member and their attendance records? Disable login instead if you want to keep their history.')) updateState({ staff: state.staff.filter(s => s.id !== id) }); };
+  const removeStaff = async (id) => { if (confirm('Remove this staff member and their attendance records? Disable login instead if you want to keep their history.')) (await updateState({ staff: state.staff.filter(s => s.id !== id) })); };
   const resetPassword = async (id) => {
     const np = prompt('Enter a new password for this staff member (min 4 characters):');
     if (!np) return;

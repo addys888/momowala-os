@@ -30,12 +30,13 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   // land straight on the OLDEST unsettled day, not today (where the stale orders
   // wouldn't be visible at all, since the feed shows one date at a time).
   const [ordersDate, setOrdersDate] = useState(null);
+  useEffect(()=>{const open=e=>{if(e.detail.cartId!==cartId)return;if(e.detail.target==='orders')setOrdersDate(e.detail.date||TODAY);if(e.detail.target==='closing')setReconcileDate(e.detail.date||TODAY);};window.addEventListener('mw:navigate-notification',open);return()=>window.removeEventListener('mw:navigate-notification',open);},[cartId]);
   const goOrders = (date) => { setOrdersDate(date || TODAY); setTab('orders'); };
   const navTab = (t) => { setReportView('revenue'); setReconcileDate(null); setOrdersDate(null); setTab(t); };
   const cart = state.carts.find(c => c.id === cartId);
   const inv = state.inventory[cartId];
   const menu = menuFor(state, cartId);
-  const saveProfile = (fields) => {
+  const saveProfile = async (fields) => {
     // Printer config lives in the menus blob (synced via pushMenus, clobber-safe)
     // — split it out from the cart-table fields.
     const { printerEnabled, printerFooter, printerAutoPrint, zomatoUrl, swiggyUrl, vendors, ...cartFields } = fields;
@@ -45,14 +46,14 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
       vendors: vendors || menuFor(state, cartId).vendors,
       vendorLinks: { zomato: (zomatoUrl || '').trim(), swiggy: (swiggyUrl || '').trim() },
     } };
-    if (!updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c), menus: newMenus })) return;
+    if (!(await updateState({ carts: state.carts.map(c => c.id === cartId ? updated : c), menus: newMenus }))) return;
     saveCartProfile(updated); // persist immediately so it survives a refresh
     pushMenus(newMenus, cartId);
     setShowProfile(false);
   };
-  const toggleOpen = () => {
+  const toggleOpen = async () => {
     const next = !cart?.closedManually;
-    if (!updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: next } : c) })) return;
+    if (!(await updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, closedManually: next } : c) }))) return;
     // Persist immediately (not via the debounced batch) so it survives a refresh.
     setCartClosed(cartId, next);
   };
@@ -60,7 +61,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
   // append-only WARE_RESET adjustment (qty = target − current) so the balance
   // lands exactly on the entered count — durable, sync-safe, and itself
   // reversible by another correction. Use after a miscount or handover mishap.
-  const resetWare = (wareKey) => {
+  const resetWare = async (wareKey) => {
     const led = wareLedger(state, cartId, TODAY)[wareKey];
     const cur = led.opening + led.supplied - led.used; // live current
     const label = WARE_TYPES.find(w => w.key === wareKey)?.label || wareKey;
@@ -71,7 +72,7 @@ function OwnerApp({ state, updateState, onExit, cartId }) {
     const delta = target - cur;
     if (delta === 0) return;
     const log = { id: Date.now(), cartId, date: TODAY, time: istTime(), type: 'WARE_RESET', item: wareKey, qty: delta, note: `Recount correction → set to ${target}` };
-    updateState(s => ({ ...s, stockLogs: [...s.stockLogs, log] }));
+    (await updateState(s => ({ ...s, stockLogs: [...s.stockLogs, log] })));
   };
 
   const todayOrders = state.orders.filter(o => o.cartId === cartId && o.date === TODAY);

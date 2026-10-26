@@ -1,3 +1,4 @@
+import { NotificationInbox } from './NotificationInbox';
 import { nativeCommand } from '../lib/nativeApp';
 import React, { useState, useEffect, useRef, createContext, useContext } from 'react';
 import { ShoppingCart, Package, TrendingUp, Users, Plus, Minus, Check, X, Clock, AlertCircle, BarChart3, Settings, LogOut, Home, ChefHat, User, IndianRupee, Coffee, Flame, Sparkles, ArrowRight, Trash2, Edit3, Eye, EyeOff, DollarSign, Boxes, FileText, Calendar, Award, AlertTriangle, CheckCircle2, Smartphone, Wifi, WifiOff, Lock, Volume2, VolumeX } from 'lucide-react';
@@ -92,6 +93,7 @@ function TopBar({ title, onExit, exitMessage = "Log out and exit? You’ll need 
           <div style={{ fontWeight: 700, fontSize: 15, overflowWrap: 'anywhere' }}>{title}</div>
         </div>
       </div>
+      <NotificationInbox/>
       {__ANDROID_APP__ && <button aria-label="App settings" onClick={() => nativeCommand('options')} style={{ width: 44, height: 44, flexShrink: 0, border: 0, background: 'transparent', color: '#fff', fontSize: 24 }}>⋮</button>}
       <button onClick={() => { if (confirm(exitMessage)) onExit(); }} style={{ background: 'transparent', border: `1px solid rgba(255,255,255,0.5)`, color: '#fff', padding: '6px 12px', borderRadius: 20, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
         <LogOut size={12}/> Exit

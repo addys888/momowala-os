@@ -65,11 +65,11 @@ function PrepChecklistModal({ state, updateState, cartId, onClose }) {
   const set = (i, v) => setRows(rs => rs.map((r, idx) => idx === i ? { ...r, label: v } : r));
   const remove = (i) => setRows(rs => rs.filter((_, idx) => idx !== i));
   const add = () => setRows(rs => [...rs, { id: `p${Date.now().toString(36)}${rs.length}`, label: '' }]);
-  const save = () => {
+  const save = async () => {
     const clean = rows.map(r => ({ id: r.id, label: r.label.trim() })).filter(r => r.label);
     if (clean.length === 0) { setError('Add at least one item, or cancel.'); return; }
     const menus = { ...state.menus, [cartId]: { ...menuFor(state, cartId), prepChecklist: clean } };
-    updateState({ menus });
+    if(!(await updateState({ menus })))return;
     pushMenus(menus, cartId);
     onClose();
   };

@@ -6,7 +6,7 @@ import { nativeCommand } from '../lib/nativeApp';
 import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, X, Clock, Boxes, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
-import { storage } from '../lib/store';
+import { storage, committedOrder } from '../lib/store';
 import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, partnerColors as colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../components/RemindersButton';
@@ -22,6 +22,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   const [isManager,setIsManager]=useState(false);
   const [placing, setPlacing] = useState(false); // in-flight guard for the pay buttons
   const submittedCartRef = React.useRef(null); // Keep a committed basket from being submitted again before React renders.
+  const draftOrderRef = React.useRef(null);
   const placingRef = React.useRef(false); // synchronous guard — blocks rapid double-taps before re-render
   const settlingRef = React.useRef(new Set()); // per-order guard against double-settle on pending orders
   const [settling, setSettling] = useState(() => new Set());
@@ -74,8 +75,8 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   // Staff has seen the order — stop the ringing and record it so the repeat-push
   // cron stops too. Written immediately (not via the debounced sync) so the
   // phone stops buzzing within a second.
-  const acknowledgeOrder = (orderId) => {
-    if (!updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, acknowledgedAt: new Date().toISOString() } : o) })) return;
+  const acknowledgeOrder = async (orderId) => {
+    if (!(await updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, acknowledgedAt: new Date().toISOString() } : o) }))) return;
     stopOrderAlarm();
     setOrderAlert(null);
   };
@@ -94,7 +95,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   // day must still be collectable, or it's lost (invisible to owner revenue too).
   // Oldest first so stuck ones surface at the top.
   const pendingOrders = state.orders.filter(o => o.cartId === cartId && o.payment === 'pending').sort((a, b) => a.id - b.id);
-  const setCartInv = (newInv, extra) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra });
+  const setCartInv = async (newInv, extra) => (await updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra }));
 
   const placeOrder = async (payment, extra) => {
     // Re-entrancy guard: the counter person can tap Cash/UPI again while the
@@ -104,6 +105,8 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     // over-deduction. The ref blocks the second tap synchronously, before any
     // re-render can disable the button.
     if (cart.length === 0 || placingRef.current || submittedCartRef.current === cart) return;
+    const alreadySaved=draftOrderRef.current?.cart===cart && state.orders.find(o=>o.id===draftOrderRef.current.order.id && o.revision>0);
+    if(alreadySaved){setCart([]);setJustPlaced({token:alreadySaved.token,total:alreadySaved.total,payment:alreadySaved.payment,order:alreadySaved});draftOrderRef.current=null;return true;}
     placingRef.current = true;
     setPlacing(true);
     try {
@@ -111,7 +114,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       // Shared per-cart/day counter (same RPC the customer QR flow uses) so staff
       // and customer tokens never collide; local count is the offline fallback.
       const token = 'Waiting to sync';
-      const order = {
+      const order = draftOrderRef.current?.cart===cart ? draftOrderRef.current.order : {
         id: Date.now(),
         cartId,
         token,
@@ -132,11 +135,16 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       const newInv = deductInventory(inv, cart, menu.items);
       // Functional update so the new order appends to the freshest orders list,
       // never a stale closure snapshot.
-      if (!updateState(s => ({ inventory: { ...s.inventory, [cartId]: newInv }, orders: [...s.orders, order] }))) return;
+      draftOrderRef.current={cart,order};
+      const receipt=await updateState(s => ({ inventory: { ...s.inventory, [cartId]: newInv }, orders: [...s.orders.filter(o=>o.id!==order.id), order] }));
+      if(!receipt)return;
+      const savedRow=receipt.order || receipt.results?.find(r=>r.order)?.order;
+      const saved=savedRow?committedOrder(savedRow):order;
 
       submittedCartRef.current = cart;
       setCart([]);
-      setJustPlaced({ token, total, payment, order });
+      setJustPlaced({ token:saved.token, total:saved.total, payment, order:saved });
+      draftOrderRef.current=null;
       return true;
     } finally {
       placingRef.current = false;
@@ -148,7 +156,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   // The original items already deducted stock at punch, so we deduct ONLY the
   // newly-added items and recompute the total — same token, still pending. Plates/
   // glasses re-derive from the items, so the theft audit stays correct too.
-  const addToOrder = (target, extraItems) => {
+  const addToOrder = async (target, extraItems) => {
     const reset = () => { setCart([]); setAddTarget(null); setTab('pending'); };
     if (!target || !extraItems?.length) { reset(); return; }
     const order = state.orders.find(o => o.id === target.id);
@@ -156,17 +164,17 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     const newItems = [...order.items, ...extraItems];
     const newTotal = newItems.reduce((s, it) => s + it.price * it.qty, 0);
     const newInv = deductInventory(inv, extraItems, menu.items);
-    if (!updateState(s => ({
+    if (!(await updateState(s => ({
       inventory: { ...s.inventory, [cartId]: newInv },
       orders: s.orders.map(o => o.id === target.id ? { ...o, items: newItems, total: newTotal } : o),
-    }))) return;
+    })))) return;
 
     reset();
   };
 
   // Customer QR orders arrive as 'pending'; staff confirms payment here,
   // and only then is stock deducted.
-  const settleOrder = (orderId, payment, extra) => {
+  const settleOrder = async (orderId, payment, extra) => {
     if (settlingRef.current.has(orderId)) return;
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment !== 'pending') return;
@@ -179,23 +187,23 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       const alreadyDeducted = order.source === 'staff-entry' || !!order.stockDeducted;
       const newInv = alreadyDeducted ? inv : deductInventory(inv, order.items, menu.items);
       const split = payment === 'split' ? { cash: extra?.cash || 0, upi: extra?.upi || 0 } : null;
-      return setCartInv(newInv, {
+      return (await setCartInv(newInv, {
         orders: state.orders.map(o => o.id === orderId ? { ...o, payment, split, staff: staffName, settledAt: new Date().toISOString(), stockDeducted: true } : o),
-      });
+      }));
     } finally {
       settlingRef.current.delete(orderId);
       setSettling(s => { const n = new Set(s); n.delete(orderId); return n; });
     }
   };
   // Staff advances the kitchen status (preparing → ready) the customer sees live.
-  const setPrepStatus = (orderId, status) => {
-    updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, prepStatus: status } : o) });
+  const setPrepStatus = async (orderId, status) => {
+    (await updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, prepStatus: status } : o) }));
   };
   // Cancelling keeps the order (marked 'cancelled' with a required reason) so it
   // stays in records and surfaces in the admin's activity feed — never deleted.
   // Works for pending QR orders AND already-settled staff orders (e.g. a counter
   // customer backs out): if the order was paid, its pieces are returned to stock.
-  const confirmCancel = (orderId, reason) => {
+  const confirmCancel = async (orderId, reason) => {
     const order = state.orders.find(o => o.id === orderId);
     if (!order || order.payment === 'cancelled') { setCancelTarget(null); return; }
     // A settled (paid) COUNTER order can only be cancelled inside the 5-minute
@@ -208,23 +216,23 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
     const wasDeducted = isPaid(order) || order.source === 'staff-entry' || !!order.stockDeducted;
     const sameStockDay=(order.stockBusinessDate || order.date)===openingBusinessDate(cartInfo?.openTime);
     const newInv = wasDeducted && sameStockDay ? restoreInventory(inv, order.items, menu.items) : inv;
-    updateState({
+    if(!(await updateState({
       inventory: { ...state.inventory, [cartId]: newInv },
       orders: state.orders.map(o => o.id === orderId
         ? { ...o, payment: 'cancelled', cancelReason: reason, staff: o.staff || staffName, settledAt: new Date().toISOString(), stockDeducted: false }
         : o),
-    });
+    })))return;
     setCancelTarget(null);
   };
 
   // Staff adjusts the live prep/wait time customers see on their token screen.
-  const setPrepMins = (mins) => {
+  const setPrepMins = async (mins) => {
     const m = Math.max(2, Math.min(10, mins));
-    updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, defaultPrepMins: m } : c) });
+    (await updateState({ carts: state.carts.map(c => c.id === cartId ? { ...c, defaultPrepMins: m } : c) }));
   };
 
   // Staff logs damaged/wasted momos — deducts from cart stock + records it.
-  const logWastage = (stockKey, qty, reason) => {
+  const logWastage = async (stockKey, qty, reason) => {
     const st = (menu.stockTypes || []).find(s => s.key === stockKey);
     const newInv = { ...inv };
     if (newInv[stockKey]) newInv[stockKey] = { ...newInv[stockKey], cart: Math.max(0, newInv[stockKey].cart - qty) };
@@ -233,12 +241,12 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
       time: istTime(),
       stockKey, label: st?.label || stockKey, qty, reason, staff: staffName,
     };
-    return updateState({ inventory: { ...state.inventory, [cartId]: newInv }, wastageLogs: [...state.wastageLogs, log] }, [{ kind: 'inventory', payload: { cartId, ops: { [stockKey]: { dc: -qty } }, expected: inv } }]);
+    return (await updateState({ inventory: { ...state.inventory, [cartId]: newInv }, wastageLogs: [...state.wastageLogs, log] }, [{ kind: 'inventory', payload: { cartId, ops: { [stockKey]: { dc: -qty } }, expected: inv } }]));
   };
 
   return (
     <div className="partner-app" style={{ minHeight: '100vh', background: colors.paper, paddingBottom: 80, fontFamily: 'system-ui, sans-serif' }}>
-      <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders will continue on this assigned phone." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will continue on this assigned phone."} title={<>{cartInfo?.name ?? 'Cart'} · {staffName} {isManager && <span className="manager-badge">Manager</span>}</>} onExit={() => { updateState({ staffOnDuty: null }); onExit(); }} />
+      <TopBar exitMessage={state.dayCloseLogs.some(l=>l.cartId===cartId && l.date===TODAY) ? "Log out? Opening reminders will continue on this assigned phone." : "Closing inventory has not been reconciled today. Ask the owner to complete Day Close before ending the shift. Log out anyway? Opening reminders will continue on this assigned phone."} title={<>{cartInfo?.name ?? 'Cart'} · {staffName} {isManager && <span className="manager-badge">Manager</span>}</>} onExit={async () => { (await updateState({ staffOnDuty: null })); onExit(); }} />
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: 16 }}>
         {!__ANDROID_APP__ && <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
@@ -392,7 +400,7 @@ function CancelReasonModal({ order, onCancel, onConfirm }) {
 function PendingOrders({ orders, onSettle, onSplitSettle, onCancel, onPrep, onAddItems, settling = new Set() }) {
   return (
     <div>
-      <SectionHeader title="Pending Payment" subtitle="QR orders waiting to be collected" />
+      <SectionHeader title="Customer orders" subtitle="Prepare orders and collect unpaid bills" />
       {orders.length === 0 && (
         <div style={{ background: '#fff', borderRadius: 12, padding: 40, textAlign: 'center', border: `1px solid ${colors.border}` }}>
           <CheckCircle2 size={36} color={colors.green} style={{ margin: '0 auto 12px' }}/>
@@ -815,12 +823,12 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
   const [err, setErr] = useState('');
   const n = Number(qty);
   const onCart = inv[stockKey]?.cart ?? 0;
-  const submit = () => {
+  const submit = async () => {
     setErr('');
     if (!stockKey || !Number.isSafeInteger(n) || n <= 0) { setErr('Enter a positive whole number of pieces.'); return; }
     // Can't waste more than is physically on the cart.
     if (n > onCart) { setErr(`Only ${onCart} ${stockTypes.find(s => s.key === stockKey)?.label || ''} pcs on the cart — can't log ${n}.`); return; }
-    if (onLog(stockKey, n, reason) === false) return;
+    if ((await onLog(stockKey, n, reason)) === false) return;
     setDone(`Logged ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage.`);
     setQty(''); setTimeout(() => setDone(''), 2500);
   };

@@ -14,34 +14,34 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   const [adjusting, setAdjusting] = useState(null); // { key, label } | null
   const [moving, setMoving] = useState(null); // { type, label, dir:'load'|'return', qty } | null
   const [editCons, setEditCons] = useState(null); // { key?, name, unit, stock } | null
-  const setCartInv = (newInv, extra, ops) => updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra }, ops ? [{ kind: 'inventory', payload: { cartId, ops, expected: inv } }] : []);
+  const setCartInv = async (newInv, extra, ops) => (await updateState({ inventory: { ...state.inventory, [cartId]: newInv }, ...extra }, ops ? [{ kind: 'inventory', payload: { cartId, ops, expected: inv } }] : []));
   const cartStockLogs = state.stockLogs.filter(l => l.cartId === cartId);
   const cartLoadLogs = state.cartLoadings.filter(l => l.cartId === cartId);
   const labelFor = (key) => stockTypes.find(st => st.key === key)?.label || key;
   const mode = stockModeFor(state, cartId);
-  const setStockMode = (m) => {
+  const setStockMode = async (m) => {
     const menu = menuFor(state, cartId);
     const newMenus = { ...state.menus, [cartId]: { ...menu, stockMode: m } };
-    if (!updateState({ menus: newMenus })) return;
+    if (!(await updateState({ menus: newMenus }))) return;
     pushMenus(newMenus, cartId);
   };
 
-  const setStockTypes = (next) => {
+  const setStockTypes = async (next) => {
     const menu = menuFor(state, cartId);
     const newInv = { ...inv };
     const newOps = {};
     next.forEach(st => { if (!newInv[st.key]) { newInv[st.key] = { freezer: 0, cart: 0 }; newOps[st.key] = { df: 0, dc: 0 }; } });
     const newMenus = { ...state.menus, [cartId]: { ...menu, stockTypes: next } };
-    return updateState({
+    return (await updateState({
       menus: newMenus,
       inventory: { ...state.inventory, [cartId]: newInv },
-    }, Object.keys(newOps).length ? [{ kind: 'inventory', payload: { cartId, ops: newOps, expected: inv } }] : []);
+    }, Object.keys(newOps).length ? [{ kind: 'inventory', payload: { cartId, ops: newOps, expected: inv } }] : []));
   };
 
   // Accepts a batch: [{ type, qty }] so a delivery of all momo types is recorded
   // in one go. Each type adds to its freezer, logs a STOCK_IN row, and sends one
   // atomic freezer delta.
-  const addStock = (entries) => {
+  const addStock = async (entries) => {
     const newInv = { ...inv };
     const logs = [];
     const deltas = {};
@@ -52,7 +52,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       deltas[type] = { df: qty };
     });
     if (!Object.keys(deltas).length) { setShowAddStock(false); return; }
-    if (!setCartInv(newInv, { stockLogs: [...state.stockLogs, ...logs] }, deltas)) return;
+    if (!(await setCartInv(newInv, { stockLogs: [...state.stockLogs, ...logs] }, deltas))) return;
     setShowAddStock(false);
   };
 
@@ -60,7 +60,7 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   // PLATE_SUPPLY stock logs (synced, append-only) — one row per ware type
   // handed over (small plates / large plates / glasses); saves changed packet
   // sizes to the cart's menu config.
-  const supplyWare = (entries, packSizes) => {
+  const supplyWare = async (entries, packSizes) => {
     const logs = entries
       .filter(e => e.packets > 0 && e.perPacket > 0)
       .map((e, i) => ({ id: Date.now() + i, cartId, date: TODAY, time: istTime(), type: 'PLATE_SUPPLY', item: e.key, qty: e.packets * e.perPacket, note: `${e.packets} packet${e.packets > 1 ? 's' : ''} × ${e.perPacket}` }));
@@ -69,10 +69,10 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     const savedPacks = warePacksFor(state, cartId);
     const packsChanged = WARE_TYPES.some(w => packSizes[w.key] !== savedPacks[w.key]);
     const newMenus = packsChanged ? { ...state.menus, [cartId]: { ...menu, warePacks: packSizes } } : null;
-    if (!updateState({
+    if (!(await updateState({
       stockLogs: [...state.stockLogs, ...logs],
       ...(newMenus ? { menus: newMenus } : {}),
-    })) return;
+    }))) return;
     if (newMenus) pushMenus(newMenus, cartId);
     setShowPlates(false);
   };
@@ -82,15 +82,15 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
   // device that still has the row cached. A reversal is itself append-only, so
   // the +qty and −qty always sum to zero on every device — permanent. The
   // reversed original's id is stored in the note (↩#<id>) so the list hides it.
-  const undoSupply = (log) => {
+  const undoSupply = async (log) => {
     const w = WARE_TYPES.find(t => t.key === log.item);
     if (!confirm(`Undo this handover — ${log.qty} × ${w?.label || log.item}? This posts a reversing entry; re-enter the correct numbers after.`)) return;
     const reversal = { id: Date.now(), cartId, date: log.date, time: istTime(), type: 'PLATE_SUPPLY', item: log.item, qty: -(log.qty || 0), note: `↩#${log.id} reversed (${log.note || ''})` };
-    updateState({ stockLogs: [...state.stockLogs, reversal] });
+    (await updateState({ stockLogs: [...state.stockLogs, reversal] }));
   };
 
   // Adjust freezer up or down (wastage, spoilage, recount correction).
-  const adjustStock = (type, delta, reason) => {
+  const adjustStock = async (type, delta, reason) => {
     const newInv = { ...inv };
     const cur = newInv[type]?.freezer ?? 0;
     const next = Math.max(0, cur + delta);
@@ -103,11 +103,11 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       type: 'STOCK_ADJUST', item: type, qty: applied,
       note: `${verb} ${Math.abs(applied)} ${labelFor(type)} in freezer — ${reason}`
     };
-    if (!setCartInv(newInv, { stockLogs: [...state.stockLogs, log] }, { [type]: { df: applied } })) return;
+    if (!(await setCartInv(newInv, { stockLogs: [...state.stockLogs, log] }, { [type]: { df: applied } }))) return;
     setAdjusting(null);
   };
 
-  const loadToCart = (type, qty) => {
+  const loadToCart = async (type, qty) => {
     if (!openingReady) { alert('Use Load opening stock above to save all opening quantities together.'); return; }
     const newInv = { ...inv };
     if (newInv[type].freezer < qty) { alert('Not enough stock in freezer!'); return; }
@@ -117,11 +117,11 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       time: istTime(),
       type: 'CART_LOAD', item: type, qty, note: `Moved ${qty} ${labelFor(type)} pieces to cart`
     };
-    return setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { df: -qty, dc: qty } });
+    return (await setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { df: -qty, dc: qty } }));
   };
 
   // Move pieces back from the cart into the freezer (e.g. loaded too many).
-  const returnToFreezer = (type, qty) => {
+  const returnToFreezer = async (type, qty) => {
     const newInv = { ...inv };
     if ((newInv[type]?.cart ?? 0) < qty) { alert('Not that many pieces on the cart.'); return; }
     newInv[type] = { freezer: newInv[type].freezer + qty, cart: newInv[type].cart - qty };
@@ -130,14 +130,14 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
       time: istTime(),
       type: 'CART_UNLOAD', item: type, qty, note: `Returned ${qty} ${labelFor(type)} pieces to freezer`
     };
-    return setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { df: qty, dc: -qty } });
+    return (await setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { df: qty, dc: -qty } }));
   };
 
   // Correct / hard-reset a stock type's CART count after a miscount or mishap.
   // Sets the cart piece count to the true number via an ATOMIC absolute set
   // (cset), and logs a CART_ADJUST entry for the audit trail. This is the momo
   // equivalent of the plate/glass reset on Home.
-  const correctCart = (type) => {
+  const correctCart = async (type) => {
     const cur = inv[type]?.cart ?? 0;
     const raw = window.prompt(`Recount "${labelFor(type)}" on the cart.\nSystem shows ${cur} pcs. Enter the TRUE count now (0 to reset):`, '0');
     if (raw === null) return;
@@ -147,31 +147,31 @@ function InventoryView({ state, updateState, cartId, inv, stockTypes = [] }) {
     if (delta === 0) return;
     const newInv = { ...inv, [type]: { ...(inv[type] || { freezer: 0, cart: 0 }), cart: target } };
     const log = { id: Date.now(), cartId, date: TODAY, time: istTime(), type: 'CART_ADJUST', item: type, qty: delta, note: `Cart recount → set to ${target} (${delta > 0 ? '+' : ''}${delta})` };
-    if (!setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { cset: target } })) return;
+    if (!(await setCartInv(newInv, { cartLoadings: [...state.cartLoadings, log] }, { [type]: { cset: target } }))) return;
   };
 
   // Confirmed from the move modal (load to cart / return to freezer).
-  const confirmMove = () => {
+  const confirmMove = async () => {
     if (!moving || moving.qty <= 0) { setMoving(null); return; }
-    const saved = moving.dir === 'load' ? loadToCart(moving.type, moving.qty) : returnToFreezer(moving.type, moving.qty);
+    const saved = moving.dir === 'load' ? (await loadToCart(moving.type, moving.qty)) : (await returnToFreezer(moving.type, moving.qty));
     if (saved === false) return;
     setMoving(null);
   };
 
   // Owner-managed consumables / supplies (oil, cream, French fries packets, …).
-  const saveConsumable = ({ key, name, unit, stock }) => {
+  const saveConsumable = async ({ key, name, unit, stock }) => {
     const cons = { ...(inv.consumables || {}) };
     const k = key || slugify(name) || ('c' + Date.now());
     const prev = cons[k] || { perOrder: 0 };
     cons[k] = { ...prev, name: name.trim(), unit: (unit || '').trim() || 'pcs', stock: parseFloat(stock) || 0 };
-    if (!updateState({ inventory: { ...state.inventory, [cartId]: { ...inv, consumables: cons } } }, [{ kind: 'consumables', payload: { cartId, value: cons } }])) return;
+    if (!(await updateState({ inventory: { ...state.inventory, [cartId]: { ...inv, consumables: cons } } }, [{ kind: 'consumables', payload: { cartId, value: cons } }]))) return;
     setEditCons(null);
   };
-  const removeConsumable = (key) => {
+  const removeConsumable = async (key) => {
     if (!confirm('Remove this consumable/supply item?')) return;
     const cons = { ...(inv.consumables || {}) };
     delete cons[key];
-    if (!updateState({ inventory: { ...state.inventory, [cartId]: { ...inv, consumables: cons } } }, [{ kind: 'consumables', payload: { cartId, value: cons } }])) return;
+    if (!(await updateState({ inventory: { ...state.inventory, [cartId]: { ...inv, consumables: cons } } }, [{ kind: 'consumables', payload: { cartId, value: cons } }]))) return;
   };
 
   return (
@@ -371,9 +371,9 @@ function ConsumableModal({ initial, onSave, onClose }) {
   const [unit, setUnit] = useState(initial.unit || '');
   const [stock, setStock] = useState(initial.stock === '' || initial.stock == null ? '' : String(initial.stock));
   const [error, setError] = useState('');
-  const submit = () => {
+  const submit = async () => {
     if (!name.trim()) { setError('Enter a name.'); return; }
-    onSave({ key: initial.key, name, unit, stock });
+    (await onSave({ key: initial.key, name, unit, stock }));
   };
   return (
     <EditModalShell title={initial.key ? `Edit ${initial.name}` : 'Add consumable / supply'} onClose={onClose} onSave={submit} error={error}>
@@ -469,7 +469,7 @@ function StockTypesModal({ stockTypes, onSave, onClose }) {
         </div>
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={onClose} style={{ flex: 1, padding: 14, background: '#fff', border: `1px solid ${brand.border}`, borderRadius: 10, fontWeight: 600, cursor: 'pointer', color: brand.text }}>Cancel</button>
-          <button onClick={() => { if (onSave(rows.filter(r => r.label.trim()).map(r => ({ key: r.key, label: r.label.trim() }))) !== false) onClose(); }} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save</button>
+          <button onClick={async () => { if ((await onSave(rows.filter(r => r.label.trim()).map(r => ({ key: r.key, label: r.label.trim() })))) !== false) onClose(); }} style={{ flex: 2, padding: 14, background: brand.navy, color: '#fff', border: 'none', borderRadius: 10, fontWeight: 700, cursor: 'pointer' }}>Save</button>
         </div>
       </div>
     </div>

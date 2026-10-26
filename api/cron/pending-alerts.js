@@ -1,3 +1,4 @@
+import { deliverPartnerNotifications } from '../../server/partnerNotifications.js';
 import { deliverClosingAlerts } from './closing-alerts.js';
 import { deliverOpeningAlerts } from './opening-alerts.js';
 import { backendHeaders, cronAuthorized } from '../../server/auth.js';
@@ -30,7 +31,7 @@ export default async function handler(req, res) {
   if (!cronAuthorized(req)) return res.status(401).json({ error: 'unauthorized' });
   if (!SB_URL || !SB_KEY) return res.status(500).json({ error: 'missing Supabase env' });
   // Existing minute scheduler also drives durable opening events, even with no pending orders.
-  const [opening,closing] = await Promise.all([deliverOpeningAlerts(),deliverClosingAlerts()]);
+  const [opening,closing,inbox] = await Promise.all([deliverOpeningAlerts(),deliverClosingAlerts(),deliverPartnerNotifications()]);
   if ((!process.env.VAPID_PRIVATE_KEY || !process.env.VAPID_PUBLIC_KEY) && !process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     return res.status(500).json({ error: 'missing VAPID env' });
   }
@@ -66,5 +67,5 @@ export default async function handler(req, res) {
     results.push({ orderId: o.id, cartId: o.cart_id, ...r });
   }
 
-  return res.status(Math.max(opening.status,closing.status)).json({ opening, closing, date: istDate, unacknowledged: orders.length, rung: due.length, results });
+  return res.status(Math.max(opening.status,closing.status,inbox.status)).json({ opening, closing, inbox, date: istDate, unacknowledged: orders.length, rung: due.length, results });
 }

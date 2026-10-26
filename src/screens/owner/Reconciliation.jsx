@@ -93,11 +93,11 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
   const msLeft = deadline ? deadline - Date.now() : null;
   const countdown = msLeft != null && msLeft > 0 ? `${Math.floor(msLeft / 3600000)}h ${Math.floor((msLeft % 3600000) / 60000)}m left` : null;
 
-  const markHoliday = () => {
-    updateState({ dayCloseLogs: [...state.dayCloseLogs, { id: Date.now(), cartId, date, holiday: true, revenue: 0, closedAt: new Date().toISOString() }] });
+  const markHoliday = async () => {
+    (await updateState({ dayCloseLogs: [...state.dayCloseLogs, { id: Date.now(), cartId, date, holiday: true, revenue: 0, closedAt: new Date().toISOString() }] }));
   };
 
-  const closeDay = () => {
+  const closeDay = async () => {
     if (thisClose || !canClose) return;
     const dayClose = {
       id: Date.now(), cartId, date,
@@ -117,9 +117,9 @@ function Reconciliation({ state, updateState, cartId, inv, stockTypes = [], init
       // Return counted leftover momos to the freezer and empty the cart.
       const newInv = { ...inv }; const ops = {};
       stockRows.forEach(r => { const actual = parseInt(r.val) || 0; if (newInv[r.key]) { newInv[r.key] = { freezer: (newInv[r.key].freezer || 0) + actual, cart: 0 }; ops[r.key] = { df: actual, cset: 0 }; } });
-      updateState({ inventory: { ...state.inventory, [cartId]: newInv }, dayCloseLogs: [...state.dayCloseLogs, dayClose] }, Object.keys(ops).length ? [{ kind: 'inventory', payload: { cartId, ops, expected: inv } }] : []);
+      (await updateState({ inventory: { ...state.inventory, [cartId]: newInv }, dayCloseLogs: [...state.dayCloseLogs, dayClose] }, Object.keys(ops).length ? [{ kind: 'inventory', payload: { cartId, ops, expected: inv } }] : []));
     } else {
-      updateState({ dayCloseLogs: [...state.dayCloseLogs, dayClose] });
+      (await updateState({ dayCloseLogs: [...state.dayCloseLogs, dayClose] }));
     }
   };
   const validCount = value => value !== '' && Number.isSafeInteger(Number(value)) && Number(value) >= 0;
