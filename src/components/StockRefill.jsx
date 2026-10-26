@@ -30,7 +30,7 @@ export function StockRefill({cartId,date,stockTypes,inventory}) {
   {message&&<p role="status" style={{fontSize:13,margin:'12px 0'}}>{message}</p>}
   {!open?<button style={button} onClick={()=>{setOpen(true);setMessage('');}}>Add refill</button>:<form onSubmit={submit}>
    <label>Category<select aria-label="Refill category" style={field} required disabled={busy||!!pending} value={category} onChange={e=>setCategory(e.target.value)}><option value="">Choose category</option>{stockTypes.map(s=><option key={s.key} value={s.key}>{s.label}</option>)}</select></label>
-   {category&&<p style={{fontSize:13}}>In cart: {inventory[category]?.cart||0} · Freezer: {inventory[category]?.freezer||0}</p>}
+   {category&&<p style={{fontSize:13}}>Freezer: {inventory[category]?.freezer||0}</p>}
    <label>Quantity to add<input aria-label="Refill quantity" style={field} type="number" inputMode="numeric" min="1" max="100000" step="1" required disabled={busy||!!pending} value={quantity} onChange={e=>setQuantity(e.target.value)}/></label>
    <button style={button} disabled={busy}>{busy?'Saving…':pending?'Retry refill':'Confirm refill'}</button>
    {!pending&&<button type="button" style={{...button,background:'#fff',color:'#0A2F5C',marginLeft:8}} disabled={busy} onClick={()=>setOpen(false)}>Cancel</button>}

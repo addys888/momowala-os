@@ -1,3 +1,4 @@
+import { StaffStockStatus } from '../components/StaffStockStatus';
 import { useNotificationNavigation } from '../lib/useNotificationNavigation';
 import { PrepChecklist } from '../components/PrepChecklist';
 import { ClosingWorkflow } from '../components/ClosingWorkflow';
@@ -7,7 +8,7 @@ import { OpeningInventory } from '../components/OpeningInventory';
 import React, { useState, useEffect } from 'react';
 import { Plus, Minus, X, Clock, Boxes, User, IndianRupee, Trash2, FileText, Award, CheckCircle2, Smartphone, Volume2, VolumeX } from 'lucide-react';
 import { storage, committedOrder } from '../lib/store';
-import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, partnerColors as colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, orderStockDeltas, printerCfgFor, vendorEnabledFor, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
+import { CANCEL_REASONS, CategoryBand, PAY_BADGE, TODAY, WARE_TYPES, brand, partnerColors as colors, deductInventory, editInput, editLabel, groupByCat, isPaid, istTime, menuFor, menuLabelFor, onlineVendorsFor, printerCfgFor, vendorEnabledFor, playOrderAlert, startOrderAlarm, stopOrderAlarm, restoreInventory, staffCancellable, unlockAudio, wareForOrder, wareLedger } from '../core';
 import { Alert, BottomNav, EditModalShell, MenuItemRow, MetricCard, OrderItemLines, SectionHeader, SimpleItemRow, StockRow, TopBar } from '../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../components/RemindersButton';
 import { printReceipt, printKitchenTicket } from '../lib/escpos';
@@ -265,7 +266,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} foodLabel={menuLabelFor(state, cartId)} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} vendors={{ zomato: vendorEnabledFor(state, cartId, 'zomato'), swiggy: vendorEnabledFor(state, cartId, 'swiggy') }} addTarget={addTarget} onAddToOrder={(items) => addToOrder(addTarget, items)} onCancelAdd={() => { setAddTarget(null); setCart([]); }} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} onAddItems={(o) => { setCart([]); setAddTarget(o); setTab('order'); }} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} settling={settling} onlineVendors={onlineVendorsFor(state, cartId)} printer={printerCfgFor(state, cartId)} cart={cartInfo} />}
-        {tab === 'stock' && <section aria-label="Cart stock"><SectionHeader title="Stock in cart" subtitle="Fresh stock for today · remaining pieces" />{(menu.stockTypes || []).map(s=><StockRow key={s.key} label={s.label} value={inv?.[s.key]?.cart || 0} unit="pieces" />)}</section>}
+        {tab === 'stock' && <section aria-label="Cart stock"><SectionHeader title="Stock availability" subtitle="Refill alerts · count stock physically at closing" /><StaffStockStatus stockTypes={menu.stockTypes} inventory={inv} showHealthy /></section>}
         {tab === 'stock' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} ware={wareLedger(state, cartId, TODAY)} myOrders={myOrders} staffName={staffName} />}
       </div>
@@ -492,16 +493,6 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, foodLabel 
   const [category, setCategory] = useState('momos');
   const items = menu?.items || [], lassi = menu?.lassi || [], addons = menu?.addons || [];
 
-  // Live "momos left on cart" per stock category — owner loads these from the
-  // freezer at open; each placed order deducts. We also subtract the pieces in
-  // the order being punched right now, so staff see what will remain AFTER it.
-  // Sorted by remaining count, highest first.
-  const stockTypes = menu?.stockTypes || [];
-  const pending = orderStockDeltas(cart, items);
-  const stockLeft = stockTypes
-    .map(st => ({ key: st.key, label: st.label, left: (inv?.[st.key]?.cart ?? 0) - (pending[st.key] || 0) }))
-    .sort((a, b) => b.left - a.left);
-
   // Live "plates / glasses left" — same accountability the owner sees. Half →
   // 6" plate, full → 7" plate, mocktail → glass. Subtracts the ware the current
   // order would use ("after this order"). Only shown for ware the owner has
@@ -546,27 +537,7 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, foodLabel 
           </div>
         : <SectionHeader title="New Order" subtitle="Tap items to add" />}
 
-      {/* Live momos left on cart — updates as items are added and after each order */}
-      {stockLeft.length > 0 && (
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 10, color: colors.muted, fontWeight: 700, letterSpacing: 0.5, marginBottom: 6 }}>{foodLabel.emoji} {foodLabel.label.toUpperCase()} LEFT ON CART {cart.length > 0 && <span style={{ color: colors.accent }}>· after this order</span>}</div>
-          <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
-            {stockLeft.map(s => {
-              const state = s.left <= 0 ? 'out' : s.left <= 10 ? 'low' : 'ok';
-              const bg = state === 'out' ? '#FFE7E7' : state === 'low' ? '#FFF1E7' : colors.ink;
-              const fg = state === 'out' ? colors.red : state === 'low' ? colors.accent : colors.primary;
-              return (
-                <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 8, background: bg, color: fg, borderRadius: 12, padding: '8px 14px', whiteSpace: 'nowrap', flexShrink: 0 }}>
-                  <span style={{ fontSize: 12, fontWeight: 600 }}>{s.label}</span>
-                  <span style={{ fontSize: 18, fontWeight: 900 }}>{s.left}</span>
-                  {state === 'out' && <span style={{ fontSize: 10, fontWeight: 800 }}>OUT</span>}
-                  {state === 'low' && <span style={{ fontSize: 10, fontWeight: 800 }}>LOW</span>}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <StaffStockStatus stockTypes={menu?.stockTypes} inventory={inv} />
 
       {/* Live plates / glasses left — staff accountability, mirrors the owner's
           ware audit so nothing goes missing without being noticed. */}
@@ -786,9 +757,7 @@ function ShiftStatus({ inv, stockTypes = [], ware = {}, myOrders, staffName }) {
 
       <div style={{ background: '#fff', padding: 16, borderRadius: 12, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
         <div style={{ fontSize: 11, color: colors.muted, letterSpacing: 1, fontWeight: 700, marginBottom: 12 }}>STOCK ON CART</div>
-        {stockTypes.map(st => (
-          <StockRow key={st.key} label={`${st.label} (pcs)`} value={inv[st.key]?.cart ?? 0} unit="pcs"/>
-        ))}
+        <StaffStockStatus stockTypes={stockTypes} inventory={inv} showHealthy />
         {stockTypes.length === 0 && <div style={{ fontSize: 13, color: colors.muted, textAlign: 'center', padding: 8 }}>No stock tracked</div>}
       </div>
 
@@ -827,7 +796,7 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
     setErr('');
     if (!stockKey || !Number.isSafeInteger(n) || n <= 0) { setErr('Enter a positive whole number of pieces.'); return; }
     // Can't waste more than is physically on the cart.
-    if (n > onCart) { setErr(`Only ${onCart} ${stockTypes.find(s => s.key === stockKey)?.label || ''} pcs on the cart — can't log ${n}.`); return; }
+    if (n > onCart) { setErr('This quantity exceeds recorded stock. Recount the wastage and ask your owner to review any missing entries.'); return; }
     if ((await onLog(stockKey, n, reason)) === false) return;
     setDone(`Logged ${n} ${stockTypes.find(s => s.key === stockKey)?.label || ''} as wastage.`);
     setQty(''); setTimeout(() => setDone(''), 2500);
@@ -844,7 +813,7 @@ function WastageScreen({ stockTypes, inv, logs, onLog }) {
           <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: `1px solid ${colors.border}`, marginBottom: 16 }}>
             <div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>ITEM</div>
             <select value={stockKey} onChange={e => setStockKey(e.target.value)} style={{ ...editInput, marginBottom: 12 }}>
-              {stockTypes.map(st => <option key={st.key} value={st.key}>{st.label} (cart: {inv[st.key]?.cart ?? 0})</option>)}
+              {stockTypes.map(st => <option key={st.key} value={st.key}>{st.label}</option>)}
             </select>
             <div style={{ display: 'flex', gap: 10 }}>
               <div style={{ flex: 1 }}><div style={{ fontSize: 12, color: colors.muted, marginBottom: 6, fontWeight: 600 }}>PIECES</div>
