@@ -197,6 +197,15 @@ public class PrintRoutingTest extends Instrumentation {
         check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Cross-phone submission did not stop closing");
         payload.put("mode","closing_due");PartnerMessagingService.handle(c,payload);
         check(!AlertPlaybackService.pending(c).contains("partner:"+key),"Late reminder re-rang a completed closing");
+        // Completing opening stock must not suppress an owner announcement in the bell inbox.
+        java.util.Map<String,String> inboxPayload=new java.util.HashMap<>(payload);
+        inboxPayload.put("tag","inbox-98765");inboxPayload.put("mode","info");
+        PartnerMessagingService.handle(c,inboxPayload);
+        boolean inboxVisible=false;
+        for(android.service.notification.StatusBarNotification posted:PartnerAlerts.manager(c).getActiveNotifications())
+            if("partner:inbox-98765".equals(posted.getTag()))inboxVisible=true;
+        check(inboxVisible,"Opening completion suppressed an unrelated inbox update");
+        PartnerAlerts.acknowledge(c,"inbox-98765");
         String silenceKey="closing-manager-124-1";
         PartnerAlerts.show(c,binding,silenceKey,"Closing due","Submit counts");
         android.app.Notification visible=null;

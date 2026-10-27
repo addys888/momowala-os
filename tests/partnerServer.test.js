@@ -64,3 +64,18 @@ test('recovered prior-day sale retains its date without deducting current-day st
  const claim=sql("select pg_get_functiondef('app_claim_partner_notifications()'::regprocedure)");
  assert.match(claim,/n.kind not in \('order','cancel','payment'\) and d.sent_at is null/);
  });
+
+test('opening and submitted closing persist owner bell events independently of push',()=>{
+ const result=sql(`begin;
+ insert into opening_loads(cart_id,business_date,operation_id,quantities,actor_role,actor_name) values('inbox-test-a','2098-01-01','bbbbbbbb-1111-4111-8111-111111111111','{"veg":500}','staff','Inbox Staff');
+ insert into closing_reports(id,cart_id,business_date,due_at,stock_types) overriding system value values(8999999,'inbox-test-a','2098-01-01',now(),'[]');
+ select count(*) from partner_notifications where event_key='closing:8999999';
+ update closing_reports set submitted_at=now(),submitted_name='Inbox Staff',cash_count=100,quantities='{}' where id=8999999;
+ update closing_reports set notes='Reviewed' where id=8999999;
+ set local role anon;set local request.headers='{"x-app-session":"${owner}"}';select app_partner_inbox('inbox-test-a');rollback;`).split('\n');
+ assert.ok(result.includes('0'),'An unsubmitted closing must not notify owner');
+ const inbox=JSON.parse(result.find(l=>l.startsWith('{')));
+ assert.equal(inbox.items.filter(n=>n.kind==='opening'&&n.business_date==='2098-01-01').length,1);
+ assert.equal(inbox.items.filter(n=>n.kind==='closing'&&n.business_date==='2098-01-01').length,1);
+ assert.ok(inbox.items.filter(n=>['opening','closing'].includes(n.kind)).every(n=>!n.is_read));
+});

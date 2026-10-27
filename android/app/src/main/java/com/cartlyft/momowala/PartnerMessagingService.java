@@ -35,7 +35,8 @@ public final class PartnerMessagingService extends FirebaseMessagingService {
         }
         String key=d.getOrDefault("tag","");
         if(!cart.isEmpty() && !date.isEmpty())PartnerAlerts.prefs(c).edit().putString("event:"+key,cart+":"+date).apply();
-        if(!cart.isEmpty() && cart.equals(InventoryReminders.prefs(c).getString("cartId","")) && !date.isEmpty() && date.compareTo(InventoryReminders.prefs(c).getString("completedDate",""))<=0)return;
+        // Opening completion only suppresses obsolete opening reminders, never inbox updates.
+        if("staff".equals(PartnerAlerts.prefs(c).getString("role","")) && key.startsWith("opening-") && !cart.isEmpty() && cart.equals(InventoryReminders.prefs(c).getString("cartId","")) && !date.isEmpty() && date.compareTo(InventoryReminders.prefs(c).getString("completedDate",""))<=0)return;
         PartnerAlerts.show(c,d.getOrDefault("binding",""),d.getOrDefault("tag",""),d.getOrDefault("title","Cartlyft"),d.getOrDefault("body","Open Cartlyft to review."));
     }
     static org.json.JSONObject status(android.content.Context c) throws Exception {
@@ -43,7 +44,11 @@ public final class PartnerMessagingService extends FirebaseMessagingService {
         if(configured)com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token->c.getSharedPreferences("fcm",MODE_PRIVATE).edit().putString("token",token).apply());
         PartnerAlerts.channel(c);
         boolean notifications=PartnerAlerts.manager(c).areNotificationsEnabled();
-        if(android.os.Build.VERSION.SDK_INT>=26) notifications &= PartnerAlerts.manager(c).getNotificationChannel(PartnerAlerts.CHANNEL).getImportance()!=android.app.NotificationManager.IMPORTANCE_NONE;
+        if(android.os.Build.VERSION.SDK_INT>=26) {
+            notifications &= PartnerAlerts.manager(c).getNotificationChannel(PartnerAlerts.INFO_CHANNEL).getImportance()!=android.app.NotificationManager.IMPORTANCE_NONE;
+            if("staff".equals(PartnerAlerts.prefs(c).getString("role","")))
+                notifications &= PartnerAlerts.manager(c).getNotificationChannel(PartnerAlerts.CHANNEL).getImportance()!=android.app.NotificationManager.IMPORTANCE_NONE;
+        }
         return new org.json.JSONObject().put("notifications",notifications).put("configured",configured).put("token",c.getSharedPreferences("fcm",MODE_PRIVATE).getString("token",""));
     }
 }

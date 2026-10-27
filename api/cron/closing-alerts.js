@@ -4,7 +4,7 @@ import { backendHeaders, cronAuthorized, SB_URL } from '../../server/auth.js';
 export async function deliverClosingAlerts() {
  const rpc=async(name,body={})=>{
   const r=await fetch(`${SB_URL}/rest/v1/rpc/${name}`,{method:'POST',headers:backendHeaders(),body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
-  if(!r.ok)throw Error('Closing delivery unavailable');return r.json();
+  if(!r.ok){const e=new Error('Closing delivery unavailable');e.code=`${name}:${r.status}`;throw e;}return r.status===204?null:r.json();
  };
  try {
   const deliveries=await rpc('app_claim_closing_notifications');
@@ -16,6 +16,6 @@ export async function deliverClosingAlerts() {
    await rpc('app_finish_closing_notification',{p_id:d.id,p_endpoint:d.endpoint,p_tag:d.tag,p_lease:d.lease,p_sent:ok,p_dead:dead});
   }));
   return {status:failed?503:200,sent,failed};
- }catch{return {status:503,error:'Closing notification delivery will retry on the next scheduled run'};}
+ }catch(e){console.warn('Closing delivery failed',e.code||e.name);return {status:503,error:'Closing notification delivery will retry on the next scheduled run'};}
 }
 export default async function handler(req,res){if(!cronAuthorized(req))return res.status(401).json({error:'unauthorized'});const r=await deliverClosingAlerts();return res.status(r.status).json(r);}

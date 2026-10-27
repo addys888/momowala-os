@@ -4,7 +4,7 @@ import {backendHeaders,SB_URL} from './auth.js';
 export async function deliverPartnerNotifications(){
  const rpc=async(name,body={})=>{
   const r=await fetch(`${SB_URL}/rest/v1/rpc/${name}`,{method:'POST',headers:backendHeaders(),body:JSON.stringify(body),signal:AbortSignal.timeout(15000)});
-  if(!r.ok)throw Error('Notification delivery unavailable');return r.json();
+  if(!r.ok)throw Error('Notification delivery unavailable');return r.status===204?null:r.json();
  };
  try{
   if(process.env.VAPID_PUBLIC_KEY&&process.env.VAPID_PRIVATE_KEY)webpush.setVapidDetails(process.env.VAPID_SUBJECT||'mailto:reminders@momowala.co.in',process.env.VAPID_PUBLIC_KEY,process.env.VAPID_PRIVATE_KEY);

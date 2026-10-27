@@ -26,8 +26,8 @@ export function NotificationInbox() {
  useEffect(()=>{
   setItems([]);setUnread(0);setOpen(false);
   void read();const refresh=()=>{if(!document.hidden)void read();};const timer=setInterval(refresh,30000);
-  const show=()=>{setOpen(true);void read();};window.addEventListener('focus',refresh);window.addEventListener('mw:open-inbox',show);
-  return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('mw:open-inbox',show);};
+  const show=()=>{setOpen(true);void read();};window.addEventListener('focus',refresh);window.addEventListener('online',refresh);document.addEventListener('visibilitychange',refresh);window.addEventListener('mw:open-inbox',show);
+  return()=>{clearInterval(timer);window.removeEventListener('focus',refresh);window.removeEventListener('online',refresh);document.removeEventListener('visibilitychange',refresh);window.removeEventListener('mw:open-inbox',show);};
  },[read]);
  if(!cartId)return null;
  const select=async item=>{

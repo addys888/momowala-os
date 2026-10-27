@@ -8,7 +8,7 @@ export async function deliverOpeningAlerts() {
       method: 'POST', headers: backendHeaders(), body: JSON.stringify(body), signal: AbortSignal.timeout(15000),
     });
     if (!response.ok) throw new Error(`Opening notification database request failed (${response.status})`);
-    return response.json();
+    return response.status===204?null:response.json();
   };
   try {
     // Always collect durable owner alerts, including when push isn't configured.
