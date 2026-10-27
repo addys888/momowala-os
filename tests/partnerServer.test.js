@@ -45,6 +45,7 @@ test('recovered prior-day sale retains its date without deducting current-day st
  const id=8999991,op='a5555555-5555-4555-8555-555555555555';
  const payload=JSON.stringify({before:null,after:{id,cart_id:'test-a',date:'2026-10-10',time:'20:30',token:'Waiting to sync',items:[{id:'veg',name:'Veg Full',type:'full',price:70,qty:1}],total:70,payment:'cash',source:'staff-entry',staff:'Test Staff'}});
  const result=sql(`begin;
+ update app_sessions set expires_at=now()+interval '1 day' where token='22222222-2222-4222-8222-222222222222';
  update menus set data=jsonb_set(data,'{test-a}', '{"items":[{"id":"veg","name":"Veg","half":35,"full":70,"pcsHalf":5,"pcsFull":10,"stockKey":"veg"}],"lassi":[],"addons":[]}');
  update inventory set data=jsonb_set(data,'{test-a}', '{"veg":{"freezer":100,"cart":100}}');
  insert into app_private.inventory_days values('test-a',app_private.stock_business_date('test-a')) on conflict(cart_id) do update set business_date=excluded.business_date;

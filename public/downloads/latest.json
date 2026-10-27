@@ -1,8 +1,8 @@
 {
-  "versionCode": 23,
-  "versionName": "1.8.0",
-  "path": "/downloads/cartlyft-1.8.0.apk",
-  "bytes": 4156811,
-  "sha256": "18d1e4b504f676a926915685d5638e703f208b74be45c77c529417100d5e71ca",
-  "notes": "Server-confirmed orders, safer recovery of unsent orders, faster account loading, and a notification inbox with owner announcements."
+  "versionCode": 24,
+  "versionName": "1.8.1",
+  "path": "/downloads/cartlyft-1.8.1.apk",
+  "bytes": 4157415,
+  "sha256": "66aedecbe060bfdf975c123357bb6e7d535527f9292c947334293bee143eba0e",
+  "notes": "Staff stock privacy with low-stock refill warnings, physical closing counts, operational notifications and more reliable owner alerts."
 }
