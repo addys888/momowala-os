@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { nativeCommand } from '../lib/nativeApp';
 
 const updates = [
+ {code:25,items:['Compact manager closing: submit physical counts without stock-difference warnings or mandatory notes. Owners see the comparison.','Managers can log staff meals of 1–10 pieces, with stock deductions and owner report totals.','Mark all bell notifications as read. Closing reminders repeat every 10 minutes until submitted, except on recorded leave or off days.']},
  {code:24,items:['Staff stock balances are hidden. Category warnings flag low stock and urgent refills.','Closing asks for a physical count without revealing the expected balance. Owners retain the full comparison.','The notification bell focuses on opening stock, refills, closing reports and announcements. Notification delivery and refresh are more reliable.']},
  {code:23,items:['Orders and other changes are confirmed by the server before they appear as saved.','Faster account loading and safer recovery of unsent orders, without duplicating stock deductions.','New notification bell for cart activity and owner announcements to staff.']},
  {code:22,items:['Opening stock now shows the submission date, time and permanent reference number.','Owners can browse weekly opening history and daily opening/refill quantities in Stock.','Opening stock requires an explicit quantity for each category, with clearer validation and save confirmation.']},

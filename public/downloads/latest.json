@@ -1,8 +1,8 @@
 {
-  "versionCode": 24,
-  "versionName": "1.8.1",
-  "path": "/downloads/cartlyft-1.8.1.apk",
-  "bytes": 4157415,
-  "sha256": "66aedecbe060bfdf975c123357bb6e7d535527f9292c947334293bee143eba0e",
-  "notes": "Staff stock privacy with low-stock refill warnings, physical closing counts, operational notifications and more reliable owner alerts."
+  "versionCode": 25,
+  "versionName": "1.8.2",
+  "path": "/downloads/cartlyft-1.8.2.apk",
+  "bytes": 4160007,
+  "sha256": "adff5a556e4a5f0afaa1aebad18f903674bb15bc31f6bbd64a457e4a052bef32",
+  "notes": "Compact manager closing without discrepancy blockers, staff meals with stock/report totals, mark all notifications read, and ten-minute closing reminders with leave checks."
 }
