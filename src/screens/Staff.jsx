@@ -1,3 +1,4 @@
+import { StaffMeals } from '../components/StaffMeals';
 import { StaffStockStatus } from '../components/StaffStockStatus';
 import { useNotificationNavigation } from '../lib/useNotificationNavigation';
 import { PrepChecklist } from '../components/PrepChecklist';
@@ -267,6 +268,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} onAddItems={(o) => { setCart([]); setAddTarget(o); setTab('order'); }} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} settling={settling} onlineVendors={onlineVendorsFor(state, cartId)} printer={printerCfgFor(state, cartId)} cart={cartInfo} />}
         {tab === 'stock' && <section aria-label="Cart stock"><SectionHeader title="Stock availability" subtitle="Refill alerts · count stock physically at closing" /><StaffStockStatus stockTypes={menu.stockTypes} inventory={inv} showHealthy /></section>}
+        {tab === 'stock' && isManager && <StaffMeals cartId={cartId} date={openingBusinessDate(cartInfo?.openTime)} stockTypes={menu.stockTypes||[]} staff={state.staff} manager />}
         {tab === 'stock' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} ware={wareLedger(state, cartId, TODAY)} myOrders={myOrders} staffName={staffName} />}
       </div>

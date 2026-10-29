@@ -8,7 +8,7 @@ export function useNotificationNavigation(cartId,owner,setTab) {
    if(link.target==='inbox'){window.dispatchEvent(new Event('mw:open-inbox'));return;}
    const tab=link.target==='closing'?(owner?'reconcile':'order'):link.target==='orders'?(owner?'orders':'pending'):(owner?'inventory':'stock');
    setTab(tab);
-   if(link.target==='closing')setTimeout(()=>document.querySelector('[aria-label="Daily closing"]')?.scrollIntoView({block:'start'}),100);
+   if(link.target==='closing')setTimeout(()=>{window.dispatchEvent(new Event('mw:open-closing'));document.querySelector('[aria-label="Daily closing"]')?.scrollIntoView({block:'start'});},100);
   };
   const navigate=e=>{const link=e.detail;if(link.cartId!==cartId)return;setTab(link.target==='closing'?(owner?'reconcile':'order'):link.target==='orders'?(owner?'orders':'pending'):(owner?'inventory':'stock'));};
   window.addEventListener('mw:navigate-notification',navigate);

@@ -8,6 +8,7 @@ export function NotificationInbox() {
  const {session}=useStore()||{};
  const cartId=session?.cartId;
  const [open,setOpen]=useState(false),[items,setItems]=useState([]),[unread,setUnread]=useState(0),[more,setMore]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [showRead,setShowRead]=useState(false);
  const [title,setTitle]=useState(''),[body,setBody]=useState(''),[notice,setNotice]=useState('');
  const operation=useRef(null),loading=useRef(false),binding=useRef(session?.token);
  binding.current=session?.token;
@@ -37,6 +38,10 @@ export function NotificationInbox() {
   if(!item.is_read)setUnread(n=>Math.max(0,n-1));
   if(item.target!=='inbox'){setOpen(false);window.dispatchEvent(new CustomEvent('mw:navigate-notification',{detail:{cartId,target:item.target,date:item.business_date}}));}
  };
+ const markAll=async()=>{
+  if(busy||!items.length)return;setBusy(true);
+  try{const {error}=await supabase.rpc('app_read_all_partner_notifications',{p_cart_id:cartId,p_through:Math.max(...items.map(n=>n.id))});if(error)throw error;await read();}catch{setError('Could not mark notifications read. Please retry.');}finally{setBusy(false);}
+ };
  const publish=async()=>{
   if(busy)return;setBusy(true);setNotice('');
   if(!operation.current)operation.current={id:crypto.randomUUID(),title:title.trim(),body:body.trim()};
@@ -53,9 +58,10 @@ export function NotificationInbox() {
   {open&&<div role="dialog" aria-modal="true" aria-label="Notifications" style={{position:'fixed',inset:0,zIndex:200,background:'#f4f6f9',color:'#152d44',overflowY:'auto',padding:20}}>
    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}><h1 style={{fontSize:22}}>Notifications</h1><button aria-label="Close notifications" onClick={()=>setOpen(false)} style={{minWidth:44,minHeight:44}}><X/></button></div>
    {['owner','admin'].includes(session.role)&&<details className="partner-card"><summary>Publish announcement to staff</summary><label>Title<input value={title} maxLength={100} disabled={busy||!!operation.current} onChange={e=>setTitle(e.target.value)} style={{display:'block',width:'100%',minHeight:44}}/></label><label>Message<textarea value={body} maxLength={2000} disabled={busy||!!operation.current} onChange={e=>setBody(e.target.value)} style={{display:'block',width:'100%',minHeight:100}}/></label><button disabled={busy||!title.trim()||!body.trim()} onClick={publish} style={{minHeight:44}}>{busy?'Publishing…':'Publish to staff'}</button>{notice&&<p role="status">{notice}</p>}</details>}
+   <div style={{display:'flex',gap:12,marginBottom:12}}><button disabled={busy||!unread||!items.length} onClick={markAll}>Mark all as read</button><label><input type="checkbox" checked={showRead} onChange={e=>setShowRead(e.target.checked)}/> Show read</label></div>
    {error&&<p role="alert">{error} <button onClick={()=>read()}>Retry</button></p>}
-   {!items.length&&!error&&<p>No notifications yet.</p>}
-   {items.map(item=><button key={item.id} onClick={()=>select(item)} style={{display:'block',textAlign:'left',width:'100%',background:item.is_read?'#fff':'#e9f2fc',border:'1px solid #dce3ea',borderRadius:12,padding:16,marginBottom:10,color:'inherit'}}><strong>{item.title}</strong><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.body}</p><small>{localDate(new Date(item.created_at))} · {istTime(new Date(item.created_at))} IST{item.is_read?'':' · Unread'}</small></button>)}
+   {!items.some(n=>showRead||!n.is_read)&&!error&&<p>{showRead?'No notifications yet.':'All caught up. No unread notifications on this page.'}</p>}
+   {items.filter(n=>showRead||!n.is_read).map(item=><button key={item.id} onClick={()=>select(item)} style={{display:'block',textAlign:'left',width:'100%',background:item.is_read?'#fff':'#e9f2fc',border:'1px solid #dce3ea',borderRadius:12,padding:16,marginBottom:10,color:'inherit'}}><strong>{item.title}</strong><p style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{item.body}</p><small>{localDate(new Date(item.created_at))} · {istTime(new Date(item.created_at))} IST{item.is_read?'':' · Unread'}</small></button>)}
    {more&&<button onClick={()=>read(items.at(-1)?.id)} style={{minHeight:44}}>Load older notifications</button>}
   </div>}
  </>;
