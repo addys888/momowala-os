@@ -11,7 +11,7 @@ import { InventoryView } from './Inventory';
 import { Reconciliation } from './Reconciliation';
 import { Reports } from './Reports';
 import { StaffRegistry } from './StaffRegistry';
-import { BottomNav, MetricCard, OrderRow, TopBar } from '../../components/shared';
+import { BottomNav, MetricCard, OrderRow, OrderItemLines, TopBar } from '../../components/shared';
 import { RemindersButton, OrderAlertsPrompt } from '../../components/RemindersButton';
 import { PrepChecklist } from '../../components/PrepChecklist';
 import { useStore } from '../../store';
@@ -204,7 +204,6 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
         <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 12, overflow: 'hidden' }}>
           {sorted.map(o => {
             const badge = PAY_BADGE[o.payment] || { bg: '#F1EFE8', fg: colors.muted };
-            const itemsTxt = (o.items || []).map(i => `${i.qty}× ${i.name}`).join(', ');
             const cancelledRow = o.payment === 'cancelled';
             return (
               <div key={o.id} style={{ padding: '11px 14px', borderBottom: `1px solid ${colors.border}`, opacity: cancelledRow ? 0.55 : 1 }}>
@@ -215,7 +214,7 @@ function OrdersFeed({ state, cartId, onlineVendors = false, initialDate }) {
                     <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 10, background: badge.bg, color: badge.fg }}>{o.payment === 'pending' ? 'UNPAID' : o.payment === 'split' ? `SPLIT · 💵${o.split?.cash || 0}+📱${o.split?.upi || 0}` : o.payment.toUpperCase()}</span>
                   </div>
                 </div>
-                {itemsTxt && <div style={{ fontSize: 11.5, color: colors.muted, marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{itemsTxt}</div>}
+                <OrderItemLines items={o.items} collapsible />
               </div>
             );
           })}

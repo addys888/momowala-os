@@ -10,6 +10,34 @@ const ESC = 0x1B, GS = 0x1D, COLS = 32; // 58mm ≈ 32 chars/line at Font A
 // and render the rupee sign as "Rs." so nothing prints as garbage.
 const ascii = (s) => String(s ?? '').replace(/₹/g, 'Rs.').replace(/[^\x20-\x7E]/g, '').trim();
 
+// Raster badge gives real rounded corners on standard ESC/POS thermal printers.
+// Retain text-mode fallback when canvas is unavailable.
+export function tokenBadgeBytes(token) {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 384; canvas.height = 100;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 384, 100);
+  ctx.strokeStyle = '#000'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(28, 4); ctx.lineTo(356, 4);
+  ctx.quadraticCurveTo(380, 4, 380, 28); ctx.lineTo(380, 72);
+  ctx.quadraticCurveTo(380, 96, 356, 96); ctx.lineTo(28, 96);
+  ctx.quadraticCurveTo(4, 96, 4, 72); ctx.lineTo(4, 28);
+  ctx.quadraticCurveTo(4, 4, 28, 4); ctx.stroke();
+  ctx.fillStyle = '#000'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = 'bold 20px sans-serif'; ctx.fillText('TOKEN', 192, 23);
+  ctx.font = '900 48px sans-serif'; ctx.fillText('#' + ascii(token), 192, 64, 340);
+  const pixels = ctx.getImageData(0, 0, 384, 100).data;
+  const bytes = [GS, 0x76, 0x30, 0, 48, 0, 100, 0];
+  for (let y = 0; y < 100; y++) for (let x = 0; x < 384; x += 8) {
+    let value = 0;
+    for (let bit = 0; bit < 8; bit++) if (pixels[(y * 384 + x + bit) * 4] < 128) value |= 128 >> bit;
+    bytes.push(value);
+  }
+  return bytes;
+}
+
 function receiptBytes(order, cart = {}, opts = {}) {
   const b = [];
   const raw = (...x) => x.forEach((v) => b.push(v & 0xFF));
@@ -33,9 +61,10 @@ function receiptBytes(order, cart = {}, opts = {}) {
 
   // Highlighted token — reverse (white-on-black), double size, centred, padded so
   // it reads as a solid block (the closest a text-mode thermal gets to a "badge").
-  align(1); reverse(true); bold(true); dbl(true);
-  line('  TOKEN #' + (order.token || '') + '  ');
-  dbl(false); bold(false); reverse(false);
+  align(1);
+  const badge = tokenBadgeBytes(order.token || '');
+  if (badge) { b.push(...badge); line(); }
+  else { reverse(true); bold(true); dbl(true); line('TOKEN #' + (order.token || '')); dbl(false); bold(false); reverse(false); }
   align(0);
   if (order.date) line('Date: ' + order.date);
   if (order.time) line('Time: ' + order.time + (order.staff ? '   ' + order.staff : ''));
@@ -89,7 +118,10 @@ function kitchenTicketBytes(order, cart = {}) {
   if (cart.name) line(cart.name);
   bold(false); rule();
 
-  align(1); reverse(true); bold(true); dbl(true); line('  TOKEN #' + (order.token || '') + '  '); dbl(false); bold(false); reverse(false);
+  align(1);
+  const badge = tokenBadgeBytes(order.token || '');
+  if (badge) { b.push(...badge); line(); }
+  else { reverse(true); bold(true); dbl(true); line('TOKEN #' + (order.token || '')); dbl(false); bold(false); reverse(false); }
   align(0);
   line((order.time || '') + (order.staff ? '   ' + order.staff : ''));
   rule();

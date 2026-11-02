@@ -1,3 +1,4 @@
+import { KitchenQueue } from '../components/KitchenQueue';
 import { StaffMeals } from '../components/StaffMeals';
 import { StaffStockStatus } from '../components/StaffStockStatus';
 import { useNotificationNavigation } from '../lib/useNotificationNavigation';
@@ -199,7 +200,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
   };
   // Staff advances the kitchen status (preparing → ready) the customer sees live.
   const setPrepStatus = async (orderId, status) => {
-    (await updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, prepStatus: status } : o) }));
+    return await updateState({ orders: state.orders.map(o => o.id === orderId ? { ...o, prepStatus: status } : o) });
   };
   // Cancelling keeps the order (marked 'cancelled' with a required reason) so it
   // stays in records and surfaces in the admin's activity feed — never deleted.
@@ -264,11 +265,14 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         <OpeningInventory staffFlow showDetails={tab==='stock'} key={cartId} onManager={setIsManager} cartId={cartId} cart={cartInfo} stockTypes={menu.stockTypes || []} inventory={inv || {}} />
         {( __ANDROID_APP__ || tab === 'order') && <RemindersButton cartId={cartId} role="staff" />}
         {tab === 'order' && isManager && <PrepChecklist key={`packing-${cartId}`} state={state} cartId={cartId} readOnly />}
+        {tab === 'order' && <div style={{display:'flex', gap:8, marginBottom:16}}>{isManager && <button className="quiet-button" onClick={()=>setTab('meals')}>Log staff meal</button>}<button className="quiet-button" onClick={()=>setTab('kitchen')}>Kitchen queue</button><button className="quiet-button" onClick={()=>setTab('shift')}>My shift</button></div>}
+        {tab === 'meals' && <button className="quiet-button" onClick={()=>setTab('order')}>Back to new order</button>}
+        {tab === 'kitchen' && <KitchenQueue orders={state.orders.filter(o=>o.cartId===cartId && o.date===TODAY)} onPrep={setPrepStatus} onPayment={()=>setTab('pending')} />}
         {tab === 'order' && <NewOrderScreen cart={cart} setCart={setCart} onPlaceOrder={placeOrder} placing={placing} menu={menu} foodLabel={menuLabelFor(state, cartId)} inv={inv} ware={wareLedger(state, cartId, TODAY)} prepMins={cartInfo?.defaultPrepMins || 8} onSetPrep={setPrepMins} vendors={{ zomato: vendorEnabledFor(state, cartId, 'zomato'), swiggy: vendorEnabledFor(state, cartId, 'swiggy') }} addTarget={addTarget} onAddToOrder={(items) => addToOrder(addTarget, items)} onCancelAdd={() => { setAddTarget(null); setCart([]); }} />}
         {tab === 'pending' && <PendingOrders orders={pendingOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} onPrep={setPrepStatus} settling={settling} onAddItems={(o) => { setCart([]); setAddTarget(o); setTab('order'); }} />}
         {tab === 'myorders' && <MyOrdersScreen orders={myOrders} onSettle={settleOrder} onSplitSettle={setSplitSettle} onCancel={(id) => setCancelTarget(id)} settling={settling} onlineVendors={onlineVendorsFor(state, cartId)} printer={printerCfgFor(state, cartId)} cart={cartInfo} />}
         {tab === 'stock' && <section aria-label="Cart stock"><SectionHeader title="Stock availability" subtitle="Refill alerts · count stock physically at closing" /><StaffStockStatus stockTypes={menu.stockTypes} inventory={inv} showHealthy /></section>}
-        {tab === 'stock' && isManager && <StaffMeals cartId={cartId} date={openingBusinessDate(cartInfo?.openTime)} stockTypes={menu.stockTypes||[]} staff={state.staff} manager />}
+        {(tab === 'stock' || tab === 'meals') && isManager && <StaffMeals cartId={cartId} date={openingBusinessDate(cartInfo?.openTime)} stockTypes={menu.stockTypes||[]} staff={state.staff} manager expanded={tab==='meals'} />}
         {tab === 'stock' && <WastageScreen stockTypes={menu.stockTypes || []} inv={inv} logs={state.wastageLogs.filter(l => l.cartId === cartId && l.date === TODAY)} onLog={logWastage} />}
         {tab === 'shift' && <ShiftStatus inv={inv} stockTypes={menu.stockTypes || []} ware={wareLedger(state, cartId, TODAY)} myOrders={myOrders} staffName={staffName} />}
       </div>
@@ -278,7 +282,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
         { id: 'pending', icon: <Clock size={20}/>, label: 'Pending', badge: pendingOrders.length },
         { id: 'myorders', icon: <FileText size={20}/>, label: 'My Orders' },
         { id: 'stock', icon: <Boxes size={20}/>, label: 'Stock' },
-        { id: 'shift', icon: <Award size={20}/>, label: 'Shift' },
+        { id: 'kitchen', icon: <Award size={20}/>, label: 'Kitchen' },
       ]} />
 
       {cancelTarget != null && (
@@ -341,7 +345,7 @@ function StaffApp({ state, updateState, onExit, cartId, staffName }) {
 function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
   // Printing needs a deliberate tap (and navigates to RawBT), so don't auto-close
   // when the printer is on — otherwise keep the quick 2.6s dismiss.
-  useEffect(() => { if (printer.enabled) return; const t = setTimeout(onClose, 2600); return () => clearTimeout(t); }, [info]);
+  // Keep the receipt visible until the cashier has checked the items.
   // Auto-print the internal kitchen ticket (no prices) once, the moment the order
   // is placed. The customer bill stays a manual tap (button below / My Orders).
   const printed = React.useRef(new Set());
@@ -358,6 +362,7 @@ function OrderPlacedToast({ info, printer = {}, cart, onClose }) {
         <div style={{ fontSize: 18, fontWeight: 800 }}>{confirmed ? 'Order synced' : 'Order saved on this phone'}</div>
         {confirmed ? <div style={{ fontSize: 52, fontWeight: 900, lineHeight: 1.1, margin: '6px 0' }}>#{info.token}</div> : <p role="status" style={{ fontSize: 14, lineHeight: 1.5, margin: '12px 0', opacity: 0.9 }}>Sync pending · Your order number appears after the server confirms it.</p>}
         <div style={{ fontSize: 15, opacity: 0.9 }}>₹{info.total} · {info.payment === 'unpaid' ? '⏳ Unpaid — collect in Pending' : info.payment === 'zomato' ? '🛵 Zomato — weekly payout' : info.payment === 'swiggy' ? '🛵 Swiggy — weekly payout' : info.payment === 'split' ? '🔀 Split — cash + UPI' : `${info.payment === 'cash' ? '💵 Cash' : '📱 UPI'} received`}</div>
+        <div style={{background:'#fff', borderRadius:12, padding:12, textAlign:'left', maxHeight:'35vh', overflowY:'auto', marginTop:12}}><OrderItemLines items={info.order?.items || []}/></div>
         {/* Single button: prints the customer bill (only when the printer is on and
             NOT already auto-printing) AND always advances. Printing is best-effort —
             any printer/RawBT failure can never block moving to the next order. */}
@@ -425,7 +430,7 @@ function PendingOrders({ orders, onSettle, onSplitSettle, onCancel, onPrep, onAd
                 </div>
               )}
               <div style={{ fontSize: 13, color: colors.muted, marginBottom: 12 }}>
-                {o.items.map(i => `${i.qty}× ${i.name}`).join(', ')}
+                <OrderItemLines items={o.items}/>
               </div>
               <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 12 }}>₹{o.total}</div>
 
@@ -622,7 +627,7 @@ function NewOrderScreen({ cart, setCart, onPlaceOrder, placing, menu, foodLabel 
               {cart.map(item => (
                 <div key={item.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,214,10,0.2)' }}>
                   <div>
-                    <div style={{ fontSize: 13 }}>{item.name} {item.type && <span style={{ opacity: 0.7 }}>({item.type})</span>}</div>
+                    <div style={{ fontSize: 16, fontWeight: 800 }}>{item.name} {item.type && <span style={{ opacity: 0.7 }}>({item.type})</span>}</div>
                     <div style={{ fontSize: 11, opacity: 0.7 }}>₹{item.price} × {item.qty} = ₹{item.price * item.qty}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

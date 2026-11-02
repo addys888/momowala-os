@@ -2,7 +2,7 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import {supabase} from '../lib/supabase';
 import {useStore} from '../store';
 import {istTime} from '../lib/time';
-export function StaffMeals({cartId,date,stockTypes=[],staff=[],manager=false}) {
+export function StaffMeals({cartId,date,stockTypes=[],staff=[],manager=false,expanded=false}) {
  const {refreshNow,session}=useStore();
  const key=`cartlyft:meal:${cartId}:${date}:${session?.staffId}`;
  const [items,setItems]=useState([]),[error,setError]=useState(''),[busy,setBusy]=useState(false),[name,setName]=useState(''),[category,setCategory]=useState(''),[qty,setQty]=useState('');
@@ -23,7 +23,7 @@ export function StaffMeals({cartId,date,stockTypes=[],staff=[],manager=false}) {
  }
  const totals={};for(const i of items){const k=`${i.staff_id}:${i.category}`;totals[k]||={name:i.staff_name,category:i.category,quantity:0};totals[k].quantity+=i.quantity;}
  return <section className="partner-card" aria-label="Staff meals"><h3>Staff meals · {items.reduce((s,i)=>s+i.quantity,0)} pcs</h3><p className="muted">{date} · Recorded separately from sales and wastage.</p>
- {manager&&<details open={pending||undefined}><summary>Log staff meal</summary><form onSubmit={save}>
+ {manager&&<details open={expanded||pending||undefined}><summary>Log staff meal</summary><form onSubmit={save}>
  <label>Staff name<select required disabled={busy||pending} value={name} onChange={e=>setName(e.target.value)}><option value="">Choose staff</option>{staff.filter(s=>s.active!==false&&s.cartId===cartId).map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></label>
  <label>Category<select required disabled={busy||pending} value={category} onChange={e=>setCategory(e.target.value)}><option value="">Choose category</option>{stockTypes.map(t=><option key={t.key} value={t.key}>{t.label}</option>)}</select></label>
  <label>Pieces (1–10)<input type="number" inputMode="numeric" required min="1" max="10" step="1" disabled={busy||pending} value={qty} onChange={e=>setQty(e.target.value)}/></label><button disabled={busy}>{busy?'Saving…':pending?'Retry meal':'Save meal'}</button></form></details>}

@@ -240,13 +240,14 @@ function SimpleItemRow({ id, name, price, extra, onAdd, picked }) {
 // A clean, stacked item list (qty chip + name) — replaces the cramped
 // comma-joined string used in order cards.
 
-function OrderItemLines({ items, muted }) {
+function OrderItemLines({ items = [], muted, collapsible = false }) {
+  if (collapsible && items.length > 3) return <details><summary style={{cursor: 'pointer', fontWeight: 700, padding: '8px 0'}}>View all {items.length} items</summary><OrderItemLines items={items} muted={muted}/></details>;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
       {items.map((i, idx) => (
         <div key={i.key || idx} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ minWidth: 30, textAlign: 'center', fontWeight: 800, fontSize: 12, color: colors.ink, background: '#F1EFE9', borderRadius: 6, padding: '2px 6px' }}>{i.qty}×</span>
-          <span style={{ fontSize: 14, fontWeight: 600, color: muted ? colors.muted : colors.ink }}>{i.name}</span>
+          <span style={{ fontSize: 15, fontWeight: 750, overflowWrap: 'anywhere', color: muted ? colors.muted : colors.ink }}>{i.name}{i.type ? ` (${i.type})` : ''}</span>
         </div>
       ))}
     </div>
