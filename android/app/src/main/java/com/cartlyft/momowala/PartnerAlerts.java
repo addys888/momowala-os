@@ -9,7 +9,7 @@ import org.json.JSONObject;
 
 /** Persistent local acknowledgments prevent redelivered messages from re-ringing. */
 public final class PartnerAlerts {
-    static final String CHANNEL="partner_attention_v2";
+    static final String CHANNEL="partner_attention_v3";
     static final String INFO_CHANNEL="partner_updates_silent_v1";
     static android.content.SharedPreferences prefs(Context c) { return c.getSharedPreferences("partner_alerts",Context.MODE_PRIVATE); }
     static NotificationManager manager(Context c) { return (NotificationManager)c.getSystemService(Context.NOTIFICATION_SERVICE); }
@@ -18,7 +18,7 @@ public final class PartnerAlerts {
             NotificationChannel channel=new NotificationChannel(CHANNEL,"Partner alerts requiring acknowledgment",NotificationManager.IMPORTANCE_HIGH);
             channel.enableVibration(true);channel.setVibrationPattern(AlertSound.VIBRATION);
             channel.setSound(AlertSound.uri(c),AlertSound.attributes());
-            NotificationChannel old=manager(c).getNotificationChannel("partner_attention_v1");
+            NotificationChannel old=manager(c).getNotificationChannel("partner_attention_v2");
             if(old!=null) {
                 channel.setImportance(old.getImportance());
                 if(old.getSound()==null)channel.setSound(null,AlertSound.attributes());
@@ -72,6 +72,7 @@ public final class PartnerAlerts {
             if(e.getKey().startsWith("ack:") && e.getValue() instanceof Long && now-(Long)e.getValue()>7*86400000L)prefs(c).edit().remove(e.getKey()).apply();
         if(prefs(c).contains("ack:"+key)){acknowledge(c,key);return;}
         boolean ring=rings(c,key);
+        if(ring && prefs(c).getLong("closingQuietUntil",0)>now)return;
         if(!ring)AlertPlaybackService.remove(c,"partner:"+key);
         if(ring && AlertPlaybackService.running() && AlertPlaybackService.pending(c).contains("partner:"+key))return;
         channel(c);
@@ -89,8 +90,8 @@ public final class PartnerAlerts {
          .setPriority(ring?Notification.PRIORITY_HIGH:Notification.PRIORITY_DEFAULT).setOngoing(ring).setAutoCancel(!ring).setOnlyAlertOnce(true);
         if(ring && !key.startsWith("closing-"))b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",silence).build());
         else if(ring) {
-            b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,"Open closing",open).build());
-            b.addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"Silence ringtone",silence).build());
+            b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,"Start report · silence",open).build());
+            b.addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"Acknowledge · pause",silence).build());
         }
         if(ring && Build.VERSION.SDK_INT<26)b.setSound(AlertSound.uri(c),AlertSound.attributes()).setVibrate(AlertSound.VIBRATION);
         boolean managed=ring && AlertPlaybackService.start(c,"partner:"+key,CHANNEL);
@@ -104,7 +105,7 @@ public final class PartnerAlerts {
             .setContentText(key.startsWith("closing-manager-")?"Day-end closing needs submission":key.startsWith("closing-owner-")?"Closing report ready to review":"A partner update needs attention")
             .setVisibility(Notification.VISIBILITY_PUBLIC).setContentIntent(open).setOngoing(ring)
             .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,key.startsWith("closing-")?"Open closing":"Open app",open).build());
-        if(ring)locked.addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"Silence ringtone",silence).build());
+        if(ring)locked.addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"Acknowledge · pause",silence).build());
         b.setPublicVersion(locked.build());
         Notification n=b.build();if(ring&&!managed)n.flags|=Notification.FLAG_INSISTENT;
         try {manager(c).notify("partner:"+key,1,n);}catch(SecurityException denied){/* User notification settings take precedence. */}

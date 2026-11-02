@@ -24,15 +24,37 @@ public class MainActivity extends Activity {
     private org.json.JSONObject notificationTarget;
     private void captureNotification(Intent intent) {
         if(intent==null)return;
+        if(intent.getBooleanExtra("openActiveAlert",false)){openActiveAlert();return;}
+        if(intent.getBooleanExtra("acknowledgeOpening",false))InventoryReminders.acknowledge(this);
         String target=intent.getStringExtra("notificationTarget"),cart=intent.getStringExtra("notificationCart");
         if(target==null||cart==null||!java.util.Arrays.asList("stock","orders","closing","inbox").contains(target))return;
         String binding=intent.getStringExtra("notificationBinding"),key=intent.getStringExtra("notificationKey");
         if(binding!=null&&!binding.equals(PartnerAlerts.prefs(this).getString("binding","")))return;
         // Opening the notification hides it locally; report acknowledgment remains a server action.
-        if(key!=null&&!key.startsWith("closing-manager-"))PartnerAlerts.acknowledge(this,key);
+        if(key!=null){if(key.startsWith("closing-manager-"))AlertPlaybackService.acknowledgeAll(this);PartnerAlerts.acknowledge(this,key);}
         try{notificationTarget=new org.json.JSONObject().put("target",target).put("cartId",cart);}catch(Exception ignored){}
     }
     @Override protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);captureNotification(intent);}
+
+    private AlertDialog activeAlertDialog;
+    private final android.os.Handler alertHandler=new android.os.Handler(android.os.Looper.getMainLooper());
+    private void openActiveAlert() {
+        boolean opening=AlertPlaybackService.pending(this).contains("inventory");
+        String cart=opening?InventoryReminders.prefs(this).getString("cartId",""):PartnerAlerts.prefs(this).getString("cartId","");
+        AlertPlaybackService.acknowledgeAll(this);
+        try{notificationTarget=new org.json.JSONObject().put("target",opening?"stock":"closing").put("cartId",cart);}catch(Exception ignored){}
+    }
+    private final Runnable alertPoll=new Runnable(){public void run(){
+        if(!AlertPlaybackService.pending(MainActivity.this).getAll().isEmpty() && activeAlertDialog==null) {
+            activeAlertDialog=new AlertDialog.Builder(MainActivity.this).setTitle("Manager reminder")
+                .setMessage("Opening stock or closing counts need your attention. Acknowledge to stop sound and vibration. Closing reminders pause for 10 minutes; submission completes the task.")
+                .setPositiveButton("Start task · silence",(d,w)->openActiveAlert())
+                .setNegativeButton("Acknowledge · pause",(d,w)->AlertPlaybackService.acknowledgeAll(MainActivity.this))
+                .setCancelable(false).create();
+            activeAlertDialog.setOnDismissListener(d->activeAlertDialog=null);activeAlertDialog.show();
+        } else if(AlertPlaybackService.pending(MainActivity.this).getAll().isEmpty() && activeAlertDialog!=null)activeAlertDialog.dismiss();
+        alertHandler.postDelayed(this,1000);
+    }};
 
     private AppUpdater updater;
     private final android.os.Handler updateHandler=new android.os.Handler(android.os.Looper.getMainLooper());
@@ -176,6 +198,7 @@ public class MainActivity extends Activity {
                             }
                             case "syncClosingAlerts": PartnerAlerts.syncClosing(MainActivity.this,data); break;
                             case "acknowledgePartner": PartnerAlerts.acknowledge(MainActivity.this,data.getString("key")); break;
+                            case "acknowledgeManagerAlerts": AlertPlaybackService.acknowledgeAll(MainActivity.this); break;
                             case "acknowledgeInventory": InventoryReminders.acknowledge(MainActivity.this); break;
                             default: throw new IllegalArgumentException();
                         }
@@ -273,8 +296,8 @@ public class MainActivity extends Activity {
         super.onActivityResult(request,result,data);
         if (request==100 && fileCallback!=null) { fileCallback.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(result,data)); fileCallback=null; }
     }
-    @Override protected void onResume() { super.onResume(); if(updater!=null)updater.foreground(); updateHandler.postDelayed(updatePoll,750); }
-    @Override protected void onPause() { updateHandler.removeCallbacks(updatePoll); super.onPause(); }
+    @Override protected void onResume() { super.onResume(); alertHandler.post(alertPoll); if(updater!=null)updater.foreground(); updateHandler.postDelayed(updatePoll,750); }
+    @Override protected void onPause() { updateHandler.removeCallbacks(updatePoll); alertHandler.removeCallbacks(alertPoll); if(activeAlertDialog!=null)activeAlertDialog.dismiss(); super.onPause(); }
     @Override public void onBackPressed() { if (web!=null && web.canGoBack()) web.goBack(); else super.onBackPressed(); }
     @Override protected void onDestroy() { if(fileCallback!=null) fileCallback.onReceiveValue(null); if(web!=null) web.destroy(); for(WebView p:popups) p.destroy(); super.onDestroy(); }
 }

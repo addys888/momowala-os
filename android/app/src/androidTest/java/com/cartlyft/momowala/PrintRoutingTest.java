@@ -206,6 +206,10 @@ public class PrintRoutingTest extends Instrumentation {
             if("partner:inbox-98765".equals(posted.getTag()))inboxVisible=true;
         check(inboxVisible,"Opening completion suppressed an unrelated inbox update");
         PartnerAlerts.acknowledge(c,"inbox-98765");
+        check(PartnerAlerts.prefs(c).getLong("closingQuietUntil",0)>System.currentTimeMillis(),"Acknowledgment did not pause reminders");
+        PartnerAlerts.show(c,binding,"closing-manager-123-2","Next slot","Count stock");
+        check(!AlertPlaybackService.pending(c).contains("partner:closing-manager-123-2"),"New reminder bypassed ten-minute pause");
+        PartnerAlerts.prefs(c).edit().putLong("closingQuietUntil",0).commit();
         String silenceKey="closing-manager-124-1";
         PartnerAlerts.show(c,binding,silenceKey,"Closing due","Submit counts");
         android.app.Notification visible=null;

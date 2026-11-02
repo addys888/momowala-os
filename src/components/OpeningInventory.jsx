@@ -80,6 +80,7 @@ export function OpeningInventory({cartId,cart,stockTypes=[],inventory={},onReady
   const content=<section style={{background:'#fff',border:'1px solid #DAE3EC',borderRadius:16,padding:18,marginBottom:16}} aria-label="Opening inventory">
     <div style={{fontSize:10,letterSpacing:1.2,fontWeight:800,color:'#617184'}}>DAILY READINESS · {date}</div>
     <h2 style={{fontSize:20,margin:'8px 0'}}>{record?'Inventory ready':access?.canLoad?'Prepare opening stock':'Opening stock status'}</h2>
+    {staffFlow && access?.canLoad && !record && <button style={button} onClick={()=>{nativeCommand('acknowledgeInventory');setNotice('Reminder acknowledged. Enter your opening quantities below.');}}>Start loading · stop sound & vibration</button>}
     {!record && <p style={{fontSize:13,lineHeight:1.6,color:'#617184',marginBottom:14}}>Enter the fresh pieces loaded from your freezer or kitchen today. Confirm once; your owner receives the saved quantities.</p>}
     <p style={{fontSize:13,lineHeight:1.6,color:'#617184',margin:'10px 0'}}>Manager: <strong>{access?.managerActive ? access.managerName : 'Not assigned or inactive'}</strong> · Opening {cart?.openTime || 'not set'} IST</p>
     {!record && ownerHistory && <details onToggle={e=>setHistoryOpen(e.currentTarget.open)}><summary>View weekly opening history</summary>{historyOpen&&<OpeningWeeklyHistory cartId={cartId} stockTypes={stockTypes}/>}</details>}

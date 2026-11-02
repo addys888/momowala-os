@@ -10,7 +10,7 @@ import java.util.*;
 
 /** Local schedule only: stores no session token, stock quantities or customer data. */
 public final class InventoryReminders {
-    static final String CHANNEL = "opening_inventory_v2";
+    static final String CHANNEL = "opening_inventory_v3";
     static final int ID = 4201;
     static android.content.SharedPreferences prefs(Context c) { return c.getSharedPreferences("inventory_reminder", Context.MODE_PRIVATE); }
     static AlarmManager alarms(Context c) { return (AlarmManager)c.getSystemService(Context.ALARM_SERVICE); }
@@ -21,7 +21,7 @@ public final class InventoryReminders {
             channel.setDescription("Reminder to load the cart 30 minutes before opening");
             channel.enableVibration(true); channel.setVibrationPattern(AlertSound.VIBRATION);
             channel.setSound(AlertSound.uri(c),AlertSound.attributes());
-            NotificationChannel old=manager(c).getNotificationChannel("opening_inventory_v1");
+            NotificationChannel old=manager(c).getNotificationChannel("opening_inventory_v2");
             if(old!=null) {
                 channel.setImportance(old.getImportance());
                 if(old.getSound()==null)channel.setSound(null,AlertSound.attributes());
@@ -79,7 +79,7 @@ public final class InventoryReminders {
         long open=OpeningSchedule.businessOpening(time,now);
         if(now<open-30*60_000L || OpeningSchedule.date(open).equals(quietDate(c))) { schedule(c,false); return; }
         channel(c);
-        Intent launch=new Intent(c,MainActivity.class).putExtra("notificationTarget","stock").putExtra("notificationCart",prefs(c).getString("cartId","")).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        Intent launch=new Intent(c,MainActivity.class).putExtra("acknowledgeOpening",true).putExtra("notificationTarget","stock").putExtra("notificationCart",prefs(c).getString("cartId","")).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP|Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent content=PendingIntent.getActivity(c,ID,launch,PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,CHANNEL):new Notification.Builder(c);
         b.setSmallIcon(R.drawable.ic_stat_cartlyft).setContentTitle("Prepare opening inventory")
@@ -88,12 +88,19 @@ public final class InventoryReminders {
          .setPriority(Notification.PRIORITY_HIGH).setContentIntent(content).setOngoing(true).setAutoCancel(false);
         if(Build.VERSION.SDK_INT<26) b.setSound(AlertSound.uri(c),AlertSound.attributes()).setVibrate(AlertSound.VIBRATION);
         PendingIntent ack=PendingIntent.getBroadcast(c,ID,new Intent(c,PartnerAlertReceiver.class).setAction("cartlyft.ACK_OPENING"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,"Start loading · silence",content).build());
         b.addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge",ack).build());
         boolean managed=AlertPlaybackService.start(c,"inventory",CHANNEL);
         if(managed) {
             if(Build.VERSION.SDK_INT>=26)b.setGroup("cartlyft-alerts").setGroupAlertBehavior(Notification.GROUP_ALERT_SUMMARY);
             else b.setSound(null).setVibrate(null);
         }
+        Notification.Builder locked=Build.VERSION.SDK_INT>=26?new Notification.Builder(c,CHANNEL):new Notification.Builder(c);
+        locked.setSmallIcon(R.drawable.ic_stat_cartlyft).setContentTitle("Cartlyft opening reminder")
+            .setContentText("Tap to load opening stock and silence this reminder.").setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setContentIntent(content).addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_view,"Start loading · silence",content).build())
+            .addAction(new Notification.Action.Builder(android.R.drawable.ic_lock_silent_mode,"Acknowledge",ack).build());
+        b.setPublicVersion(locked.build());
         Notification n=b.build();if(!managed)n.flags|=Notification.FLAG_INSISTENT;
         try { manager(c).notify(ID,n); } catch(SecurityException denied) { /* Permission status is visible in the app. */ }
         schedule(c,true);

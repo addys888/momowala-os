@@ -23,7 +23,7 @@ export function ClosingWorkflow({cartId,owner=false,expanded=false,onOpen}) {
    setData(next);setError('');
    // Only confirmed server state controls which native closing alerts may ring.
    const alerts=next.reports.filter(r=>owner?r.submitted_at&&!r.owner_read_at:next.settings.enabled&&next.canSubmit&&!r.submitted_at&&r.reminderKey)
-    .map(r=>({key:owner?`closing-owner-${r.id}`:r.reminderKey,title:owner?'Closing report ready':'Submit closing counts',body:owner?`${r.submitted_name} submitted ${r.business_date}. Review in Reconcile.`:`${r.business_date}: count cash and remaining stock. Submit to stop ringing.`}));
+    .map(r=>({key:owner?`closing-owner-${r.id}`:r.reminderKey,title:owner?'Closing report ready':'Submit closing counts',body:owner?`${r.submitted_name} submitted ${r.business_date}. Review in Reconcile.`:`${r.business_date}: count cash and remaining stock. Tap Start report to pause the alarm. Submit to finish.`}));
    // Explicitly clear completed alerts even if an older app lost their cart mapping.
    for(const r of next.reports) {
     if(r.owner_read_at)nativeCommand('acknowledgePartner',{key:`closing-owner-${r.id}`});
@@ -37,7 +37,7 @@ export function ClosingWorkflow({cartId,owner=false,expanded=false,onOpen}) {
   }
  },[cartId,owner]);
  useEffect(()=>{void load();const timer=setInterval(()=>{if(!document.hidden)void load();},15000);window.addEventListener('online',load);return()=>{epoch.current++;clearInterval(timer);window.removeEventListener('online',load);};},[load]);
- useEffect(()=>{const show=()=>setManagerOpen(true);window.addEventListener('mw:open-closing',show);return()=>window.removeEventListener('mw:open-closing',show);},[]);
+ useEffect(()=>{const show=()=>{nativeCommand('acknowledgeManagerAlerts');setManagerOpen(true);};window.addEventListener('mw:open-closing',show);return()=>window.removeEventListener('mw:open-closing',show);},[]);
  const pending=data?.reports.find(r=>!r.submitted_at);
  useEffect(()=>{setCash('');setCounts({});setNotes('');setReview(false);request.current=null;},[pending?.id]);
  const saveSettings=async()=>{
@@ -60,10 +60,11 @@ export function ClosingWorkflow({cartId,owner=false,expanded=false,onOpen}) {
 
  const valid=cash!==''&&Number.isFinite(Number(cash))&&Number(cash)>=0&&(pending?.stock_types||[]).every(t=>counts[t.key]!==undefined&&counts[t.key]!==''&&Number.isInteger(Number(counts[t.key]))&&Number(counts[t.key])>=0);
  return <section className="partner-card closing-workflow" aria-label="Daily closing">
-  {!owner&&<button type="button" className="quiet-button" aria-expanded={managerOpen} style={{width:'100%',display:'flex',justifyContent:'space-between'}} onClick={()=>setManagerOpen(v=>!v)}><strong>Daily closing</strong><span>{pending?'Report due':'View reports'} {managerOpen?'▴':'▾'}</span></button>}
+  {!owner&&<button type="button" className="quiet-button" aria-expanded={managerOpen} style={{width:'100%',display:'flex',justifyContent:'space-between'}} onClick={()=>{if(!managerOpen)nativeCommand('acknowledgeManagerAlerts');setManagerOpen(v=>!v);}}><strong>Daily closing</strong><span>{pending?'Report due':'View reports'} {managerOpen?'▴':'▾'}</span></button>}
+  {!owner&&pending&&__ANDROID_APP__&&<button type="button" className="quiet-button" onClick={()=>{nativeCommand('acknowledgeManagerAlerts');setManagerOpen(true);}}>Start report · stop sound & vibration</button>}
   <div hidden={!owner&&!managerOpen}>
   {owner&&<h3>Daily closing</h3>}
-  {__ANDROID_APP__ && (pending||unread.length>0) && <div><button type="button" className="quiet-button" onClick={()=>{for(const r of data.reports.filter(r=>owner?r.submitted_at&&!r.owner_read_at:!r.submitted_at))nativeCommand('acknowledgePartner',{key:owner?`closing-owner-${r.id}`:r.reminderKey||`closing-manager-${r.id}-${data.managerRevision}-${data.settings.revision}`});}}>Silence ringtone</button><p className="muted">Stops sound and vibration on this phone. Your closing report still needs {owner?'review':'submission'}.</p></div>}
+  {__ANDROID_APP__ && (pending||unread.length>0) && <div><button type="button" className="quiet-button" onClick={()=>{if(!owner)nativeCommand('acknowledgeManagerAlerts');for(const r of data.reports.filter(r=>owner?r.submitted_at&&!r.owner_read_at:!r.submitted_at))nativeCommand('acknowledgePartner',{key:owner?`closing-owner-${r.id}`:r.reminderKey||`closing-manager-${r.id}-${data.managerRevision}-${data.settings.revision}`});}}>Silence ringtone</button><p className="muted">Stops sound and vibration on this phone. Your closing report still needs {owner?'review':'submission'}.</p></div>}
   <p>{data.settings.enabled?`Scheduled at ${data.settings.closing_time.slice(0,5)} IST`:'Closing workflow is off'}</p>
   {error&&<p role="alert">{error} <button disabled={busy} onClick={load}>Reload</button></p>}
   {owner&&<><button className="quiet-button" onClick={()=>{settingsRevision.current=data.settings.revision;setEnabled(data.settings.enabled);setTime(data.settings.closing_time.slice(0,5));setEditing(!editing);}}>Configure closing</button>

@@ -7,7 +7,7 @@ import android.net.Uri;
 import android.os.*;
 import java.util.*;
 
-/** One audio/vibration loop for all unresolved alerts; opening the tray cannot silence it. */
+/** Playback stops on explicit acknowledgment or opening the task. */
 public final class AlertPlaybackService extends Service {
     private static final int ID=4202;
     private static final String CHANNEL="cartlyft_playback";
@@ -37,6 +37,13 @@ public final class AlertPlaybackService extends Service {
         pending(c).edit().remove(key).commit();
         if(instance!=null)instance.handler.post(()->{if(instance!=null)instance.reconcile();});
     }
+    static void acknowledgeAll(Context c) {
+        PartnerAlerts.prefs(c).edit().putLong("closingQuietUntil",System.currentTimeMillis()+10*60_000L).commit();
+        for(String key:pending(c).getAll().keySet()) {
+            if(key.startsWith("partner:"))PartnerAlerts.acknowledge(c,key.substring(8));
+            else if(key.equals("inventory"))InventoryReminders.acknowledge(c);
+        }
+    }
     static void clearPartner(Context c) {
         for(String key:pending(c).getAll().keySet())if(key.startsWith("partner:"))remove(c,key);
     }
@@ -47,12 +54,12 @@ public final class AlertPlaybackService extends Service {
             NotificationChannel channel=new NotificationChannel(CHANNEL,"Active alert playback",NotificationManager.IMPORTANCE_LOW);
             channel.setSound(null,null);channel.enableVibration(false);nm.createNotificationChannel(channel);
         }
-        PendingIntent open=PendingIntent.getActivity(this,4202,new Intent(this,MainActivity.class),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
+        PendingIntent open=PendingIntent.getActivity(this,4202,new Intent(this,MainActivity.class).putExtra("openActiveAlert",true),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         PendingIntent ack=PendingIntent.getBroadcast(this,4202,new Intent(this,PartnerAlertReceiver.class).setAction("cartlyft.ACK_ALL"),PendingIntent.FLAG_UPDATE_CURRENT|PendingIntent.FLAG_IMMUTABLE);
         Notification.Builder b=Build.VERSION.SDK_INT>=26?new Notification.Builder(this,CHANNEL):new Notification.Builder(this);
         startForeground(ID,b.setSmallIcon(R.drawable.ic_stat_cartlyft).setContentTitle("Cartlyft needs your attention")
             .setContentText("Silence sound here. Complete closing and review reports in the app.").setGroup("cartlyft-alerts").setGroupSummary(true).setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
-            .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Silence alerts",ack).build()).build());
+            .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Acknowledge · pause",ack).build()).build());
         handler.removeCallbacks(tick);reconcile();handler.postDelayed(tick,1000);
         return START_STICKY;
     }
@@ -74,7 +81,7 @@ public final class AlertPlaybackService extends Service {
             if(Build.VERSION.SDK_INT>=26) {
                 NotificationChannel channel=nm.getNotificationChannel(String.valueOf(value));
                 if(channel==null || channel.getImportance()<NotificationManager.IMPORTANCE_DEFAULT)continue;
-                if(sound==null)sound=channel.getSound();vibrate|=channel.shouldVibrate();
+                if(sound==null && channel.getSound()!=null)sound=AlertSound.uri(this);vibrate|=channel.shouldVibrate();
             } else {sound=AlertSound.uri(this);vibrate=true;}
         }
         if(sound==null)stopAudio();
@@ -92,7 +99,7 @@ public final class AlertPlaybackService extends Service {
             } catch(Exception failed) {stopAudio();}
         }
         if(vibrate && !vibrating && vibrator!=null && vibrator.hasVibrator()) {
-            if(Build.VERSION.SDK_INT>=26)vibrator.vibrate(VibrationEffect.createWaveform(AlertSound.VIBRATION,new int[]{0,255,0,255,0,255,0},0),AlertSound.attributes());
+            if(Build.VERSION.SDK_INT>=26)vibrator.vibrate(VibrationEffect.createWaveform(AlertSound.VIBRATION,new int[]{0,140,0,140,0},0),AlertSound.attributes());
             else vibrator.vibrate(AlertSound.VIBRATION,0,AlertSound.attributes());
             vibrating=true;
         } else if(!vibrate && vibrating) {vibrator.cancel();vibrating=false;}

@@ -1,8 +1,8 @@
 {
-  "versionCode": 26,
-  "versionName": "1.8.3",
-  "path": "/downloads/cartlyft-1.8.3.apk",
-  "bytes": 4162711,
-  "sha256": "beb64f09e61a583ea73448622bbcfdd80554c65e5aec689b7a7dd0d573d09375",
-  "notes": "Direct manager staff-meal access, full order item details, clearer payment confirmation, rounded thermal tokens and a shared kitchen preparation queue."
+  "versionCode": 27,
+  "versionName": "1.8.4",
+  "path": "/downloads/cartlyft-1.8.4.apk",
+  "bytes": 4383883,
+  "sha256": "7fd5ee9177c9a900f744f45dc8c996a921ba08cbbcad01823d6aba856c4efcbe",
+  "notes": "Manager reminders now stop on acknowledgment or opening the task. Clear in-app controls, ten-minute closing reminder pause, gentler double-beep sound and shorter vibration pulses."
 }
